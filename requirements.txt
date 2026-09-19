@@ -1,0 +1,11 @@
+torch
+transformers
+accelerate
+safetensors
+huggingface_hub
+datasets
+peft
+pandas
+numpy
+matplotlib
+pyyaml
