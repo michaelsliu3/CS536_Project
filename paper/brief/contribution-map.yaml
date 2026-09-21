@@ -1,0 +1,122 @@
+# Contribution map for: Robust Minimal Context Selection for LLM Code Review
+# Status: framing hypothesis. Claim strength must not exceed verified evidence.
+
+primary_claim:
+  id: C1
+  statement: "Selecting per-example review context under a joint correctness-and-stability constraint yields code-review decisions that are more robust to semantics-preserving input changes than correctness-only context selection at comparable or lower token cost."
+  novelty_type: new-method-plus-evaluation-setting
+  gap_evidence: >
+    Minimal sufficient context has been formalized for issue resolution and agent
+    pruning (msc2026issue, swepruner2026), but the selection objective is task
+    success only. Code-review context studies (hu2025contextcrbench,
+    swe_prbench2026) report aggregate effects of fixed context combinations and
+    disagree on whether added context helps. Robustness studies
+    (morvalho2026mutations, execsem2026) document instability under
+    semantics-preserving mutations without proposing a context-side remedy. No
+    prior work constrains stability inside the context-selection objective for a
+    review decision.
+  falsifier: >
+    If stability-constrained selection produces the same subsets as
+    correctness-only selection, or improves flip rate by no more than the
+    seed/decoding noise band at equal token cost, the primary claim fails.
+  status: hypothesis
+  measurement_protocol: >
+    Thresholds tau_c and tau_s, the matched-token-budget rule, and the
+    seed/decoding noise band are fixed on development data and written down
+    before the test-set run. Stability at evaluation time is measured on
+    perturbation families held out from selection, so the selector cannot be
+    credited for fitting the perturbations it optimized against. Both inference
+    token cost and selection-time reviewer-call cost are reported, because the
+    method can be cheaper per final query while costing more to search.
+
+secondary_claims:
+  - id: C2
+    statement: "Frozen code LLMs flip structured code-review judgments under semantics-preserving changes at a rate well above their decoding/seed noise band, and the rate differs by perturbation family."
+    supports_primary: true
+    research_question: RQ1
+    falsifier: "Flip rates stay within the decoding/seed noise band across all perturbation families."
+    status: hypothesis
+    note: >
+      Code-level invariance (renaming, formatting, neutral comments) and prompt-level
+      invariance (paraphrase) are different properties and are reported separately
+      rather than pooled into one flip rate.
+
+  - id: C3
+    statement: "The marginal value of a context type for review decisions is non-monotone and example-dependent, so a single global context recipe is not optimal."
+    supports_primary: true
+    research_question: RQ2, RQ5
+    falsifier: "One fixed context combination is at least as good as per-example selection on every stratum of the evaluation set."
+    status: hypothesis
+
+  - id: C4
+    statement: "Greedy forward and backward context search approximate the exhaustive minimal-context optimum on small candidate sets within a measurable and reportable gap, using far fewer reviewer calls."
+    supports_primary: true
+    research_question: RQ3
+    falsifier: "Greedy search deviates from the enumerated optimum so often that its selections carry no usable signal."
+    status: hypothesis
+
+  - id: C5
+    statement: "Context subsets selected on an open 7B reviewer retain a measurable advantage over a matched-budget random subset on unseen reviewers, while falling short of context selected directly for those reviewers."
+    supports_primary: true
+    research_question: RQ4
+    falsifier: >
+      Transferred subsets are statistically indistinguishable from matched-budget
+      random subsets on unseen reviewers, or they match reviewer-specific
+      selection exactly, collapsing the transfer gap this claim is about.
+    status: hypothesis
+    note: >
+      A negative result is acceptable and reportable. The two comparison anchors
+      (random subset floor, reviewer-specific selection ceiling) are fixed in
+      advance so that "partial transfer" cannot absorb every possible outcome.
+
+non_claims:
+  - "No claim that fine-tuning, LoRA, or QLoRA improves review robustness. Reviewers stay frozen."
+  - "No claim about the quality of free-form generated review comments."
+  - "No claim of state-of-the-art code-review accuracy."
+  - "No claim that the studied LLMs form a formal Rashomon set. Model multiplicity is motivation only."
+  - "No claim about agreement with human reviewers or production review outcomes."
+  - "No claim that our perturbations cover the space of realistic code edits."
+
+risk_factors:
+  - description: "Qwen2.5-Coder-7B may be too weak on CodeReviewer quality estimation for a meaningful correctness signal."
+    mitigation: "Report the CodeReviewer checkpoint as a task-specific baseline, keep 7B as the main open reviewer, and stratify to examples where the baseline is above chance."
+  - description: "Baseline instability may be small, weakening the premise behind C2."
+    mitigation: "Escalate to stronger perturbation families, and pivot the paper's emphasis toward context efficiency (C3, C4) with the low flip rate reported as a finding."
+  - description: "CodeReviewer lacks issue/PR text, so the candidate context set is thin."
+    mitigation: "Use CodeReviewer for the stability baseline and move the minimal-context experiment to ContextCRBench, which supplies issue and PR descriptions plus surrounding function or class."
+  - description: "Semantics-preserving perturbations may accidentally change the correct label."
+    mitigation: "Restrict to scope-checked renaming, formatting, and neutral comment edits; audit a manual sample; follow the execution-based preservation check used by execsem2026 where code is runnable."
+  - description: "Stability measurement multiplies reviewer calls across perturbations and subsets, so compute may not fit."
+    mitigation: "Cache every response keyed by (model, prompt hash, seed); enumerate exhaustively only on a small controlled subset; cap p at 4-5."
+  - description: "Closed-model API cost can exceed budget."
+    mitigation: "Evaluate closed reviewers on a stratified subset only, after the selector is frozen, so they act as external validation rather than a tuning loop."
+  - description: "Local hardware currently resolves to CPU-only PyTorch, making 7B inference slow."
+    mitigation: "Install a CUDA-enabled wheel on the NVIDIA machine; use the 3B model for sweeps; treat 7B as the reporting model."
+  - description: "With p=4-5 context types the subset space is only 16-32, so stability-constrained and correctness-only selection may pick identical subsets on most examples, leaving too little signal to support C1."
+    mitigation: "Report the fraction of examples where the two objectives disagree as a first-class result, stratify the main comparison to disagreement cases, and size the evaluation set from that fraction rather than assuming it."
+  - description: "Selecting against a perturbation family and then evaluating stability on the same family would inflate the C1 result."
+    mitigation: "Partition perturbation families into selection and evaluation sets and report held-out stability as the headline stability number."
+  - description: "Thresholds tau_c and tau_s chosen after seeing test results would make C1 circular."
+    mitigation: "Fix thresholds, the matched-budget rule, and the noise band on development data and record them in the repo before the test run."
+  - description: "CodeReviewer lacks issue/PR text, so the stability study and the minimal-context study may run on different datasets and read as two loosely joined papers."
+    mitigation: "Repeat the stability measurement on the ContextCRBench subset so at least one dataset carries the full C2-through-C5 chain end to end."
+  - description: "Heuristic labels in code-review quality estimation cap attainable accuracy and add label noise to every downstream metric."
+    mitigation: "Report the task-specific baseline for calibration, stratify to examples where the baseline is above chance, and treat absolute accuracy as secondary to within-example comparisons."
+
+likely_reviewer_objections:
+  - objection: "Instability of code LLMs under renaming is already known."
+    preemptive_response: "Prior evidence is on output/execution prediction. We measure review decisions, and instability is our premise, not our contribution. The contribution is the stability-constrained selection objective (C1)."
+  - objection: "Minimal sufficient context already exists (msc2026issue, swepruner2026)."
+    preemptive_response: "Those objectives optimize task success alone for issue resolution and agent middleware. We add an explicit stability constraint over semantics-preserving variants, target a review decision, and test cross-reviewer transfer, which none of them do."
+  - objection: "Greedy selection is not a novel algorithm."
+    preemptive_response: "We do not claim algorithmic novelty. The claimed contributions are the objective, the exhaustive minimal-context reference target, and the transfer evaluation. Greedy is the deliberately simple approximator."
+  - objection: "Results on a few hundred examples with one open model family will not generalize."
+    preemptive_response: "We scope the claim to the evaluated reviewers and datasets, report seeds and confidence intervals, and include a second open family plus closed reviewers as the generalization probe rather than asserting universality."
+  - objection: "ContextCRBench already reports which context types help."
+    preemptive_response: "It reports aggregate effects of fixed combinations. C3 tests example-level non-monotonicity, and reconciles the conflict between its positive result and the monotone degradation reported by swe_prbench2026."
+  - objection: "Stability could be bought by always answering the majority class."
+    preemptive_response: "We report stability jointly with accuracy/F1 and include a constant-predictor and random-subset control at matched token budget, so degenerate stability is visible."
+  - objection: "The method is more expensive than the full-context baseline once selection cost is counted."
+    preemptive_response: "We report selection-time reviewer calls separately from inference token cost and state plainly that the saving applies to repeated queries under a fixed selected subset, not to the one-shot case."
+  - objection: "Selection uses the evaluation labels, so the reported gains are optimistic."
+    preemptive_response: "Selection utility is computed on development examples with thresholds fixed in advance; the label is never placed in candidate context, and human review comments that reveal the answer are excluded from inputs."

@@ -1,0 +1,7 @@
+innovation_id,claim_id,issue_id,artifact_path,what_to_verify,status,notes
+I3,C1,,brief/evidence-matrix.csv,Stability-constrained vs correctness-only selection at matched token budget,planned,Primary contribution; needs degenerate-stability controls
+I3,C4,,brief/evidence-matrix.csv,Greedy approximation gap against exhaustive minimal-context optimum,planned,Feasibility half of the method story
+I1,C2,,brief/evidence-matrix.csv,Flip rate under semantics-preserving perturbations on review judgments,planned,Premise only; do not frame as the contribution
+I2,C3,,brief/evidence-matrix.csv,Per-example non-monotonicity of context value,planned,Reconciles ContextCRBench vs SWE-PRBench
+I4,C5,,brief/evidence-matrix.csv,Transfer of selected context to unseen reviewers,planned,Negative result acceptable
+I5,,,notes/innovation/innovation-candidates.md,Optional white-box attribution ranking,deferred,Only if black-box selector lands early

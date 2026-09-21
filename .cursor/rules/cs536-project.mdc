@@ -1,0 +1,14 @@
+---
+description: Always apply CS536 / ML II project docs and research constraints
+alwaysApply: true
+---
+
+# CS536 project (always on)
+
+This repo is the CS536 / ML II research project **Robust Minimal Context Selection for LLM Code Review**.
+
+On every task:
+
+1. Follow `.cursor/skills/cs536-project/SKILL.md`.
+2. Consult `docs/` when the work touches research design, experiments, evaluation, writing, or course requirements. Start with `.cursor/skills/cs536-project/docs-index.md`.
+3. If a request conflicts with `docs/` or the skill, say so before proceeding.
