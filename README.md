@@ -59,6 +59,10 @@ The explicit PyTorch index is required for NVIDIA use on Windows; the generic
 PyPI wheel is CPU-only. Restart any active Jupyter kernel after replacing
 PyTorch.
 
+### Linux (NVIDIA GPU)
+
+See [AGENTS.md](AGENTS.md) for full virtualenv setup (`torch==2.14.0+cu130`, notebook deps, kernel registration, verification).
+
 ### macOS (Apple Silicon)
 
 ```bash
