@@ -10,6 +10,9 @@ wandb/
 data/*
 !data/.gitkeep
 
+models/*
+!models/.gitkeep
+
 checkpoints/*
 !checkpoints/.gitkeep
 
