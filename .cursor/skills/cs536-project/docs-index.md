@@ -5,7 +5,7 @@ Read the original file in `docs/`. New files added there become official sources
 | File | Use when |
 |------|----------|
 | `docs/MLII_fall2026_project_kickoff.pdf` | Course values, allowed project types, compute/data rules, grading, proposal/midpoint/final requirements, team rules |
-| `docs/ml2_project_proposal_detailed.docx` | Research questions, datasets, model/compute plan, experiment phases, metrics, leakage rules, timeline, success criteria |
+| `docs/context_selection_proposal_detailed.docx` | Current proposal: learned per-diff context selection, ContextCRBench, frozen Qwen reviewer, accuracy-cost evaluation, leakage rules, timeline, success criteria |
 
 Re-list `docs/` if the folder may have changed. Prefer the newest dated proposal, report, or instructor note when sources disagree.
 
@@ -34,16 +34,16 @@ Re-list `docs/` if the folder may have changed. Prefer the newest dated proposal
 
 ## Proposal phases (implementation order)
 
-1. Baseline + stability on CodeReviewer
-2. Add context types one at a time
-3. Exhaustive minimal-context target on small candidate sets
-4. Greedy forward / backward selection; optional attribution
-5. Cross-model transfer
+1. Audit ContextCRBench and establish the frozen-reviewer pilot
+2. Generate and cache offline outcomes for context subsets
+3. Fine-tune the compact context selector
+4. Compare accuracy-cost frontiers with fixed and adaptive baselines
+5. Run error/ablation analysis; cross-reviewer transfer is optional
 
 ## Starting references from the proposal
 
-1. Li et al. (2022), CodeReviewer
-2. Microsoft CodeBERT / CodeReviewer dataset
-3. Hu et al. (2025), ContextCRBench
-4. Qwen2.5-Coder
-5. ElliCE as conceptual motivation, not a template to copy
+1. Hu et al. (2025), ContextCRBench
+2. Li et al. (2022), CodeReviewer
+3. Wu et al. (2024), Repoformer
+4. Xu et al. (2024), RECOMP
+5. Qwen2.5-Coder and a CodeBERT-style selector

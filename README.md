@@ -1,13 +1,19 @@
-# CS536 Project: Local Qwen2.5-Coder-7B Inference Setup
+# CS536 Project: Learned Context Selection for LLM Code Review
 
-This repository provides a clean, reproducible setup for local inference with
-`Qwen/Qwen2.5-Coder-7B-Instruct` using Python 3.11, PyTorch, and Hugging Face
-Transformers. It is designed to run on:
+This repository studies whether a learned per-diff selector can preserve a
+frozen LLM reviewer's ContextCRBench quality-assessment accuracy while reducing
+optional context tokens. The primary reviewer is
+`Qwen/Qwen2.5-Coder-7B-Instruct`; the 3B model supports lower-cost pilots.
+
+Frozen inference supports:
 
 - Windows + NVIDIA GPU (CUDA)
 - Apple Silicon Mac (MPS)
 
-The current milestone is inference only (no fine-tuning yet).
+The central experiment keeps Qwen frozen and trains a compact context selector.
+`notebooks/qwen3b_qlora_contextcrbench.ipynb` is a separate exploratory QLoRA
+feasibility test requested for the 3B reviewer; it is not the main method and
+requires an NVIDIA CUDA GPU.
 
 ## Repository Layout
 
@@ -45,8 +51,13 @@ CS536_Project/
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install --upgrade pip
+pip install "torch==2.14.0+cu130" --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
+
+The explicit PyTorch index is required for NVIDIA use on Windows; the generic
+PyPI wheel is CPU-only. Restart any active Jupyter kernel after replacing
+PyTorch.
 
 ### macOS (Apple Silicon)
 

@@ -7,7 +7,7 @@ description: Guides all CS536 / ML II research work in this repo: local Qwen inf
 
 This is the Rutgers CS536 / Machine Learning II (Fall 2026) research project.
 
-**Title:** Robust Minimal Context Selection for LLM Code Review
+**Title:** Learning to Select Context per Code Diff: An Accuracy-Cost Trade-off for LLM Code Review
 
 Before implementing, changing experiments, or writing course deliverables, read the relevant files in `docs/` and follow this skill. Do not rely on memory of a prior chat.
 
@@ -19,15 +19,14 @@ Before implementing, changing experiments, or writing course deliverables, read 
 
 ## Research question
 
-What is the smallest additional context needed to make an LLM code-review judgment correct and stable, and can that context transfer across reviewers?
+Can a small learned selector choose context separately for each code diff, maintaining a frozen LLM reviewer's hunk-level quality-assessment accuracy while using fewer input tokens than fixed context choices?
 
 Keep work tied to one of:
 
-- **RQ1** Sensitivity of review judgments to semantics-preserving changes
-- **RQ2** Which context types improve correctness and stability
-- **RQ3** Minimal / near-minimal context subsets
-- **RQ4** Transfer of selected context to other open and closed reviewers
-- **RQ5** Token cost vs reliability
+- **RQ1** Effects of fixed issue, PR, and surrounding-code context on accuracy and token count
+- **RQ2** Whether a fine-tuned compact selector improves the accuracy-cost frontier
+- **RQ3** When context helps, does nothing, or turns a correct judgment into an incorrect one
+- **Stretch** Transfer of selected subsets to a second frozen reviewer
 
 ## Course standards (kickoff)
 
@@ -49,18 +48,19 @@ Do not:
 
 ## Method constraints (proposal)
 
-- Reviewers stay **frozen**. This is an inference / analysis project, not pre-training.
-- Do **not** full-fine-tune. LoRA / QLoRA only if the user asks after a baseline needs it.
-- Main local reviewer: `Qwen/Qwen2.5-Coder-7B-Instruct`
-- Fast iteration model (when added): `Qwen2.5-Coder-3B-Instruct`
-- First dataset: Microsoft CodeReviewer quality estimation
-- Later rich-context dataset: ContextCRBench
-- Initial task: structured / binary review judgment, not free-form comments
-- Deterministic decoding when measuring input-caused instability
+- The central comparison keeps reviewers **frozen**; train the context selector, not Qwen.
+- Exploratory Qwen LoRA / QLoRA is separate from the proposed main method and must be labeled as such.
+- Main local reviewer: quantized `Qwen/Qwen2.5-Coder-7B-Instruct`
+- Fallback/pilot reviewer: quantized `Qwen/Qwen2.5-Coder-3B-Instruct`
+- Core dataset: ContextCRBench
+- Core task: benchmark-defined hunk-level quality assessment, not free-form comments
+- Candidate chunks: issue text, PR text, code before, and code after; diff is always present.
+- Use deterministic decoding for the main reviewer comparisons.
 - Cache model responses; fixed seeds
-- Do not leak labels or human review comments into candidate context
+- Do not leak labels, merge status, human review comments, verdicts, or post-judgment text into model inputs.
+- Split by repository where possible and keep all hunks from one PR in one partition.
 - Choose thresholds on development data, not the test set
-- Commercial APIs only after the selector is mostly fixed, on a small subset
+- Compare diff-only, all-context, best fixed, random, and similarity-based policies.
 
 ## Repo conventions
 
@@ -75,7 +75,7 @@ Do not:
 
 ## Current milestone
 
-Confirm local inference first. Do not add CodeReviewer downloads, LoRA training, experiment trackers, or large datasets unless the user asks.
+Audit and download ContextCRBench, verify its task mapping and chronology, then run a 100–200 example frozen-reviewer pilot. Do not scale outcome generation or selector training before the pilot passes its go/no-go checks.
 
 ## Writing course documents
 
