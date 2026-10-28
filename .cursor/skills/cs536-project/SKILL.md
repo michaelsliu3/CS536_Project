@@ -1,6 +1,6 @@
 ---
 name: cs536-project
-description: Guides all CS536 / ML II research work in this repo: local Qwen inference, robustness, context selection, evaluation, writing, and repo changes. Use whenever working in CS536_Project, implementing models or scripts, planning experiments, editing docs, writing the proposal/report, or making research decisions.
+description: "Guides all CS536 / ML II research work in this repo: local Qwen inference, robustness, context selection, evaluation, writing, and repo changes. Use whenever working in CS536_Project, implementing models or scripts, planning experiments, editing docs, writing the proposal/report, or making research decisions."
 ---
 
 # CS536 Project Skill
@@ -9,13 +9,26 @@ This is the Rutgers CS536 / Machine Learning II (Fall 2026) research project.
 
 **Title:** Learning to Select Context per Code Diff: An Accuracy-Cost Trade-off for LLM Code Review
 
-Before implementing, changing experiments, or writing course deliverables, read the relevant files in `docs/` and follow this skill. Do not rely on memory of a prior chat.
+Before any work in this repository, follow the required project-context procedure
+in root `AGENTS.md`. This applies to every task, including setup and small fixes.
 
 ## Required first step
 
-1. List `docs/` and identify current official sources (kickoff, proposal, later reports).
-2. Read the source that matches the task. See [docs-index.md](docs-index.md).
-3. If a request conflicts with `docs/` or this skill, say so and follow the official document unless the user explicitly overrides it.
+1. Recursively list `docs/` and read **every document in full**, including PDFs,
+   DOCX files, Markdown, and future additions. Do not filter by immediate task
+   relevance. Use extraction/rendering tools for non-text formats.
+2. Read [docs-index.md](docs-index.md) as a navigation aid; it does not replace
+   the original documents. Distinguish historical context, proposed work, and
+   verified results.
+3. Explicitly report any unreadable document after trying available tools. Do not
+   silently skip files or claim complete context when a file remains unread.
+4. Surface conflicts. Explicit current user instructions take precedence;
+   otherwise prefer current official course/instructor guidance and the latest
+   applicable project decisions over older drafts or historical handoffs.
+5. Re-list `docs/` at each new task/session and read new or changed files. Reuse
+   full reads within the same active session only while those files are unchanged;
+   do not rely solely on a previous chat's memory. Apply this procedure to any
+   delegated agents as well.
 
 ## Research question
 

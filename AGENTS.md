@@ -1,4 +1,37 @@
-# Agent setup notes (CS536_Project)
+# Agent instructions (CS536_Project)
+
+## Required project context — all agents, every task
+
+These instructions apply to every agent working anywhere in this repository, on
+any platform, including setup, coding, debugging, notebooks, experiments, reviews,
+and writing.
+
+Before starting work:
+
+1. Recursively list **all files in `docs/`**. Read **every document in full** for
+   project context, including PDFs, DOCX files, Markdown, and documents added
+   later. Do not select only documents that appear relevant to the immediate task.
+2. Read `.agents/skills/cs536-project/SKILL.md` (Codex) or
+   `.cursor/skills/cs536-project/SKILL.md` (Cursor), plus its `docs-index.md`.
+   The index and skill summaries do not replace reading the original documents.
+3. Use the documents to understand the project's purpose, professor feedback,
+   research scope, decisions, constraints, and current status before acting.
+   Distinguish historical notes and planned work from verified current results.
+4. If a document cannot be read, identify the file and limitation explicitly;
+   do not silently skip it or claim to have reviewed all context. Try available
+   document extraction or rendering tools first.
+5. Surface conflicting guidance. Follow explicit current user instructions;
+   otherwise prefer current official course/instructor guidance and the latest
+   applicable project decisions over older drafts or historical handoffs.
+   Ask only when a material conflict remains unresolved.
+
+At the start of each new task/session, re-list `docs/` and read any new or changed
+documents. Documents already read in full in the same active session need not be
+reread unless they change. Do not rely solely on memory from a previous chat.
+These requirements also apply to delegated agents; include this context requirement
+in any handoff.
+
+## Linux NVIDIA environment setup
 
 Instructions for agents setting up a **new Linux machine** with NVIDIA GPU. Windows setup is in [README.md](README.md).
 
