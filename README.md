@@ -13,7 +13,7 @@ Frozen inference supports:
 The central experiment keeps Qwen frozen and trains a compact context selector.
 `notebooks/qwen3b_qlora_contextcrbench.ipynb` is a separate exploratory QLoRA
 feasibility test requested for the 3B reviewer; it is not the main method and
-requires an NVIDIA CUDA GPU.
+defaults to 3B QLoRA on NVIDIA CUDA, with notebook preparation on the M4 Max.
 
 ## Repository Layout
 
@@ -73,6 +73,14 @@ pip install -r requirements.txt
 ```
 
 > Use Python 3.11 if available.
+
+For the exploratory training notebook, select the **CS536 (.venv)** kernel and
+set `HARDWARE = "auto"` (or explicitly `"nvidia"` / `"m4_max"`) in its configuration
+cell. Both profiles default to 3B QLoRA, 2048-token sequences, and all rows
+for one epoch. Prepare the notebook on the M4 Max, then train on an NVIDIA
+CUDA cloud machine; the Mac training preflight stops before downloads. The notebook's one-time install cell selects packages for the host;
+restart the kernel after installation. Mac preparation does not require bitsandbytes.
+The data and model download cells still download multi-GB files when executed.
 
 ## Verify Hardware/Runtime Detection
 
