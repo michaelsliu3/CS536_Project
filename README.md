@@ -82,6 +82,44 @@ CUDA cloud machine; the Mac training preflight stops before downloads. The noteb
 restart the kernel after installation. Mac preparation does not require bitsandbytes.
 The data and model download cells still download multi-GB files when executed.
 
+## LLaMA-Factory web UI
+
+The optional [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory/tree/v0.9.5)
+UI uses a separate Python environment so its dependency versions do not change
+the notebook's `.venv`. Install from the repository root with `uv`:
+
+```bash
+mkdir -p .cache/llamafactory
+git clone --depth 1 --branch v0.9.5 https://github.com/hiyouga/LLaMA-Factory.git .cache/llamafactory/source
+uv venv --python 3.11 .cache/llamafactory/venv
+uv pip install --python .cache/llamafactory/venv/bin/python -e .cache/llamafactory/source
+```
+
+Launch it from the repository root:
+
+```bash
+./scripts/llamafactory_ui.sh
+```
+
+Open [the local UI](http://127.0.0.1:7860). Stop it with Ctrl+C in its terminal.
+The launcher binds to localhost and disables public sharing. Set
+`GRADIO_SERVER_PORT=7861` before the command if port 7860 is occupied.
+
+For the exploratory Qwen run, select **Qwen2.5-Coder-3B-Instruct**, fine-tuning
+method **lora**, quantization **4**, quantization method **bnb**, and template
+**qwen**. Prepare settings on the Mac; execute QLoRA training on NVIDIA CUDA.
+Installing the UI does not register ContextCRBench or convert the notebook's
+data pipeline. Prepare repository-held-out training/evaluation files and register
+them in LLaMA-Factory's `data/dataset_info.json` before training; its sample
+instruction datasets are not ContextCRBench.
+
+The source checkout, environment, UI state, and generated UI configurations live
+under ignored `.cache/llamafactory/`. Copy configurations you want to keep into
+`configs/`; put large adapters under ignored `checkpoints/`. The UI does not
+inherit settings from the notebook automatically. On a cloud NVIDIA machine,
+install CUDA PyTorch and bitsandbytes in the separate LLaMA-Factory environment
+before training.
+
 ## Verify Hardware/Runtime Detection
 
 From project root:
