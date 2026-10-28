@@ -160,3 +160,15 @@ The script:
   installation page.
 - If MPS is expected but unavailable, verify Apple Silicon + recent macOS and a
   compatible PyTorch build.
+
+## Evaluate a completed Qwen3B adapter
+
+Open `notebooks/qwen3b_evaluation_comparison.ipynb` with **CS536 (.venv)**.
+Set the adapter directory (including tokenizer files and `run_manifest.json`),
+extracted dataset path, and frozen split manifest. The run must have used that
+same split; older checkpoints need their original split provenance recovered.
+Set `RUN_INFERENCE=True` on cloud NVIDIA to compare the training-majority
+classifier, untouched Qwen3B, and the trained adapter on identical validation
+examples. Test evaluation is separately gated. The notebook performs no training.
+Copy its results directory to the Mac and leave inference disabled to display
+cached metrics, the comparison graph, and fixed demonstration examples.

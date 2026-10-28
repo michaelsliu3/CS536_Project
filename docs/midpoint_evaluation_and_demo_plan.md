@@ -174,3 +174,13 @@ Synthetic tests cover disjoint and complete membership, deterministic behavior u
 [6] [Scikit-learn: cross-validation and grouped data](https://scikit-learn.org/stable/modules/cross_validation.html), reviewed October 28, 2026. Supports separating selection from final testing and grouping dependent examples.
 
 [7] [Scikit-learn: common pitfalls and data leakage](https://scikit-learn.org/stable/common_pitfalls.html), reviewed October 28, 2026. Supports splitting before learning transformations and avoiding test exposure during fitting/selection.
+
+## Stage 3 implementation
+
+Use `notebooks/qwen3b_evaluation_comparison.ipynb` for evaluation only. Set the adapter directory, completed run manifest, dataset root, and saved split manifest. Enable `RUN_INFERENCE` on cloud NVIDIA; default mode only reads cached results. The completed run must identify Qwen3B and embed the same Stage 2 split manifest. Historical runs without that provenance require recovery of their original split protocol; do not manually attach the new split to old weights.
+
+The notebook computes the constant label from training rows only (ties resolve to False), compares the base with its adapter disabled against the same base with the adapter enabled, and uses identical validation IDs and generation settings. Adapters with trained bias or saved extra modules are rejected for this baseline route. Both model conditions use the same NF4 inference quantization. Choose the training base revision when known; the resolved inference commit and adapter hashes are recorded. This does not establish that an unknown historical training revision matches.
+
+Per-example records include raw outputs, strict parsed labels, validity, correctness, repository/PR identity, token counts, truncation, and generation latency. Invalid JSON is always incorrect; macro-F1 covers the two real classes while invalid predictions count as misses for their true class. Resume is supported using individual cached records with protocol checks. The notebook provides the three-way metric table, a score figure, paired improvement/regression counts, and the fixed demo examples. More detailed Stage 4 figures can consume the exported JSONL without loading a model.
+
+No actual trained adapter was available for inference verification during implementation. Unit tests verify strict parsing, majority ties, invalid scoring, cache reuse/protocol mismatch, and exclusion of outcome fields from prompts. Cloud model loading and real-data metrics still require the completed run artifacts. The original training notebook now imports the shared prompt module to prevent prompt drift.
