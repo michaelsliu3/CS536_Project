@@ -172,3 +172,19 @@ classifier, untouched Qwen3B, and the trained adapter on identical validation
 examples. Test evaluation is separately gated. The notebook performs no training.
 Copy its results directory to the Mac and leave inference disabled to display
 cached metrics, the comparison graph, and fixed demonstration examples.
+
+### Cloud checkpoints and recovery
+
+The training notebook fixes **3B QLoRA** on every profile; execution requires NVIDIA
+CUDA. Set `CHECKPOINT_ROOT` to persistent cloud storage and keep the same `RUN_NAME`
+to resume. Checkpoints save every 10 optimizer steps or about five minutes at the
+next optimizer boundary, retaining three verified complete saves. Resume restores
+adapter, optimizer, scheduler, RNG and Trainer progress. Logs append across sessions.
+A completed run skips training on rerun and can finish interrupted export/evaluation.
+
+Keep the same code and environment on resume; skip the installation cell. The run
+contract pins the model revision, packages and split/configuration identity. A new
+experiment needs a new run name. Browser disconnects can leave the kernel running:
+reconnect before launching another writer. Persistent storage or a backup is required
+to survive instance/volume deletion; only work through the last intact checkpoint is
+recoverable. See the midpoint plan for the full artifact and metric inventory.
