@@ -25,7 +25,9 @@ class SplitTests(unittest.TestCase):
         m=build_manifest(self.rows+[duplicate])
         self.assertEqual(m['excluded_exact_duplicates'],[{'id':'zzz','duplicate_of':'0-0'}])
         duplicate['merged']=True
-        with self.assertRaisesRegex(ValueError,'Conflicting'):build_manifest(self.rows+[duplicate])
+        m=build_manifest(self.rows+[duplicate])
+        self.assertEqual(m['excluded_conflicting_labels'],[{'ids':['0-0','zzz'],'diff_hash':'diff-0-0'}])
+        self.assertFalse({'0-0','zzz'} & set().union(*(set(ids) for ids in m['ids'].values())))
 
     def test_frozen_change_rejected_and_paths_portable(self):
         with tempfile.TemporaryDirectory() as d:

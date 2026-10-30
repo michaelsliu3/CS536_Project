@@ -30,17 +30,17 @@ def build_manifest(rows, seed=42, validation_limit=200, demo_limit=12):
         if not r['full_name'] or r['pr_number'] is None or not r['diff_hash']:
             raise ValueError(f'Missing repository/PR/diff identity: {r["id"]}')
         as_bool(r['merged'])
-    # Exact normalized diff duplicates: retain the smallest stable ID, without using labels to choose it.
-    seen, retained, excluded = {}, [], []
+    # Ambiguous identical diffs cannot supply a trustworthy label: exclude the whole group.
+    by_diff = {}
     for r in rows:
-        if r['diff_hash'] in seen:
-            original = seen[r['diff_hash']]
-            if as_bool(original['merged']) != as_bool(r['merged']):
-                raise ValueError(f'Conflicting labels for duplicate diff: {original["id"]}, {r["id"]}')
-            excluded.append({'id': r['id'], 'duplicate_of': original['id']})
+        by_diff.setdefault(r['diff_hash'], []).append(r)
+    retained, excluded, conflicting = [], [], []
+    for group in by_diff.values():
+        if len({as_bool(r['merged']) for r in group}) > 1:
+            conflicting.append({'ids': [r['id'] for r in group], 'diff_hash': group[0]['diff_hash']})
         else:
-            seen[r['diff_hash']] = r
-            retained.append(r)
+            retained.append(group[0])
+            excluded.extend({'id': r['id'], 'duplicate_of': group[0]['id']} for r in group[1:])
     rank = lambda value: digest([seed, value])
     repos = sorted({r['full_name'] for r in retained}, key=rank)
     if len(repos) < 10:
@@ -63,7 +63,8 @@ def build_manifest(rows, seed=42, validation_limit=200, demo_limit=12):
             'dataset_fingerprint': digest([{k:v for k,v in r.items() if k != 'path'} for r in rows]),
             'repositories': groups, 'ids': assignments, 'validation_generation_ids': val_ids,
             'demo_ids': val_ids[:demo_limit], 'test_generation_ids': assignments['test'],
-            'excluded_exact_duplicates': excluded, 'summary': summary}
+            'excluded_exact_duplicates': excluded, 'excluded_conflicting_labels': conflicting,
+            'summary': summary}
 
 
 def freeze_manifest(rows, path, **kwargs):
