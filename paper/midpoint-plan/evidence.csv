@@ -1,8 +1,10 @@
 Claim,Status,Source,Report treatment
 Context selection research question,verified,docs/initial_investigation_context.md and course proposal,Planned research direction
-Repository split and duplicate exclusion,verified,src/evaluation/splits.py,Implemented procedure; audit not assumed complete
+Model architecture and completed training setup,verified,Saved cloud model/config/environment artifacts summarized in model-data-audit.json,Architecture and method; no prediction-quality claim
+Retained records and split/class/language distribution,verified,Saved split_manifest.json and data_diagnostics.json summarized in model-data-audit.json,Data distribution table and limitations
+Repository split and duplicate exclusion,verified,src/evaluation/splits.py and paper/midpoint-plan/model-data-audit.json,Verified saved split; chronology and near-duplicate audit remain pending
 Prompt fields and answer-only objective,verified,src/evaluation/prompts.py and training notebook,Implemented configuration
 Checkpoint recovery and validation cadence,verified,src/training/runtime.py and training notebook,Engineering progress; no speedup claim
 Cloud difficulties,reported,User conversation,Qualitative lessons; no numeric runtime claims
-Paired majority/base/adapter performance,placeholder,Awaiting comparison notebook outputs,Table remains pending
+Paired majority/base/adapter performance,placeholder,Saved cloud predictions; generation and parsing checks pending,Scores withheld at user request; table remains pending
 Learned selector accuracy-token improvement,planned,Project proposal,Future experiment only

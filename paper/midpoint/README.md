@@ -14,13 +14,11 @@ a reference but is not included in the three-page course check-in.
 
 ## Fill before submission
 
-- Confirm the exact cloud run/checkpoint, completed epochs, actual hyperparameters,
-  model revision, and any scheduler extensions from saved run artifacts.
 - Fill the three-way validation table from paired predictions, including the
   training-majority baseline. Do not promote teacher-forced token accuracy to
   generated-answer accuracy.
-- Add sample/class/repository counts, retained/excluded dataset counts, a compact
-  loss plot, and a short explanation of successes and failures.
+- Resolve generation/parsing checks before finalizing scores; add a compact loss
+  plot and a short explanation of successes and failures.
 - Verify chronology/leakage checks and describe remaining limitations honestly.
 - Keep test evaluation separate; do not imply the selector has been trained.
 - Recompile after edits and keep the entire submitted PDF <=3 pages.
@@ -37,8 +35,9 @@ Primary bibliography pages checked October 31, 2026:
 
 Citations are kept directly in `thebibliography` for a self-contained draft.
 Project claims use the kickoff PDF, current midpoint plan, later investigation
-handoff, local notebook/runtime/split/prompt code, and user-reported workflow
-issues. Source-code settings are not automatically verified cloud-run settings.
+handoff, local notebook/runtime/split/prompt code, and saved artifacts inspected
+in a read-only cloud audit. Source-code settings alone are not evidence of the
+settings used by a completed run.
 The older robustness/CodeReviewer outline in `paper/plan/` was not used.
 The current user request explicitly authorizes a short draft with placeholders;
 full-paper IEEE, literature-count and experiment quotas from the empirical skill
@@ -66,3 +65,21 @@ The target is `merged=False`, not a claim that the proposed fix is incorrect.
 Training membership and source bytes were checked locally. Source/manifest hashes
 and selection details are in `../midpoint-plan/dataset-example.json`.
 This is a data illustration, not a performance result. The full dataset stays ignored.
+
+## Verified model and data setup
+
+The model/data revision uses the saved artifacts from
+`checkpoints/qwen3b-qlora-split-v1-run5-local`, final `checkpoint-14289`, on the
+audited server. Its three-epoch training completion is distinct from finalizing
+the evaluation workflow. The architecture comes from the base model's actual
+`config.json`; training settings, parameter count, data cleaning, split counts,
+language counts, and post-truncation lengths come from saved run artifacts.
+The small [audit summary](../midpoint-plan/model-data-audit.json) records the
+artifact names, run identity, model revision, and split-manifest digest. It is
+a transcription of inspected evidence, not a copy of the original artifacts.
+No cloud code was changed or new experiment run for this revision.
+
+The report now includes the split/class distribution table, language differences,
+and fixed validation-sample composition. It leaves prediction scores and loss
+values pending at the user's request. The learned context selector is still a
+planned component, separate from the completed QLoRA training pilot.
