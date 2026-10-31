@@ -114,13 +114,17 @@ All 200 base answers fail strict parsing: 82 untruncated outputs contain Markdow
 
 Merge status remains a proxy for code quality, and chronology and near-duplicate checks are unfinished. Language differences across repositories and only ten validation repositories also limit generalization claims.
 
+\paragraph{Learning, label quality, and stability.} Beyond the 200-example result, within-repository AUROC is only 0.520 on validation and 0.505 on sampled training data, so the adapter did not learn to judge changes. Six training repositories with under 2\% True labels hold 20.5\% of False examples, suggesting label noise beyond the proxy issue; we will handle them before balancing to 1:1. Gradient norms were also unstable, peaking at 89,273, although validation had plateaued by step 1,000.
+
 \section{Next steps}
 Our immediate task is to validate preprocessing, repeat the pilot comparison, and inspect per-class errors. We also plan to test more complex predictive models under the same split and corrected evaluation protocol, comparing macro-F1, minority-class recall, and inference cost with Qwen3B.
 
+We will also host a model locally in LM Studio and use Alibaba's Open Code Review CLI (\texttt{ocr}) for an end-to-end terminal demonstration on validation examples. The current adapter cannot drive this demonstration: in a smoke test it returned only verdict JSON and made no tool calls, so the review failed, while a general tool-capable local model completed the same review. The demonstration will therefore use a tool-capable model until a suitable reviewer is ready. It will show the workflow, not establish review quality.
+
 We will test whether context choices justify a learned selector, then use training-repository outcomes as targets if appropriate. Comparisons will cover accuracy, macro-F1, extra context tokens, and runtime including selection, with repeated seeds, context-type ablations, and negative findings.
 
-\paragraph{Acknowledgments.}
-We thank Professor Lesia Semenova for feedback on the research question and evaluation. We used OpenAI Codex for coding, debugging, and editing assistance. Our team is responsible for checking the implementation, running the experiments, and interpreting the results.
+% \paragraph{Acknowledgments.}
+% We thank Professor Lesia Semenova for feedback on the research question and evaluation. We used OpenAI Codex for coding, debugging, and editing assistance. Our team is responsible for checking the implementation, running the experiments, and interpreting the results.
 
 \begin{thebibliography}{3}
 \bibitem{hu2025}
