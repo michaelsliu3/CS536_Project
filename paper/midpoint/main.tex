@@ -23,14 +23,14 @@ Machine Learning II, Rutgers University}
 \maketitle
 \thispagestyle{plain}
 \begin{abstract}
-We study whether selecting context for each code change can reduce the input cost of LLM-assisted code review without reducing accuracy. Our planned method trains a small context selector while keeping the reviewer fixed. So far, we have prepared a repository-based split of 46,518 ContextCRBench examples, completed a Qwen3B QLoRA training pilot, and implemented fixed, random, and similarity-based context policies. This report describes the audited data and training setup. Evaluation outputs are under review, so we do not yet draw conclusions about adaptation or context selection.
+We study whether selecting context per code change can reduce the input cost of LLM-assisted review while maintaining accuracy. Our planned method trains a small selector for a frozen reviewer. We prepared a repository-based split of 46,518 ContextCRBench examples, completed a Qwen3B QLoRA pilot, and implemented context-policy baselines. The saved pilot outputs reveal malformed base-model answers and an adapter that always predicts the majority class. These findings motivate preprocessing and evaluation changes; they do not establish improved review quality.
 \end{abstract}
 \noindent\textbf{Repository:} \url{https://github.com/michaelsliu3/CS536_Project}
 
 \section{Research question}
-A code reviewer may need an issue description to understand a change's purpose or nearby code to see how it will be used. Giving the model every available field uses more tokens, even when some fields add little useful information. We ask: \emph{Can a learned selector choose context for each code change while maintaining review accuracy and using fewer tokens than fixed context choices?}
+Reviewing a change may require its issue description or nearby code, but including every available field increases input cost. We ask: \emph{Can a learned selector choose context per diff while maintaining review accuracy and using fewer tokens than fixed context choices?}
 
-ContextCRBench provides code changes together with issue, pull request (PR), and surrounding-code context \citep{hu2025}. Repoformer studies selective retrieval for code completion \citep{wu2024}; we ask whether a separate selector can help with code-review judgments. Following instructor feedback, we focus on the accuracy--cost trade-off.
+ContextCRBench provides issue, pull request (PR), and surrounding-code context \citep{hu2025}. Repoformer studies selective retrieval for code completion \citep{wu2024}; we investigate context selection for review, focusing on the accuracy--cost trade-off following instructor feedback.
 
 Our target is accuracy within one percentage point of the best fixed strategy with at least 30\% fewer extra context tokens, or higher accuracy at a matched budget. The Qwen3B adaptation pilot checks the data and evaluation pipeline and asks whether fine-tuning improves merge-status prediction. It is separate from the main experiment, which will keep Qwen frozen and train the selector.
 
@@ -38,7 +38,7 @@ Our target is accuracy within one percentage point of the best fixed strategy wi
 \paragraph{Task and split.}
 The reviewer returns a JSON answer with the Boolean field \texttt{is\_merged}. Merge status is our benchmark target, but only a proxy for code quality: a merged change can contain a bug, and a rejection can have nontechnical reasons. We exclude explicit outcome fields and human review answers from prompts. Later edits and quoted solutions in issue and PR text still need a chronology audit.
 
-The downloaded release contains 68,938 JSON records. Cleaning removes 22,375 exact normalized-diff duplicates and excludes 45 records from 16 groups with conflicting labels, leaving 46,518 examples from 99 repositories. With seed 42, we target an 80/10/10 split by repository; all changes from one PR remain together. The saved manifest has disjoint repository sets (Table~\ref{tab:data}). Unequal repository sizes explain the different example proportions. We use validation for development and reserve test repositories for the final comparison. This split does not rule out near-duplicates or temporal leakage.
+Of 68,938 downloaded JSON records, cleaning removes 22,375 exact normalized-diff duplicates and 45 records from 16 conflicting-label groups, leaving 46,518 examples from 99 repositories. Seed 42 fixes an approximately 80/10/10 repository split, keeping PRs together. Repository sets are disjoint (Table~\ref{tab:data}); unequal repository sizes explain the example proportions. Validation supports development, while test repositories are reserved. Near-duplicates and temporal leakage remain to be checked.
 
 \begin{table}[ht]
 \caption{Retained data in the saved split. True and False denote merge status.}
@@ -55,13 +55,13 @@ Test & 4,624 & 10 & 3,336 & 1,288 & 72.1\\
 \end{tabular}
 \end{table}
 
-The splits differ in both class balance and language mix. Go (23.7\%) and Python (17.4\%) are the largest training languages, while C\# (39.4\%) and Rust (27.8\%) dominate validation. The fixed 200-example generation sample contains 175 True and 25 False labels from all ten validation repositories. These imbalances make per-class scores and the training-majority baseline necessary alongside accuracy.
+Go (23.7\%) and Python (17.4\%) are the largest training languages; C\# (39.4\%) and Rust (27.8\%) dominate validation.
 
 \paragraph{A Python example.}
-Training record \texttt{final\_json/63859.json} is from
-\href{https://github.com/pandas-dev/pandas/pull/53773}{\texttt{pandas-dev/pandas}, PR \#53773}.
-Its issue describes a \texttt{TypeError} when nested JSON contains \texttt{null}.
-Four verbatim diff lines are shown below; other lines are omitted, and \texttt{+} marks an addition.
+Training record \texttt{63859.json} comes from
+\href{https://github.com/pandas-dev/pandas/pull/53773}{pandas PR \#53773}.
+The issue concerns a \texttt{TypeError} on nested JSON containing \texttt{null}.
+Below are four verbatim diff lines; others are omitted. The \texttt{+} marks additions.
 \begin{quote}
 \begin{verbatim}
 +        if data is None:
@@ -70,47 +70,51 @@ Four verbatim diff lines are shown below; other lines are omitted, and \texttt{+
              data = [data]
 \end{verbatim}
 \end{quote}
-The guard returns before processing \texttt{None}. Its label, \texttt{False}, records merge status rather than whether the fix is correct. This is an input illustration, not a model prediction; the label stays out of the prompt.
+The guard returns on \texttt{None}. Its label, \texttt{False}, records merge status, not fix correctness. This illustrates an input, not a prediction; the label stays out of the prompt.
 
 \paragraph{Model and adaptation method.}
-The audited pilot uses Qwen2.5-Coder-3B-Instruct, a decoder-only Transformer with 36 layers, hidden size 2,048, and feed-forward size 11,008. Grouped-query attention uses 16 query heads and two key/value heads. The model generates the JSON verdict autoregressively. Although its configuration supports 32,768 positions, our experiment limits each sequence to 2,048 tokens.
+The pilot uses Qwen2.5-Coder-3B-Instruct, a decoder-only Transformer with 36 layers, hidden size 2,048, and feed-forward size 11,008. Grouped-query attention has 16 query heads and two key/value heads. It generates JSON autoregressively. Its configuration supports 32,768 positions; our experimental cap is 2,048 tokens.
 
 QLoRA \citep{dettmers2023} freezes the base weights in 4-bit NF4 with double quantization and bfloat16 computation. We train low-rank adapters on the attention query, key, value, and output projections and the feed-forward gate, up, and down projections. Rank 16, scaling $\alpha=32$, and dropout 0.05 give 29,933,568 trainable parameters. The saved run uses paged 8-bit AdamW, learning rate $2\times10^{-4}$, cosine decay, 3\% warmup, and weight decay 0.01. Batch size one with eight accumulation steps gives an effective batch size of eight. Training ran for three epochs (14,289 optimizer steps) on one 32-GB RTX 5090; the final adapter is \texttt{checkpoint-14289}.
 
-Inputs contain repository and language metadata, the diff, issue and PR text, and code before and after the change. Training supervises only the JSON answer and end-of-sequence token; prompt tokens are masked from the loss. Right truncation keeps the sequence within 2,048 tokens. After preprocessing, 63.3\% of training and 57.2\% of validation sequences reach this cap. These are post-truncation lengths, not measurements of how many tokens were discarded.
+Inputs contain repository/language metadata, the diff, issue and PR text, and code before and after the change. Only JSON-answer and end-of-sequence tokens receive loss; prompt tokens are masked. After right truncation, 63.3\% of training and 57.2\% of validation sequences reach 2,048 tokens. These post-truncation lengths do not measure discarded tokens.
 
 \paragraph{Evaluation and context policies.}
-Evaluation compares the untouched base, the trained adapter, and a constant prediction chosen from training-label counts on the same saved 200 examples. The two model conditions share prompts, quantization, and deterministic decoding, with at most 2,016 input tokens and 32 generated tokens. Invalid JSON counts as an error and is reported separately. We will compare accuracy, macro-F1, per-class scores, and paired improvements and regressions.
+Evaluation compares the untouched base, the trained adapter, and a constant prediction chosen from training-label counts on the same saved 200 examples. The two model conditions share prompts, quantization, and deterministic decoding, with at most 2,016 input tokens and 32 generated tokens. Invalid JSON counts as an error and is reported separately. We report accuracy, macro-F1, and per-class recall alongside paired outputs.
 
 For the frozen-reviewer study, diff-only, all-context, fixed-mask, random, and BM25 similarity policies are implemented. They select among issue text, PR text, and code before and after the change; the diff is always present. Assembled prompts are checked against token budgets. We plan to train a compact Transformer selector from reviewer outcomes on training repositories. The selector has not been trained, and context-policy comparisons remain pending. Fixed masks and budgets will be chosen on validation data.
 
-\section{Progress and results still needed}
-Saved cloud artifacts confirm the training setup and data counts above. Prediction files also exist, but generation and answer parsing are still being checked. We therefore leave Table~\ref{tab:pilot} unfilled. Dashes indicate unfinalized measurements, not zero scores. Training loss alone cannot establish an improvement in generated judgments.
+\section{Pilot diagnostics}
+We checked saved predictions against their protocol and source hashes and recomputed Table~\ref{tab:pilot}. All conditions share 200 IDs and labels. These observations describe the original pipeline's failures; a corrected comparison remains pending. Training loss alone cannot establish better judgments.
 
 \begin{table}[ht]
-\caption{Comparison to be completed on the same saved validation sample. The final test partition is reserved.}
+\caption{Saved validation pilot under the original strict-JSON protocol ($n=200$). These diagnostics do not establish improved review quality.}
 \label{tab:pilot}
 \centering
 \begin{tabular}{lccc}
 \toprule
-Method & Accuracy & Macro-F1 & Invalid JSON rate\\
+Method & Accuracy (\%) & Macro-F1 & Invalid (\%)\\
 \midrule
-Training-majority constant & --- & --- & N/A\\
-Untouched Qwen3B & --- & --- & ---\\
-Qwen3B + trained adapter & --- & --- & ---\\
+Training-majority constant & 87.5 & 0.467 & 0.0\\
+Untouched Qwen3B & 0.0 & 0.000 & 100.0\\
+Qwen3B + trained adapter & 87.5 & 0.467 & 0.0\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent\pending{Verify generated answers and parsing, then fill Table~\ref{tab:pilot} and add a training/validation loss plot before submission.}
+\section{Limitations and planned remedies}
+\paragraph{Class imbalance.}
+True labels account for 79.5\% of training data and 175 of the 200 evaluation examples. The adapter predicts True on every example, matching the majority baseline with 87.5\% accuracy but zero recall for the 25 False examples. Its macro-F1 is only 0.467. This is consistent with majority-class bias, but we have not established that imbalance caused the behavior. We will test balanced training sampling or example-weighted answer loss, deriving weights from training labels only. Validation macro-F1 and minority-class recall will guide selection; the original validation and test distributions will be preserved.
 
-\section{What we learned}
-Cloud runs made recovery a practical requirement. Checkpoints now retain adapter, optimizer, scheduler, and random states. We changed validation from every 100 to every 1,000 optimizer steps and corrected the restored interval on resume; timing measurements are still needed to assess the effect. The data audit also shows why accuracy alone is insufficient: labels are imbalanced, language mix changes across repositories, and many inputs reach the token cap. An all-context prompt does not guarantee that the reviewer sees every field. We need to check context timing and truncation before interpreting differences between models.
+\paragraph{Output format and truncation.}
+The base model's zero score has a separate observed explanation: all 200 answers fail the strict parser. The 82 untruncated outputs contain Markdown code fences. CPU tokenization confirms that all 118 truncated inputs lose the assistant-start suffix; their saved outputs are not valid verdicts. Thus, the score combines format failure with task performance and cannot be attributed directly to class imbalance. We will shorten context before rendering the chat, preserve role boundaries and output space, and rerun both models under one newly versioned protocol. Constrained verdict decoding is another candidate to test. We will keep the original strict scores for comparison rather than silently changing the parser.
+
+Merge status remains a proxy for code quality, and chronology and near-duplicate checks are unfinished. Language differences across repositories and only ten validation repositories also limit generalization claims.
 
 \section{Next steps}
-Our immediate task is to resolve the evaluation checks, fill Table~\ref{tab:pilot}, and inspect improvements and regressions on held-out repositories. Pilot findings will be reported separately from the context-selection experiment.
+Our immediate task is to validate preprocessing, repeat the pilot comparison, and inspect per-class errors. Balancing experiments apply to the adaptation pilot; the main reviewer will remain frozen.
 
-We will then run a small frozen-reviewer comparison to check whether context choices change enough judgments to make per-example selection useful. If they do, we will generate training outcomes and train the selector. Comparisons will include accuracy, extra context tokens, and runtime including selection, followed by repeated seeds and context-type ablations. If the selector does not beat the best fixed policy, we will analyze where context helps or hurts and report that result.
+We will then check whether context choices change enough frozen-reviewer judgments to justify a learned selector. If they do, training-repository outcomes will supply its targets. Comparisons will include accuracy, macro-F1, extra context tokens, and runtime including selection, followed by repeated seeds and context-type ablations. We will report where context helps or hurts even if the selector does not beat the best fixed policy.
 
 \paragraph{Acknowledgments.}
 We thank Professor Lesia Semenova for feedback on the research question and evaluation. We used OpenAI Codex for coding, debugging, and editing assistance. Our team is responsible for checking the implementation, running the experiments, and interpreting the results.

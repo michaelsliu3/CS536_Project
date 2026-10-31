@@ -1,0 +1,154 @@
+{
+  "audit_date": "2026-10-31",
+  "scope": "Read-only audit of saved original-pipeline validation outputs; diagnostic metrics, not evidence of improved review quality. No server code changed, no model inference/training or downloads started.",
+  "server_git_head": "c1bcbb9faff135c1124d200db8ed5d5129d4adaa",
+  "run": "checkpoints/qwen3b-qlora-split-v1-run5-local",
+  "checkpoint": "checkpoint-14289",
+  "evaluation_directory": "results/midpoint/qwen3b_validation_v1",
+  "protocol_digest": "629788db270aaa6380cc2d43e83b7446daa1ff005722bea116a781885862e386",
+  "split_manifest_digest": "33e100cbaf4b43d3d11e58955329cfa5672915e2f77cc8fe11aef6410e238d17",
+  "base_revision": "488639f1ff808d1d3d0ba301aef8c11461451ec5",
+  "source_file_sha256": {
+    "protocol.json": "3e34affd2242d664f3965c95059e6e7c6dc3ad396070410c62cfe1f2597ca4f4",
+    "predictions.jsonl": "e4f86cb8fadae2c4cfe6073abea0409aef5906033745bafcf93d4f3fedf006b9",
+    "metrics.json": "9cab89af0d92ac01ef638191b9d8e60faa0b7e04ab2e9bb4031be1a191c8f397"
+  },
+  "recorded_source_hashes_match_current_server_files": {
+    "src/evaluation/comparison.py": true,
+    "src/evaluation/prompts.py": true
+  },
+  "checks": {
+    "identical_unique_ids_per_condition": 200,
+    "labels_repositories_and_pr_ids_agree": true,
+    "raw_outputs_match_saved_strict_predictions": true,
+    "recomputed_metrics_match_saved_metrics": true
+  },
+  "evaluation_class_counts": {
+    "true": 175,
+    "false": 25
+  },
+  "metrics": [
+    {
+      "model": "majority",
+      "examples": 200,
+      "accuracy": 0.875,
+      "macro_f1": 0.4666666666666667,
+      "malformed_rate": 0.0,
+      "classes": {
+        "false": {
+          "support": 25,
+          "precision": 0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "true": {
+          "support": 175,
+          "precision": 0.875,
+          "recall": 1.0,
+          "f1": 0.9333333333333333
+        }
+      },
+      "prediction_counts": {
+        "True": 200
+      }
+    },
+    {
+      "model": "base",
+      "examples": 200,
+      "accuracy": 0.0,
+      "macro_f1": 0.0,
+      "malformed_rate": 1.0,
+      "classes": {
+        "false": {
+          "support": 25,
+          "precision": 0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "true": {
+          "support": 175,
+          "precision": 0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "prediction_counts": {
+        "None": 200
+      }
+    },
+    {
+      "model": "adapter",
+      "examples": 200,
+      "accuracy": 0.875,
+      "macro_f1": 0.4666666666666667,
+      "malformed_rate": 0.0,
+      "classes": {
+        "false": {
+          "support": 25,
+          "precision": 0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "true": {
+          "support": 175,
+          "precision": 0.875,
+          "recall": 1.0,
+          "f1": 0.9333333333333333
+        }
+      },
+      "prediction_counts": {
+        "True": 200
+      }
+    }
+  ],
+  "base_output_groups": {
+    "untruncated_markdown_fenced": 82,
+    "truncated_without_assistant_suffix": 118
+  },
+  "cpu_tokenization_check": {
+    "examples": 200,
+    "full_suffix_present": 200,
+    "truncated": 118,
+    "truncated_suffix_missing": 118,
+    "untruncated_suffix_present": 82,
+    "saved_length_matches": 200,
+    "saved_truncation_matches": 200,
+    "saved_label_matches": 200,
+    "suffix_token_ids": [
+      151644,
+      77091,
+      198
+    ],
+    "tokenizer_source": "checkpoints/qwen3b-qlora-split-v1-run5-local/checkpoint-14289/tokenizer.json",
+    "tokenizer_file_sha256": "885d62651c24d8f28bd9fa77662cc40ba4d3787b5f7dd74c0127941675738564",
+    "method": "CPU tokenization of saved IDs only; no model loading, generation, training, downloads, or server file writes"
+  },
+  "interpretation": [
+    "Class imbalance can mask poor minority-class performance; causation of the adapter behavior has not been established.",
+    "Base zero scores arise because all outputs are invalid under strict parsing; imbalance is not established as their cause.",
+    "Missing assistant suffixes and malformed outputs warrant a newly versioned controlled rerun.",
+    "No modified parser, repaired-prompt scores, or balancing improvements are claimed."
+  ],
+  "server_program_files_rechecked": [
+    "src/evaluation/comparison.py",
+    "src/evaluation/prompts.py",
+    "src/evaluation/splits.py",
+    "src/training/runtime.py",
+    "src/models/qwen.py",
+    "notebooks/qwen3b_qlora_contextcrbench.ipynb",
+    "notebooks/qwen3b_evaluation_comparison.ipynb"
+  ],
+  "server_program_hashes_unchanged_after_audit": false,
+  "comparison_notebook_concurrent_save": {
+    "before_sha256": "5dd19095dde7fba0aac876642efe6a8ad92f9d0330dc8647e482228825115446",
+    "after_sha256": "dd7cf2f05dc1274827615add850808c818f405e08edd97818407a5e8a0517470",
+    "code_cells_unchanged": false,
+    "note": "The notebook file changed during the read-only audit; no remote writes were performed by this audit.",
+    "original_code_cells_preserved": true,
+    "original_code_cell_count": 11,
+    "added_code_cell_count": 2,
+    "change_summary": "Added zoomed loss plotting and opt-in test-results code cells; no existing code cells changed.",
+    "audited_validation_artifacts_unchanged": true
+  },
+  "other_inspected_program_files_unchanged": 6
+}

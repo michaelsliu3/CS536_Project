@@ -12,19 +12,21 @@ pages. Margins, fonts,
 and the reference style file are unchanged. The conference checklist is kept as
 a reference but is not included in the three-page course check-in.
 
-## Fill before submission
+## Remaining experiment work
 
-- Fill the three-way validation table from paired predictions, including the
-  training-majority baseline. Do not promote teacher-forced token accuracy to
-  generated-answer accuracy.
-- Resolve generation/parsing checks before finalizing scores; add a compact loss
-  plot and a short explanation of successes and failures.
+- Repeat the three-way comparison under a newly versioned prompt protocol after
+  repairing truncation. Keep the original strict scores as diagnostics; do not
+  promote format compliance or teacher-forced accuracy to review-quality gains.
+- Test training-only balancing remedies separately and report minority recall
+  and macro-F1. Keep validation/test distributions unchanged.
+- A loss figure is not included; it would not by itself establish better verdicts.
 - Verify chronology/leakage checks and describe remaining limitations honestly.
 - Keep test evaluation separate; do not imply the selector has been trained.
 - Recompile after edits and keep the entire submitted PDF <=3 pages.
 
-The text contains explicit pending markers. It is not ready for submission until
-initial results and baseline evidence replace them. No results were fabricated.
+The report includes initial saved-output diagnostics and explicit limitations.
+Corrected-prompt or balancing results remain future work; no improvement from
+those remedies is claimed. No results were fabricated.
 
 ## Sources and drafting decisions
 
@@ -79,7 +81,24 @@ artifact names, run identity, model revision, and split-manifest digest. It is
 a transcription of inspected evidence, not a copy of the original artifacts.
 No cloud code was changed or new experiment run for this revision.
 
-The report now includes the split/class distribution table, language differences,
-and fixed validation-sample composition. It leaves prediction scores and loss
-values pending at the user's request. The learned context selector is still a
-planned component, separate from the completed QLoRA training pilot.
+The report includes the split/class distribution table, language differences,
+and fixed validation-sample composition. The learned context selector is still
+a planned component, separate from the completed QLoRA training pilot.
+
+## Saved-output diagnostic revision
+
+A follow-up read-only audit recomputed the original 200-example comparison and
+checked prompt integrity using existing tokenizer files on CPU. See the
+[architecture, findings, and proposed remedies](../midpoint-plan/evaluation-audit.md)
+and its [machine-readable evidence](../midpoint-plan/evaluation-audit.json).
+The original base score is zero because all outputs fail strict parsing;
+118 truncated inputs lose the assistant suffix, while 82 untruncated outputs
+contain code fences. The adapter predicts True on every example, matching
+the majority baseline and missing all 25 False examples. The paper separates
+these observations from unproven explanations about their causes.
+
+The table is now populated as **original-pipeline diagnostics**, not a finalized
+quality comparison. The limitations section proposes repaired prompt budgeting,
+a newly versioned comparison, and training-only resampling or example-weighted
+answer loss. Server programs, dependencies, checkpoints, and outputs were not
+modified, and no model inference or training was run for the audit.
