@@ -112,9 +112,11 @@ The base model's zero score has a separate observed explanation: all 200 answers
 Merge status remains a proxy for code quality, and chronology and near-duplicate checks are unfinished. Language differences across repositories and only ten validation repositories also limit generalization claims.
 
 \section{Next steps}
-Our immediate task is to validate preprocessing, repeat the pilot comparison, and inspect per-class errors. Balancing experiments apply to the adaptation pilot; the main reviewer will remain frozen.
+Our immediate task is to validate preprocessing, repeat the pilot comparison, and inspect per-class errors.
 
-We will then check whether context choices change enough frozen-reviewer judgments to justify a learned selector. If they do, training-repository outcomes will supply its targets. Comparisons will include accuracy, macro-F1, extra context tokens, and runtime including selection, followed by repeated seeds and context-type ablations. We will report where context helps or hurts even if the selector does not beat the best fixed policy.
+We also plan to test more complex predictive models under the same split and corrected evaluation protocol, comparing macro-F1, minority-class recall, and inference cost with Qwen3B.
+
+We will check whether context choices change enough frozen-reviewer judgments to justify a learned selector. If so, training-repository outcomes will supply its targets. We will compare accuracy, macro-F1, extra context tokens, and runtime including selection, with repeated seeds and context-type ablations. Negative findings will also be reported.
 
 \paragraph{Acknowledgments.}
 We thank Professor Lesia Semenova for feedback on the research question and evaluation. We used OpenAI Codex for coding, debugging, and editing assistance. Our team is responsible for checking the implementation, running the experiments, and interpreting the results.
