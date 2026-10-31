@@ -1,0 +1,139 @@
+{
+  "audit_date": "2026-10-31",
+  "evidence_type": "Summary of saved artifacts inspected during a read-only server audit; not a copy of the raw artifacts",
+  "server_git_head": "c1bcbb9faff135c1124d200db8ed5d5129d4adaa",
+  "run_directory_relative_to_project": "checkpoints/qwen3b-qlora-split-v1-run5-local",
+  "source_artifacts": [
+    "training_config.json",
+    "split_manifest.json",
+    "data_diagnostics.json",
+    "environment-85aaed2be3c94433b7e94bbd543cf8d1.json",
+    "training_complete.json",
+    "checkpoint-14289/adapter_config.json"
+  ],
+  "provenance": {
+    "model_id": "Qwen/Qwen2.5-Coder-3B-Instruct",
+    "base_revision": "488639f1ff808d1d3d0ba301aef8c11461451ec5",
+    "adapter_sha256": "7afb1fd9aee71977277dcb98d161960d0c436ca14ead4e66c00850a527da5478",
+    "split_manifest_digest": "33e100cbaf4b43d3d11e58955329cfa5672915e2f77cc8fe11aef6410e238d17",
+    "architecture_source": "config.json in the local base-model weights directory"
+  },
+  "model": {
+    "architecture": "Qwen2ForCausalLM",
+    "num_hidden_layers": 36,
+    "hidden_size": 2048,
+    "intermediate_size": 11008,
+    "num_attention_heads": 16,
+    "num_key_value_heads": 2,
+    "max_position_embeddings": 32768
+  },
+  "training": {
+    "seed": 42,
+    "quantization": "4-bit NF4 with double quantization",
+    "compute_dtype": "bfloat16",
+    "lora_rank": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "lora_target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ],
+    "trainable_parameters": 29933568,
+    "optimizer": "paged_adamw_8bit",
+    "learning_rate": 0.0002,
+    "scheduler": "cosine",
+    "warmup_ratio": 0.03,
+    "weight_decay": 0.01,
+    "per_device_batch_size": 1,
+    "gradient_accumulation_steps": 8,
+    "epochs": 3,
+    "optimizer_steps": 14289,
+    "sequence_cap": 2048,
+    "loss_scope": "JSON answer and EOS; prompt labels masked",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "gpu_memory_mib": 32607
+  },
+  "data": {
+    "source_directory_relative_to_project": "data/contextcrbench/extracted/final_json",
+    "downloaded_json_records": 68938,
+    "exact_normalized_diff_duplicates_removed": 22375,
+    "conflicting_label_groups": 16,
+    "conflicting_label_records_excluded": 45,
+    "retained_records": 46518,
+    "retained_repositories": 99,
+    "split_seed": 42,
+    "split_unit": "repository",
+    "repository_sets_disjoint": true,
+    "splits": {
+      "train": {
+        "examples": 38097,
+        "repositories": 79,
+        "true": 30281,
+        "false": 7816
+      },
+      "validation": {
+        "examples": 3797,
+        "repositories": 10,
+        "true": 3264,
+        "false": 533
+      },
+      "test": {
+        "examples": 4624,
+        "repositories": 10,
+        "true": 3336,
+        "false": 1288
+      }
+    },
+    "language_counts": {
+      "train": {
+        "c_sharp": 5831,
+        "rust": 1394,
+        "go": 9012,
+        "python": 6647,
+        "cpp": 4508,
+        "ruby": 179,
+        "javascript": 1664,
+        "c": 4003,
+        "java": 3571,
+        "typescript": 1288
+      },
+      "validation": {
+        "rust": 1057,
+        "c_sharp": 1495,
+        "go": 451,
+        "typescript": 419,
+        "c": 53,
+        "python": 170,
+        "javascript": 152
+      }
+    },
+    "fraction_at_sequence_cap_after_preprocessing": {
+      "train": 0.6333044597,
+      "validation": 0.5715038188
+    },
+    "fixed_generation_sample": {
+      "partition": "validation",
+      "examples": 200,
+      "repositories": 10,
+      "true": 175,
+      "false": 25
+    },
+    "limitations": [
+      "Exact diff deduplication does not establish absence of near-duplicates.",
+      "Issue/PR chronology and quoted solutions still require audit.",
+      "Cap frequency describes post-truncation lengths, not discarded-token counts.",
+      "Test language counts were not included in this audit summary."
+    ]
+  },
+  "evaluation_protocol": {
+    "input_token_cap": 2016,
+    "max_new_tokens": 32,
+    "do_sample": false
+  },
+  "scope": "Model/data facts only. Prediction scores and loss values are withheld pending evaluation review. Training completion does not imply the entire evaluation workflow is finalized. The learned selector remains planned."
+}

@@ -58,3 +58,27 @@ without changing the NeurIPS style.
 - Two pdfLaTeX passes succeeded. Rendered and visually checked all three pages;
   PDFKit footer selections verify 1/2/3 and empty line-number margins. The old
   course notice is absent, with no overfull boxes or unresolved references.
+
+## Verified model and data revision
+
+- Used the read-only server audit of `qwen3b-qlora-split-v1-run5-local` and
+  `checkpoint-14289`. Recorded artifact names, model revision, adapter identity,
+  split digest, exact counts, and limitations in `model-data-audit.json`.
+- Added the actual decoder architecture, adapter targets and trainable parameter
+  count, saved training settings, answer-only loss, and input/generation caps.
+  The three-epoch training completion is not presented as a finalized evaluation
+  or evidence of prediction improvement.
+- Added the retained/excluded record counts, repository/class split table,
+  language differences, fixed sample composition, and post-truncation cap
+  frequencies. Split class totals and recorded language totals agree.
+- Kept all evaluation scores and loss values unfilled at the user's request.
+  Distinguished the completed adaptation training from the planned selector.
+  No remote program was changed and no new training or inference was started.
+- Compiled twice with pdfLaTeX; the report remains three US Letter pages with
+  resolved citations/table references and no overfull boxes. One underfull
+  vertical-box warning remains; all pages were rendered and inspected, with no
+  clipping, overlap, or unreadable content.
+- PDFKit checks confirm page numbers 1/2/3, empty line-number margins, and no
+  old course notice or Preprint label. Both reference style/checklist copies
+  remain byte-identical to the supplied originals. Source hash was checked
+  before replacing the tracked PDF with the inspected build.
