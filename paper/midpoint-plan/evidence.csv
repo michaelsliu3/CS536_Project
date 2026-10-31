@@ -6,5 +6,6 @@ Repository split and duplicate exclusion,verified,src/evaluation/splits.py and p
 Prompt fields and answer-only objective,verified,src/evaluation/prompts.py and training notebook,Implemented configuration
 Checkpoint recovery and validation cadence,verified,src/training/runtime.py and training notebook,Engineering progress; no speedup claim
 Cloud difficulties,reported,User conversation,Qualitative lessons; no numeric runtime claims
-Paired majority/base/adapter performance,placeholder,Saved cloud predictions; generation and parsing checks pending,Scores withheld at user request; table remains pending
+Saved majority/base/adapter diagnostics,verified,Saved cloud predictions and protocol; evaluation-audit.json,Original strict-protocol scores only; format/truncation and majority-class behavior preclude a review-quality gain claim
 Learned selector accuracy-token improvement,planned,Project proposal,Future experiment only
+Assistant suffix lost in truncated evaluation prompts,verified,CPU reconstruction with saved tokenizer/template; evaluation-audit.json,Observed for 118 of 200 inputs; corrected-generation benefit not tested

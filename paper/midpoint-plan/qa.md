@@ -82,3 +82,43 @@ without changing the NeurIPS style.
   old course notice or Preprint label. Both reference style/checklist copies
   remain byte-identical to the supplied originals. Source hash was checked
   before replacing the tracked PDF with the inspected build.
+
+## Read-only evaluation audit and limitations revision
+
+- Re-read existing server source/configuration and original saved prediction
+  artifacts. Server HEAD remains `c1bcbb9`; its pre-existing dirty notebooks and
+  comparison module were inspected as actual files. Server docs match the
+  already-read local originals. No server program or dependency was changed.
+- Confirmed 200 unique identical IDs per condition, matching labels/repositories/
+  PRs and protocol digests, and raw-output/strict-prediction agreement. Independently
+  recomputed metrics match the saved metrics. The existing offline paired-analysis
+  CLI also accepts the genuine artifacts and reproduces the observed scores.
+- CPU-only reconstruction with the saved chat template and checkpoint tokenizer
+  matches all 200 input lengths/truncation flags and source labels. All 118
+  truncated prompts lose the assistant suffix; all 82 untruncated base outputs
+  contain code fences. No model was loaded for generation or training.
+- Added `evaluation-audit.json` with checksums/counts and `evaluation-audit.md`
+  with the architecture flow, findings, limitations, and untested remedies.
+  Kept raw predictions in temporary local audit storage, outside Git.
+- Filled the original-protocol table as diagnostics, separated class imbalance
+  from format/truncation failure, and avoided a causal claim or quality-gain claim.
+  Proposed training-only balancing, intact chat boundaries, and a new evaluation
+  protocol; none was implemented in program code. Main reviewer remains frozen.
+- Two final pdfLaTeX passes succeed; three pages including references. One
+  underfull vertical-box warning remains, with no overfull boxes, undefined
+  citations, or unresolved references. All final pages rendered and visually
+  inspected. Footer/margin checks confirm 1/2/3, no line numbers or old notice.
+- Final server recheck detected a concurrent notebook save adding two cells;
+  all eleven existing code cells, six other inspected program files, and the
+  three audited validation artifacts were preserved. Recorded this explicitly;
+  no server writes or execution of those new cells occurred in this audit.
+  Re-read the newly updated midpoint plan from the latest GitHub master.
+
+## Successes, challenges, and lessons headings
+
+- Renamed sections to `Progress: Successes and Challenges` and `Lessons Learned
+  and Limitations`. The progress paragraph now explicitly distinguishes completed
+  training/recovery and paired exports from unresolved prediction-quality claims.
+- Two pdfLaTeX passes succeed without warnings, overfull/underfull boxes, or
+  unresolved references. All three pages rendered and visually inspected; the
+  original layout, page numbers 1/2/3, and disabled line numbers are preserved.
