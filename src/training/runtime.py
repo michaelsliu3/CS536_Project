@@ -39,17 +39,86 @@ def packages():
             ['torch','transformers','peft','accelerate','bitsandbytes','datasets','numpy','tokenizers','huggingface-hub','safetensors']}
 
 
-def freeze_contract(directory, contract):
-    path = Path(directory)/'run_contract.json'
+# Provenance and the requested training horizon do not determine model identity.
+PROVENANCE_KEYS = {"additional_epochs", "epochs", "packages", "python", "runtime_sha256", "training_code_hash",
+                   "save_steps", "save_seconds", "local_model_dir", "requested_revision"}
+LEGACY_DEFAULTS = {"optimizer": "paged_adamw_8bit", "weight_decay": 0.01,
+                   "warmup_ratio": 0.03, "scheduler": "cosine",
+                   "max_train_examples": None, "max_validation_examples": None}
+
+
+def training_identity(config):
+    return {k: v for k, v in config.items() if k not in PROVENANCE_KEYS}
+
+
+def select_run(root, name, config):
+    """Reuse a matching configuration in this run family; never overwrite a mismatch.
+
+    Caller must hold the root selection lock until configuration is saved.
+    Legacy contracts are read only for migration; historical provenance stays intact.
+    """
+    root = Path(root)
+    identity = training_identity(config)
+    candidates = [root / name] + sorted(root.glob(name + '--*'))
+    for directory in candidates:
+        path = directory / 'training_config.json'
+        legacy = directory / 'run_contract.json'
+        if path.exists():
+            previous = json.loads(path.read_text())
+        elif legacy.exists():
+            previous = {**LEGACY_DEFAULTS, **json.loads(legacy.read_text())}
+        else:
+            continue
+        if training_identity(previous) == identity:
+            return directory
+    directory = root / name
+    if directory.exists() and any(directory.iterdir()):
+        suffix = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
+        directory = root / (name + '--' + suffix)
+        if directory.exists() and any(directory.iterdir()):
+            directory = root / (name + '--' + suffix + '-' + uuid.uuid4().hex[:8])
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def plan_epochs(directory, additional_epochs, checkpoint=None):
+    """Persist an additional-epoch request so retries keep its original target.
+
+    Called under the run lock. Once the verified checkpoint reaches the target,
+    the next setup invocation starts a new request from that checkpoint's epoch.
+    """
+    import math
+    if isinstance(additional_epochs, bool) or not isinstance(additional_epochs, (int, float)) or not math.isfinite(additional_epochs) or additional_epochs <= 0:
+        raise ValueError("NUM_TRAIN_EPOCHS must be a positive number of additional epochs")
+    path = Path(directory) / 'epoch_plan.json'
+    epoch = 0.0
+    if checkpoint:
+        epoch = float(json.loads((Path(checkpoint) / 'trainer_state.json').read_text()).get('epoch') or 0)
     if path.exists():
-        previous = json.loads(path.read_text())
-        if previous != contract:
-            changed = sorted(k for k in set(previous)|set(contract) if previous.get(k)!=contract.get(k))
-            raise ValueError(f'Run contract changed: {changed}. Restore settings/environment or choose a new RUN_NAME.')
-    else:
-        if list(Path(directory).glob('checkpoint-*')):
-            raise ValueError('Existing checkpoints without a run contract: use a new run directory.')
-        atomic_json(path, contract)
+        plan = json.loads(path.read_text())
+        if epoch + 1e-8 < plan['total_epochs']:
+            return plan
+    plan = {'request_id': uuid.uuid4().hex, 'started_at': now(),
+            'start_epoch': epoch, 'additional_epochs': additional_epochs,
+            'total_epochs': epoch + additional_epochs}
+    atomic_json(path, plan)
+    return plan
+
+
+class ResumeSchedule(TrainerCallback):
+    """Recompute LambdaLR's current rate for an extended total training horizon.
+
+    Trainer restores optimizer moments and scheduler step. Its newly constructed
+    cosine lambda uses the new horizon; synchronize the optimizer before step one.
+    This is a continuation, not equivalent to originally training with that horizon.
+    """
+    def on_train_begin(self, args, state, control, optimizer=None, lr_scheduler=None, **kwargs):
+        if state.global_step and hasattr(lr_scheduler, 'lr_lambdas'):
+            rates = [base * fn(lr_scheduler.last_epoch)
+                     for base, fn in zip(lr_scheduler.base_lrs, lr_scheduler.lr_lambdas)]
+            for group, rate in zip(optimizer.param_groups, rates):
+                group['lr'] = rate
+            lr_scheduler._last_lr = rates
 
 
 def complete_checkpoint(path):
@@ -103,6 +172,9 @@ class RunLogger(TrainerCallback):
 
     def on_save(self,args,state,control,**kwargs):
         path=Path(args.output_dir)/f'checkpoint-{state.global_step}'
+        config = self.directory / "training_config.json"
+        if config.exists():
+            atomic_json(path / "training_config.json", json.loads(config.read_text()))
         complete_checkpoint(path)
         self.last_save=time.monotonic()
         self.event('checkpoint_complete',step=state.global_step,path=str(path))

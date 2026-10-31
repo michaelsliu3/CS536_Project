@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from transformers import Qwen2Config,Qwen2ForCausalLM,TrainingArguments,Trainer,TrainerCallback,default_data_collator
 from peft import LoraConfig,get_peft_model
-from src.training.runtime import RunLogger,latest_checkpoint
+from src.training.runtime import RunLogger,latest_checkpoint,ResumeSchedule
 
 def model():
     torch.manual_seed(42)
@@ -16,7 +16,7 @@ class Interrupt(TrainerCallback):
         if state.global_step==2:raise RuntimeError('simulated interruption')
 
 def args(d):
-    return TrainingArguments(output_dir=d,use_cpu=True,max_steps=4,per_device_train_batch_size=1,learning_rate=.001,
+    return TrainingArguments(output_dir=d,use_cpu=True,max_steps=4,per_device_train_batch_size=1,learning_rate=.001,lr_scheduler_type="cosine",
         save_strategy='steps',save_steps=1,save_total_limit=None,logging_steps=1,report_to='none',seed=42,disable_tqdm=True)
 
 import unittest
@@ -39,3 +39,22 @@ class TrainerResumeTests(unittest.TestCase):
                 if a.requires_grad:torch.testing.assert_close(a,b,rtol=1e-5,atol=1e-7)
             trainer._save_checkpoint(resumed,trial=None)
             print('PASS: interrupted at step 2, resumed to step 4; adapter weights match uninterrupted training; final save API works')
+
+    def test_extend_completed_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            first_args = args(d)
+            first_args.max_steps = 2
+            trainer = Trainer(model=model(), args=first_args, train_dataset=data,
+                data_collator=default_data_collator, callbacks=[RunLogger(d), ResumeSchedule()])
+            trainer.train()
+            checkpoint = latest_checkpoint(d)
+            resumed = model()
+            class Capture(TrainerCallback):
+                def on_train_begin(self, args, state, control, optimizer=None, **kwargs):
+                    self.lr = optimizer.param_groups[0]['lr']
+            capture = Capture()
+            trainer = Trainer(model=resumed, args=args(d), train_dataset=data,
+                data_collator=default_data_collator, callbacks=[RunLogger(d), ResumeSchedule(), capture])
+            trainer.train(resume_from_checkpoint=checkpoint)
+            self.assertEqual(trainer.state.global_step, 4)
+            self.assertGreater(capture.lr, 0)

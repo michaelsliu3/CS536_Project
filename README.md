@@ -180,11 +180,20 @@ CUDA. Set `CHECKPOINT_ROOT` to persistent cloud storage and keep the same `RUN_N
 to resume. Checkpoints save every 10 optimizer steps or about five minutes at the
 next optimizer boundary, retaining three verified complete saves. Resume restores
 adapter, optimizer, scheduler, RNG and Trainer progress. Logs append across sessions.
-A completed run skips training on rerun and can finish interrupted export/evaluation.
+A completed run skips training when its epoch target is already met. Set
+`NUM_TRAIN_EPOCHS=3` after one completed epoch to train three more epochs;
+`TOTAL_NUM_EPOCHS` is computed as 4. An unfinished request keeps its saved target
+on restart. After completion, rerunning the model/setup cell starts another request;
+rerunning only the training cell keeps the existing target.
 
-Keep the same code and environment on resume; skip the installation cell. The run
-contract pins the model revision, packages and split/configuration identity. A new
-experiment needs a new run name. Browser disconnects can leave the kernel running:
+The notebook saves `training_config.json` in the run folder and each full checkpoint.
+Matching training settings reuse the run; changed settings select a new suffixed
+folder automatically. `RUN_NAME` names this family of experiments. Epoch targets,
+logging cadence, package versions and code hashes do not force a new run; environment
+and code provenance are still recorded. Keep compatible packages for loading saved
+optimizer state. `./log_training.sh` follows the selected folder on launch.
+
+Browser disconnects can leave the kernel running:
 reconnect before launching another writer. Persistent storage or a backup is required
 to survive instance/volume deletion; only work through the last intact checkpoint is
 recoverable. See the midpoint plan for the full artifact and metric inventory.
