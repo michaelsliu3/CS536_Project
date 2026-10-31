@@ -6,8 +6,8 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'HELP'
 Usage: ./log_training.sh [RUN_DIRECTORY_OR_LOG_FILE]
 
-Defaults to checkpoints/qwen3b-qlora-split-v1-run1/training_log.jsonl
-and streams only new entries continuously until Ctrl+C.
+Defaults to the RUN_NAME configured in the training notebook and streams
+only new entries continuously until Ctrl+C.
 
 Examples:
   ./log_training.sh
@@ -24,7 +24,42 @@ if (( $# > 1 )); then
   exit 2
 fi
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-log_path="${1:-$PROJECT_ROOT/checkpoints/qwen3b-qlora-split-v1-run1}"
+if (( $# == 0 )); then
+  python_bin="$PROJECT_ROOT/.venv/bin/python"
+  if [[ ! -x "$python_bin" ]]; then
+    python_bin="$(command -v python3 || true)"
+  fi
+  if [[ -z "$python_bin" ]]; then
+    echo "Python is needed to read RUN_NAME from the notebook; pass a run directory explicitly." >&2
+    exit 1
+  fi
+  run_name="$("$python_bin" - "$PROJECT_ROOT/notebooks/qwen3b_qlora_contextcrbench.ipynb" <<'PY'
+import ast
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    notebook = json.load(handle)
+names = []
+for cell in notebook["cells"]:
+    if cell["cell_type"] != "code":
+        continue
+    for node in ast.parse("".join(cell["source"])).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "RUN_NAME" for target in node.targets
+        ):
+            if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
+                raise SystemExit("RUN_NAME must be a string literal in the notebook")
+            names.append(node.value.value)
+if len(names) != 1:
+    raise SystemExit(f"Expected one RUN_NAME assignment in notebook, found {len(names)}")
+print(names[0])
+PY
+)"
+  log_path="$PROJECT_ROOT/checkpoints/$run_name"
+else
+  log_path="$1"
+fi
 if [[ -d "$log_path" || "$log_path" != *.jsonl ]]; then
   log_path="${log_path%/}/training_log.jsonl"
 fi
