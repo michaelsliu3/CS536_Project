@@ -35,10 +35,30 @@ We use ContextCRBench and predict the Boolean merge-status label through a short
 
 The splitter targets 80/10/10 training/validation/test proportions \emph{by repository}; row proportions can differ. It removes exact normalized-diff duplicates and excludes whole duplicate groups with conflicting labels. A saved manifest records membership and exclusions. Repository grouping reduces overlap between related changes across partitions, but does not establish temporal independence. The test partition is reserved for final evaluation after model and protocol choices are fixed. This is holdout validation, not cross-validation.
 
+\paragraph{A simple Python example from the dataset.}
+Training record \texttt{final\_json/63859.json} comes from
+\href{https://github.com/pandas-dev/pandas/pull/53773}{\texttt{pandas-dev/pandas}, PR \#53773}.
+The issue reports a \texttt{TypeError} when nested JSON contains \texttt{null}.
+The excerpt inside the recursive extraction function is copied from its diff; the header, function signature, outer context, and later
+lines are omitted. A leading \texttt{+} marks an added line.
+\begin{quote}
+\begin{verbatim}
++        if data is None:
++            return
+         if isinstance(data, dict):
+             data = [data]
+\end{verbatim}
+\end{quote}
+The added check returns immediately for missing data; otherwise processing continues.
+Our model receives the change and available context and predicts
+\texttt{is\_merged}. The recorded target here is \texttt{False}, kept out of the input;
+it does not prove that this check is incorrect. This is a data-format illustration,
+not a model prediction or a selected success case.
+
 \paragraph{Model and training.}
 The pilot uses Qwen2.5-Coder-3B-Instruct with quantized low-rank adaptation (QLoRA), which trains adapters through a frozen quantized base model \citep{dettmers2023}. The implemented configuration uses 4-bit NF4 with double quantization, adapter rank 16, scaling 32, and dropout 0.05. The learning rate is $2\times10^{-4}$ with a cosine schedule and 3\% warmup; weight decay is 0.01. Batch size one with eight accumulated batches gives an effective batch size of eight, and the maximum sequence length is 2,048 tokens. Loss is computed on the answer tokens. These describe the configured workflow; the submitted report must reconcile them with the saved cloud run configuration.
 
-Training is prepared locally and executed on a cloud NVIDIA GPU. We record the base-model revision, package versions, configuration, and append-only metrics. Full checkpoints include adapter, optimizer, scheduler, random state, and progress. They are requested every ten optimizer steps or approximately five minutes at an optimizer boundary, retaining three verified saves. An interrupted request retains its saved epoch target. Extending a completed run changes the learning-rate horizon and must be reported separately from a run planned with that horizon from the start.
+Training runs on a cloud NVIDIA GPU. We save model revision, package versions, configuration, and persistent metrics. Checkpoints retain adapter, optimizer, scheduler, random state, and progress; interrupted runs resume toward the saved epoch target. Extending a completed schedule is a separate experimental decision.
 
 \paragraph{Comparison protocol.}
 The evaluation notebook compares a constant classifier fixed from training-label counts, the untouched base model, and the same base plus the adapter. All use the same saved validation sample (up to 200 predetermined examples); the two language-model conditions share prompts, truncation, quantization, and deterministic decoding. Invalid JSON is counted as incorrect and reported separately. We will report accuracy, macro-F1, per-class scores, and malformed-output rate, then inspect paired improvements and regressions. Training-time validation loss and teacher-forced completion accuracy are diagnostics, not substitutes for independently generated answers.
@@ -64,9 +84,6 @@ Qwen3B + trained adapter & --- & --- & ---\\
 \noindent\pending{Insert evaluated sample size, class counts, checkpoint identity, completed epochs, and the three methods' scores.}\\
 \pending{Add a compact training/validation curve and discuss paired successes and failures, including negative results.}
 
-Before submission, each number should be traceable to saved predictions or logs. We will report the sample's class balance and repository coverage, distinguish invalid outputs from valid wrong answers, and avoid generalizing one pilot run to all repositories. The current placeholders are a drafting aid; the midpoint submission still needs initial results and a baseline comparison.
-
-\newpage
 \section{Lessons learned, successes, and challenges}
 \paragraph{Successes and lessons.}
 The main engineering progress is a reproducible path from dataset records to saved training state and a common evaluation interface. Freezing the split before training makes the three-way comparison interpretable. Separating evaluation from training allows us to inspect an intermediate adapter without retraining. Persistent logs and verified checkpoints also reduce dependence on a browser session; reconnecting to Jupyter does not necessarily restore its displayed output.
