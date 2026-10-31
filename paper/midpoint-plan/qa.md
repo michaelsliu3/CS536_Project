@@ -113,3 +113,12 @@ without changing the NeurIPS style.
   three audited validation artifacts were preserved. Recorded this explicitly;
   no server writes or execution of those new cells occurred in this audit.
   Re-read the newly updated midpoint plan from the latest GitHub master.
+
+## Successes, challenges, and lessons headings
+
+- Renamed sections to `Progress: Successes and Challenges` and `Lessons Learned
+  and Limitations`. The progress paragraph now explicitly distinguishes completed
+  training/recovery and paired exports from unresolved prediction-quality claims.
+- Two pdfLaTeX passes succeed without warnings, overfull/underfull boxes, or
+  unresolved references. All three pages rendered and visually inspected; the
+  original layout, page numbers 1/2/3, and disabled line numbers are preserved.

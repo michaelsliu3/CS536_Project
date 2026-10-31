@@ -84,8 +84,8 @@ Evaluation compares the untouched base, the trained adapter, and a constant pred
 
 For the frozen-reviewer study, diff-only, all-context, fixed-mask, random, and BM25 similarity policies are implemented. They select among issue text, PR text, and code before and after the change; the diff is always present. Assembled prompts are checked against token budgets. We plan to train a compact Transformer selector from reviewer outcomes on training repositories. The selector has not been trained, and context-policy comparisons remain pending. Fixed masks and budgets will be chosen on validation data.
 
-\section{Pilot diagnostics}
-We checked saved predictions against their protocol and source hashes and recomputed Table~\ref{tab:pilot}. All conditions share 200 IDs and labels. These observations describe the original pipeline's failures; a corrected comparison remains pending. Training loss alone cannot establish better judgments.
+\section{Progress: Successes and Challenges}
+We completed three epochs of QLoRA training with recoverable checkpoints and obtained paired predictions for the same 200 validation IDs. We checked protocol and source hashes and recomputed Table~\ref{tab:pilot}. The main challenge is interpreting the outputs: malformed base answers and majority-only adapter predictions prevent a claim of improved review quality. A corrected comparison remains pending.
 
 \begin{table}[ht]
 \caption{Saved validation pilot under the original strict-JSON protocol ($n=200$). These diagnostics do not establish improved review quality.}
@@ -102,7 +102,7 @@ Qwen3B + trained adapter & 87.5 & 0.467 & 0.0\\
 \end{tabular}
 \end{table}
 
-\section{Limitations and planned remedies}
+\section{Lessons Learned and Limitations}
 \paragraph{Class imbalance.}
 True labels account for 79.5\% of training data and 175 of the 200 evaluation examples. The adapter predicts True on every example, matching the majority baseline with 87.5\% accuracy but zero recall for the 25 False examples. Its macro-F1 is only 0.467. This is consistent with majority-class bias, but we have not established that imbalance caused the behavior. We will test balanced training sampling or example-weighted answer loss, deriving weights from training labels only. Validation macro-F1 and minority-class recall will guide selection; the original validation and test distributions will be preserved.
 
