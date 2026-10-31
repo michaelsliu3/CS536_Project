@@ -48,3 +48,13 @@ without changing the NeurIPS style.
   no text in the left line-number margin on any page; the course notice remains.
 - The compiled PDF remains three US Letter pages with no unresolved citations
   or overfull boxes. The reference style file is unchanged.
+
+## First-page numbering
+
+- Removed the first-page notice locally and applied the normal page style after
+  the title. All three pages now have centered page numbers 1, 2, and 3.
+- Preserved the user's existing author-affiliation edit and the disabled margin
+  line numbers. The reference style file remains unchanged.
+- Two pdfLaTeX passes succeeded. Rendered and visually checked all three pages;
+  PDFKit footer selections verify 1/2/3 and empty line-number margins. The old
+  course notice is absent, with no overfull boxes or unresolved references.
