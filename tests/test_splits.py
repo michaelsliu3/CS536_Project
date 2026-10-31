@@ -10,6 +10,7 @@ class SplitTests(unittest.TestCase):
                           merged=bool(j), diff_hash=f'diff-{i}-{j}', content_hash=f'content-{i}-{j}')
                      for i in range(30) for j in range(2)]
 
+    # Splits are disjoint, cover every row, and do not depend on input order.
     def test_disjoint_complete_and_order_independent(self):
         m=build_manifest(self.rows)
         self.assertEqual(m,build_manifest(self.rows[::-1]))
@@ -20,6 +21,7 @@ class SplitTests(unittest.TestCase):
         self.assertTrue(set(m['demo_ids'])<=sets[1])
         self.assertEqual(set(m['test_generation_ids']),sets[2])
 
+    # Identical diffs collapse to one row; conflicting labels exclude the whole group.
     def test_duplicate_and_conflict(self):
         duplicate=dict(self.rows[0],id='zzz',full_name='other/repo')
         m=build_manifest(self.rows+[duplicate])
@@ -29,6 +31,7 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(m['excluded_conflicting_labels'],[{'ids':['0-0','zzz'],'diff_hash':'diff-0-0'}])
         self.assertFalse({'0-0','zzz'} & set().union(*(set(ids) for ids in m['ids'].values())))
 
+    # Changing the data rejects reuse; changing only file paths does not.
     def test_frozen_change_rejected_and_paths_portable(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'split.json'
@@ -38,6 +41,7 @@ class SplitTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'mismatch'):freeze_manifest(changed,p)
             self.assertEqual(json.loads(p.read_text()),original)
 
+    # Too few repositories or a single-class partition must fail loudly.
     def test_insufficient_groups_and_labels(self):
         with self.assertRaises(ValueError):build_manifest(self.rows[:4])
         with self.assertRaises(ValueError):build_manifest([dict(r,merged=True) for r in self.rows])

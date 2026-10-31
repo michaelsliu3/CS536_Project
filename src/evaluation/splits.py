@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 
+# Normalize merge labels that may arrive as bools, ints, or strings in the released JSON.
 def as_bool(value):
     if isinstance(value, bool):
         return value
@@ -16,6 +17,7 @@ def as_bool(value):
     raise ValueError(f'Invalid merged label: {value!r}')
 
 
+# Order-independent JSON hash; used for deterministic ranking and dataset fingerprints.
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -23,6 +25,7 @@ def digest(value):
 def build_manifest(rows, seed=42, validation_limit=200, demo_limit=12):
     if validation_limit < 1 or demo_limit < 1:
         raise ValueError('Sample limits must be positive')
+    # Sort by stable ID so the result does not depend on input order.
     rows = sorted(rows, key=lambda r: r['id'])
     if len({r['id'] for r in rows}) != len(rows):
         raise ValueError('Duplicate record IDs')
@@ -41,10 +44,12 @@ def build_manifest(rows, seed=42, validation_limit=200, demo_limit=12):
         else:
             retained.append(group[0])
             excluded.extend({'id': r['id'], 'duplicate_of': group[0]['id']} for r in group[1:])
+    # Seeded hash ranking shuffles repositories deterministically without a global RNG.
     rank = lambda value: digest([seed, value])
     repos = sorted({r['full_name'] for r in retained}, key=rank)
     if len(repos) < 10:
         raise ValueError('Need at least 10 repositories for this 80/10/10 protocol; review grouped CV instead.')
+    # 80/10/10 applies to repository counts; row fractions follow repository sizes.
     n_test = max(1, round(len(repos) * .1))
     n_val = max(1, round(len(repos) * .1))
     groups = {'test': repos[:n_test], 'validation': repos[n_test:n_test+n_val], 'train': repos[n_test+n_val:]}
@@ -57,6 +62,7 @@ def build_manifest(rows, seed=42, validation_limit=200, demo_limit=12):
         if len(counts) != 2:
             raise ValueError(f'{name} lacks both classes; review protocol, do not search seeds for favorable scores.')
         summary[name] = {'repositories': len(group), 'rows': len(selected), 'labels': {str(k): v for k,v in counts.items()}}
+    # Generation sample: the first hash-ranked validation IDs, chosen before any labels are inspected.
     val_ids = assignments['validation'][:validation_limit]
     return {'version': 1, 'seed': seed, 'target_repository_fractions': [0.8,0.1,0.1],
             'validation_limit': validation_limit, 'demo_limit': demo_limit,
@@ -71,6 +77,7 @@ def freeze_manifest(rows, path, **kwargs):
     """Reuse only identical manifests; never silently overwrite changed data or settings."""
     path = Path(path)
     manifest = build_manifest(rows, **kwargs)
+    # Reuse only an identical stored manifest; any difference means the data or settings changed.
     if path.exists():
         if json.loads(path.read_text()) != manifest:
             raise ValueError(f'Manifest mismatch: {path}. Use a new version and retrain; do not overwrite historical splits.')

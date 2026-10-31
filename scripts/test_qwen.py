@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 import transformers
 
+# Make the src package importable when this script is run directly from any working directory.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -26,6 +27,7 @@ def main() -> None:
     qwen = QwenCoder()
     load_elapsed = time.perf_counter() - load_start
 
+    # Minimal smoke-test prompt; this is not the project's evaluation prompt.
     messages = [
         {"role": "system", "content": "You are a code reviewer."},
         {
@@ -40,6 +42,7 @@ def main() -> None:
     ]
 
     gen_start = time.perf_counter()
+    # Greedy decoding (temperature 0) so repeated runs give the same answer.
     response = qwen.generate(messages=messages, max_new_tokens=256, temperature=0.0)
     gen_elapsed = time.perf_counter() - gen_start
 

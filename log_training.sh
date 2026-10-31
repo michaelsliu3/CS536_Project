@@ -24,6 +24,7 @@ if (( $# > 1 )); then
   exit 2
 fi
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# No argument: derive the run directory from RUN_NAME in the notebook and the active_run.json pointer.
 if (( $# == 0 )); then
   python_bin="$PROJECT_ROOT/.venv/bin/python"
   if [[ ! -x "$python_bin" ]]; then
@@ -67,8 +68,10 @@ PY
 else
   log_path="$1"
 fi
+# Accept either a run directory or a direct path to the JSONL log.
 if [[ -d "$log_path" || "$log_path" != *.jsonl ]]; then
   log_path="${log_path%/}/training_log.jsonl"
 fi
 printf 'Watching: %s\nPress Ctrl+C to stop watching (training continues).\n' "$log_path"
+# -F follows by name, so the watcher survives late creation or replacement of the log file.
 exec tail -n 0 -F -- "$log_path"

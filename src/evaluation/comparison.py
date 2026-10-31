@@ -8,9 +8,11 @@ from pathlib import Path
 from .splits import as_bool, build_manifest, digest
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 
+# The frozen 3B base that the evaluated adapter must have been trained on.
 MODEL_NAME = 'Qwen/Qwen2.5-Coder-3B-Instruct'
 
 
+# Streaming SHA-256 used to fingerprint adapter weights and the evaluation code itself.
 def file_hash(path):
     h = hashlib.sha256()
     with Path(path).open('rb') as f:
@@ -19,6 +21,7 @@ def file_hash(path):
     return h.hexdigest()
 
 
+# Strict parser: exactly one JSON object with a single Boolean is_merged key. Anything else is invalid.
 def parse_prediction(text):
     def unique(pairs):
         result = {}
@@ -29,6 +32,7 @@ def parse_prediction(text):
         return result
     try:
         value = json.loads(text, object_pairs_hook=unique)
+        # type(...) is bool rejects 0/1, which json.loads would otherwise hand back as ints.
         if isinstance(value, dict) and set(value) == {'is_merged'} and type(value['is_merged']) is bool:
             return value['is_merged']
     except (ValueError, TypeError):
@@ -36,6 +40,7 @@ def parse_prediction(text):
     return None
 
 
+# Constant-classifier baseline, fixed from training labels only.
 def majority_label(labels):
     labels = [as_bool(v) for v in labels]
     if not labels:
@@ -46,14 +51,17 @@ def majority_label(labels):
 def prepare_data(extract_root, manifest_path, run_manifest_path, split='validation', final_test=False):
     if split not in {'validation', 'test'}:
         raise ValueError('Choose validation or test')
+    # The test partition is touched once, after the protocol is frozen; require an explicit flag.
     if split == 'test' and not final_test:
         raise ValueError('Final test requires explicit protocol freeze acknowledgment')
     root = Path(extract_root)
     manifest = json.loads(Path(manifest_path).read_text())
     run = json.loads(Path(run_manifest_path).read_text())
+    # Refuse to evaluate an adapter whose training run did not embed this exact split manifest.
     if run.get('model') != MODEL_NAME or run.get('split_manifest') != manifest:
         raise ValueError('Adapter run must identify Qwen3B and contain this exact split manifest. Historical runs need their original protocol; do not retrofit a new test split.')
     rows, records = [], {}
+    # Rebuild split rows from the extracted dataset; IDs are paths relative to the extract root.
     for path in sorted(root.rglob('*.json')):
         record = json.loads(path.read_text())
         rid = path.relative_to(root).as_posix()
@@ -65,11 +73,13 @@ def prepare_data(extract_root, manifest_path, run_manifest_path, split='validati
                      'content_hash': hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest(),
                      'diff_hash': hashlib.sha256(diff.encode()).hexdigest()})
         records[rid] = path
+    # Recomputing the manifest proves the on-disk data still matches the frozen split.
     reconstructed = build_manifest(rows, seed=manifest['seed'], validation_limit=manifest['validation_limit'], demo_limit=manifest['demo_limit'])
     if reconstructed != manifest:
         raise ValueError('Dataset or split fingerprint mismatch')
     ids = manifest['validation_generation_ids' if split == 'validation' else 'test_generation_ids']
     labels = {r['id']: r['merged'] for r in rows}
+    # The majority baseline uses training labels only, never validation or test.
     constant = majority_label(labels[rid] for rid in manifest['ids']['train'])
     return manifest, run, [(rid, json.loads(records[rid].read_text())) for rid in ids], constant
 
@@ -77,6 +87,7 @@ def prepare_data(extract_root, manifest_path, run_manifest_path, split='validati
 def summarize(rows):
     from sklearn.metrics import accuracy_score, precision_recall_fscore_support
     output = []
+    # One metrics row per model condition; macro-F1 is averaged over the two real classes only.
     for name in ('majority', 'base', 'adapter'):
         selected = [r for r in rows if r['model'] == name]
         if not selected:
@@ -97,23 +108,27 @@ def evaluate_cached(examples, constant, predict, protocol, output_dir):
     """predict(record, use_adapter) returns raw output and timing/token metadata."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    # The protocol fingerprint includes the example IDs and majority label so caches cannot be mixed.
     protocol = {**protocol, 'ids':[rid for rid,_ in examples], 'majority_label':constant}
     path = output_dir / 'protocol.json'
     if path.exists():
         if json.loads(path.read_text()) != protocol:
             raise ValueError('Output directory contains a different evaluation protocol')
     else:
+        # 'x' mode creates the file exactly once; a concurrent writer gets an error instead of a silent overwrite.
         with path.open('x') as f:
             json.dump(protocol, f, indent=2)
     records = []
     for rid, example in examples:
         for name in ('majority','base','adapter'):
+            # One file per (example, model) pair so an interrupted run resumes without recomputation.
             item = output_dir / f'{digest([rid,name])}.json'
             if item.exists():
                 row = json.loads(item.read_text())
                 if row['id'] != rid or row['model'] != name or row['protocol_hash'] != digest(protocol):
                     raise ValueError('Corrupted cache identity')
             else:
+                # Majority predictions cost nothing; the real conditions call the supplied predict() function.
                 if name == 'majority':
                     raw, metadata = json.dumps({'is_merged':constant}), {'latency_seconds':0, 'input_tokens':0, 'output_tokens':0}
                 else:
@@ -124,10 +139,12 @@ def evaluate_cached(examples, constant, predict, protocol, output_dir):
                        'prediction':prediction, 'valid':prediction is not None,
                        'correct':prediction is not None and prediction == as_bool(example['merged']),
                        'protocol_hash':digest(protocol), **metadata}
+                # Write-then-rename keeps the cache consistent if the process dies mid-write.
                 temporary = item.with_suffix('.tmp')
                 temporary.write_text(json.dumps(row, indent=2))
                 temporary.replace(item)
             records.append(row)
+    # Flat exports for plotting notebooks that should not need to load a model.
     (output_dir/'predictions.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in records))
     (output_dir/'metrics.json').write_text(json.dumps(summarize(records),indent=2))
     return records
@@ -139,12 +156,14 @@ class QwenComparison:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from peft import PeftModel
+        # bitsandbytes NF4 requires CUDA; the Mac only consumes the saved metrics.
         if not torch.cuda.is_available():
             raise RuntimeError('Run inference on cloud NVIDIA; use saved metrics on the Mac.')
         adapter_dir = Path(adapter_dir)
         config = json.loads((adapter_dir/'adapter_config.json').read_text())
         if config.get('base_model_name_or_path') != MODEL_NAME:
             raise ValueError('Adapter does not identify the expected Qwen3B base')
+        # disable_adapter() only removes the LoRA deltas; trained biases or saved modules would leak into the "base".
         if config.get('bias', 'none') != 'none' or config.get('modules_to_save'):
             raise ValueError('Matched disabled-adapter baseline requires bias=none and no modules_to_save; load a separate untouched base for other adapters.')
         weights = list(adapter_dir.glob('adapter_model*.safetensors')) + list(adapter_dir.glob('adapter_model*.bin'))
@@ -155,15 +174,18 @@ class QwenComparison:
         self.max_seq_length = max_seq_length
         if max_seq_length <= 32:
             raise ValueError('Sequence length must exceed generation reserve')
+        # Both conditions share one NF4-quantized base, so the adapter is the only difference between them.
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         base = AutoModelForCausalLM.from_pretrained(MODEL_NAME, revision=revision,
             device_map={'':0}, dtype=dtype, quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=dtype))
+        # Record the exact Hub commit so the evaluation can be reproduced later.
         resolved_revision = getattr(base.config, '_commit_hash', None)
         if not resolved_revision:
             raise ValueError('Cannot identify resolved base-model revision')
         self.model = PeftModel.from_pretrained(base, adapter_dir, is_trainable=False).eval()
         self.model.config.use_cache = True
+        # Everything that could change outputs is hashed into the identity stored with the results.
         self.identity = {'model': MODEL_NAME, 'base_revision':resolved_revision,
             'adapter_files':{p.name:file_hash(p) for p in [adapter_dir/'adapter_config.json',*weights]},
             'tokenizer_hash':digest(self.tokenizer.backend_tokenizer.to_str()),
@@ -179,10 +201,14 @@ class QwenComparison:
         prompt = self.tokenizer.apply_chat_template([
             {'role':'system','content':SYSTEM_PROMPT},
             {'role':'user','content':build_user_prompt(example)}], tokenize=False, add_generation_prompt=True)
+        # Tokenize once without truncation to detect whether the prompt exceeded the window.
         full = self.tokenizer(prompt)['input_ids']
+        # Reserve 32 tokens for the JSON answer when truncating the prompt.
         batch = self.tokenizer(prompt,return_tensors='pt',truncation=True,max_length=self.max_seq_length-32).to('cuda')
+        # Synchronize so latency covers the whole generate() call, not just the kernel launch.
         torch.cuda.synchronize()
         started=time.perf_counter()
+        # Same model object for both conditions; disable_adapter() yields the matched base-model baseline.
         with torch.inference_mode(), (nullcontext() if use_adapter else self.model.disable_adapter()):
             result=self.model.generate(**batch,max_new_tokens=32,do_sample=False,
                 pad_token_id=self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.tokenizer.eos_token_id,

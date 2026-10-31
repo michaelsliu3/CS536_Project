@@ -9,6 +9,7 @@ if [[ ! -x "$LLAMAFACTORY_DIR/venv/bin/llamafactory-cli" ]]; then
 fi
 export PATH="$LLAMAFACTORY_DIR/venv/bin:$PATH"
 cd "$LLAMAFACTORY_DIR/source"
+# Bind to localhost only and disable sharing/telemetry.
 export GRADIO_SERVER_NAME=127.0.0.1
 export GRADIO_SERVER_PORT="${GRADIO_SERVER_PORT:-7860}"
 export GRADIO_SHARE=0

@@ -5,16 +5,19 @@ from transformers import Qwen2Config,Qwen2ForCausalLM,TrainingArguments,Trainer,
 from peft import LoraConfig,get_peft_model
 from src.training.runtime import RunLogger,latest_checkpoint,ResumeSchedule
 
+# Tiny randomly initialized Qwen2 with a rank-2 LoRA adapter; fast enough to train on CPU.
 def model():
     torch.manual_seed(42)
     base=Qwen2ForCausalLM(Qwen2Config(vocab_size=20,hidden_size=16,intermediate_size=32,num_hidden_layers=1,num_attention_heads=2,num_key_value_heads=2))
     return get_peft_model(base,LoraConfig(r=2,lora_alpha=4,lora_dropout=0,bias='none',task_type='CAUSAL_LM',target_modules=['q_proj','v_proj']))
 
 data=[{'input_ids':[1,2,3,4], 'attention_mask':[1]*4,'labels':[-100,-100,3,4]} for _ in range(8)]
+# Simulates a kernel crash right after the step-2 checkpoint is written.
 class Interrupt(TrainerCallback):
     def on_save(self,args,state,control,**kwargs):
         if state.global_step==2:raise RuntimeError('simulated interruption')
 
+# Save every step so the interrupted run leaves checkpoint-1 and checkpoint-2 behind.
 def args(d):
     return TrainingArguments(output_dir=d,use_cpu=True,max_steps=4,per_device_train_batch_size=1,learning_rate=.001,lr_scheduler_type="cosine",
         save_strategy='steps',save_steps=1,save_total_limit=None,logging_steps=1,report_to='none',seed=42,disable_tqdm=True)
@@ -22,6 +25,7 @@ def args(d):
 import unittest
 
 class TrainerResumeTests(unittest.TestCase):
+    # Resuming from the last intact checkpoint must reproduce the uninterrupted adapter weights.
     def test_optimizer_and_rng_resume_matches_uninterrupted(self):
         with tempfile.TemporaryDirectory() as d:
             ref=model();Trainer(model=ref,args=args(d+'/reference'),train_dataset=data,data_collator=default_data_collator).train()
@@ -40,6 +44,7 @@ class TrainerResumeTests(unittest.TestCase):
             trainer._save_checkpoint(resumed,trial=None)
             print('PASS: interrupted at step 2, resumed to step 4; adapter weights match uninterrupted training; final save API works')
 
+    # A completed 2-step run extended to 4 steps must resume with a positive learning rate.
     def test_extend_completed_run(self):
         with tempfile.TemporaryDirectory() as d:
             first_args = args(d)
@@ -59,6 +64,7 @@ class TrainerResumeTests(unittest.TestCase):
             self.assertEqual(trainer.state.global_step, 4)
             self.assertGreater(capture.lr, 0)
 
+    # The eval interval saved in an old checkpoint must not override the newly configured one.
     def test_resume_uses_new_validation_interval(self):
         with tempfile.TemporaryDirectory() as d:
             first_args = args(d)

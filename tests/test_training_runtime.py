@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from src.training.runtime import atomic_json, complete_checkpoint, latest_checkpoint, select_run, training_identity, RunLogger
 
 class RuntimeTests(unittest.TestCase):
+    # A corrupted newer checkpoint falls back to the older intact one; no intact checkpoint raises.
     def test_checkpoint_fallback(self):
         with tempfile.TemporaryDirectory() as d:
             for step in [10,20]:
@@ -18,6 +19,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(latest_checkpoint(d).endswith('10'))
             (Path(d)/'checkpoint-10/rng_state.pth').unlink()
             with self.assertRaises(RuntimeError):latest_checkpoint(d)
+    # Same identity reuses the directory; a changed revision selects a sibling. Logs append across sessions.
     def test_config_selection_and_append_logs(self):
         with tempfile.TemporaryDirectory() as d:
             config = {'revision': 'abc', 'epochs': 1}
@@ -38,6 +40,7 @@ class RuntimeTests(unittest.TestCase):
 if __name__=='__main__':unittest.main()
 
 class EpochPlanTests(unittest.TestCase):
+    # An unfinished epoch request keeps its target across retries; a finished one starts a new request.
     def test_additional_epochs_survive_retries_and_extend_after_completion(self):
         from src.training.runtime import plan_epochs
         with tempfile.TemporaryDirectory() as d:
@@ -54,6 +57,7 @@ class EpochPlanTests(unittest.TestCase):
             self.assertEqual(second['total_epochs'], 7)
             self.assertNotEqual(first['request_id'], second['request_id'])
 
+    # Fresh directories plan from epoch 0; bools, NaN, inf, and non-positive counts are rejected.
     def test_fresh_request_and_invalid_counts(self):
         from src.training.runtime import plan_epochs
         with tempfile.TemporaryDirectory() as d:

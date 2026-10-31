@@ -10,18 +10,22 @@ FIELD_CHAR_LIMITS = {
     "snippet_after": 8_000,
 }
 
+# Strip NUL bytes (which break some tokenizers) and apply the per-field character cap.
 def clean_text(value, limit: int) -> str:
     if value is None:
         return ""
     return str(value).replace("\x00", "")[:limit].strip()
 
 def build_user_prompt(example: dict) -> str:
+    # Always-present fields: repository, language, and the diff hunk.
     sections = [
         f"Repository: {clean_text(example['full_name'], 500)}",
         f"Language: {clean_text(example['lang'], 100)}",
         f"Diff hunk:\n{clean_text(example['diff_hunk'], FIELD_CHAR_LIMITS['diff_hunk'])}",
     ]
+    # Optional context fields; empty ones are omitted rather than rendered as blank headers.
     optional = [
+        # "issue_tilte" is a misspelled key that appears in some released records.
         ("Issue title", clean_text(example.get("issue_title", example.get("issue_tilte", "")), 500)),
         ("Issue body", clean_text(example["issue_body"], FIELD_CHAR_LIMITS["issue_body"])),
         ("PR title", clean_text(example["pr_title"], 500)),

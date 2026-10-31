@@ -6,6 +6,7 @@ import sys
 import torch
 
 
+# Mirrors QwenCoder.select_device without importing transformers, so this runs in a bare venv.
 def select_device() -> str:
     if torch.cuda.is_available():
         return "cuda"
@@ -19,6 +20,7 @@ def main() -> None:
     print(f"Python version: {sys.version.split()[0]}")
     print(f"PyTorch version: {torch.__version__}")
 
+    # Report GPU name and memory so environment setup can be verified from the output alone.
     cuda_available = torch.cuda.is_available()
     print(f"CUDA available: {cuda_available}")
     print(f"CUDA version: {torch.version.cuda}")

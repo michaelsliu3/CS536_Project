@@ -5,13 +5,16 @@ from src.evaluation.comparison import parse_prediction, majority_label, evaluate
 from src.evaluation.prompts import build_user_prompt
 
 class ComparisonTests(unittest.TestCase):
+    # Only an exact {"is_merged": <bool>} object counts; fences, ints, extra or duplicate keys are invalid.
     def test_strict_parser(self):
         self.assertIs(parse_prediction('{"is_merged":false}'),False)
         for text in ['```json\n{"is_merged":true}\n```','{"is_merged":1}', '{"is_merged":true,"extra":1}', '{"is_merged":true,"is_merged":false}', 'blah']:
             self.assertIsNone(parse_prediction(text))
+    # An even split resolves to False, matching the notebook's majority rule.
     def test_majority_ties(self):
         self.assertFalse(majority_label([True,False]))
         self.assertTrue(majority_label([True,True,False]))
+    # A second run must hit the cache (no new predict calls); a changed protocol must be rejected.
     def test_resume_invalid_and_identity(self):
         calls=[]
         examples=[('a',{'full_name':'repo','pr_number':1,'merged':False}),('b',{'full_name':'repo','pr_number':2,'merged':True})]
@@ -28,6 +31,7 @@ class ComparisonTests(unittest.TestCase):
             evaluate_cached(examples,False,predict,{'seed':42},d)
             self.assertEqual(len(calls),4)
             with self.assertRaises(ValueError):evaluate_cached(examples,False,predict,{'seed':43},d)
+    # Outcome fields (merged, review comments, verdict) must never change the prompt text.
     def test_labels_not_in_prompt(self):
         record=dict(full_name='repo',lang='py',diff_hunk='+x',issue_title='',issue_body='',pr_title='',pr_body='',snippet_before='',snippet_after='',merged=False)
         before=build_user_prompt(record)

@@ -16,6 +16,7 @@ HF_MIRROR_URL = "https://hf-mirror.com"
 CONNECT_TIMEOUT_S = 5
 
 
+# HEAD request against the site root; any non-5xx response (even 401/403) counts as reachable.
 def _hub_reachable(base_url: str) -> bool:
     probe = f"{base_url.rstrip('/')}/"
     try:
@@ -35,6 +36,7 @@ def _using_mirror(endpoint: str) -> bool:
 def _apply_xet_policy(endpoint: str) -> None:
     """Xet/CAS auth is tied to huggingface.co; mirrors need plain HTTP downloads."""
     if _using_mirror(endpoint):
+        # The env var covers subprocesses and modules imported later; the live module is patched below.
         os.environ["HF_HUB_DISABLE_XET"] = "1"
     mod_name = "huggingface_hub.constants"
     if mod_name not in sys.modules:
@@ -51,10 +53,12 @@ def _patch_hf_constants(endpoint: str) -> None:
     if mod_name not in sys.modules:
         return
     hf_constants = sys.modules[mod_name]
+    # huggingface_hub reads these constants at import time, so patch the live module as well.
     hf_constants.ENDPOINT = endpoint
     hf_constants.HUGGINGFACE_CO_URL_TEMPLATE = (
         endpoint + "/{repo_id}/resolve/{revision}/{filename}"
     )
+    # Allow the mirror host to pass huggingface_hub's URL validation.
     host = urlsplit(endpoint).hostname
     hosts = set(hf_constants.HF_URL_HOSTS)
     if host:
@@ -67,10 +71,12 @@ def configure_hf_cache() -> str:
     if explicit := os.environ.get("HF_HOME"):
         return explicit.rstrip("/")
 
+    # AutoDL cloud instances have a large data disk at /root/autodl-tmp; the system disk is small.
     autodl_tmp = AUTODL_HF_HOME.parent
     if autodl_tmp.is_dir() and os.access(autodl_tmp, os.W_OK):
         AUTODL_HF_HOME.mkdir(parents=True, exist_ok=True)
         os.environ["HF_HOME"] = str(AUTODL_HF_HOME)
+        # Symlink the default cache path so tools that ignore HF_HOME still find the models.
         default_link = Path.home() / ".cache" / "huggingface"
         if not default_link.exists():
             default_link.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +91,7 @@ def configure_hf_cache() -> str:
 def configure_hf_hub_endpoint() -> str:
     """Return the active hub URL and ensure huggingface_hub uses it."""
     configure_hf_cache()
+    # An explicit HF_ENDPOINT wins; otherwise probe the official hub and fall back to the mirror.
     if explicit := os.environ.get("HF_ENDPOINT"):
         endpoint = explicit.rstrip("/")
     elif _hub_reachable(HF_HUB_URL):

@@ -12,10 +12,12 @@ from pathlib import Path
 from transformers import TrainerCallback
 
 
+# ISO-8601 UTC timestamps keep log records comparable across machines and sessions.
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+# Write to a temp file, fsync, then rename so readers never see a partially written JSON file.
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -27,6 +29,7 @@ def atomic_json(path, value):
     tmp.replace(path)
 
 
+# Stream the file in 1 MiB blocks so multi-GB checkpoint shards never need to fit in memory.
 def sha256(path):
     h = hashlib.sha256()
     with Path(path).open('rb') as f:
@@ -34,6 +37,7 @@ def sha256(path):
     return h.hexdigest()
 
 
+# Snapshot the package versions that affect numerical results; stored in each session's environment log.
 def packages():
     return {p: importlib.metadata.version(p) for p in
             ['torch','transformers','peft','accelerate','bitsandbytes','datasets','numpy','tokenizers','huggingface-hub','safetensors']}
@@ -47,6 +51,7 @@ LEGACY_DEFAULTS = {"optimizer": "paged_adamw_8bit", "weight_decay": 0.01,
                    "max_train_examples": None, "max_validation_examples": None}
 
 
+# Everything except the provenance keys defines "the same run"; changing it selects a new directory.
 def training_identity(config):
     return {k: v for k, v in config.items() if k not in PROVENANCE_KEYS}
 
@@ -59,6 +64,7 @@ def select_run(root, name, config):
     """
     root = Path(root)
     identity = training_identity(config)
+    # The plain run name plus any suffixed siblings form one run family.
     candidates = [root / name] + sorted(root.glob(name + '--*'))
     for directory in candidates:
         path = directory / 'training_config.json'
@@ -72,10 +78,12 @@ def select_run(root, name, config):
         if training_identity(previous) == identity:
             return directory
     directory = root / name
+    # A non-empty directory with a different identity must not be reused; derive a deterministic suffix.
     if directory.exists() and any(directory.iterdir()):
         suffix = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
         directory = root / (name + '--' + suffix)
         if directory.exists() and any(directory.iterdir()):
+            # Extremely unlikely suffix collision: add a random tail rather than touching existing data.
             directory = root / (name + '--' + suffix + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=True)
     return directory
@@ -88,16 +96,19 @@ def plan_epochs(directory, additional_epochs, checkpoint=None):
     the next setup invocation starts a new request from that checkpoint's epoch.
     """
     import math
+    # Reject bools (a subclass of int), NaN, inf, and non-positive values.
     if isinstance(additional_epochs, bool) or not isinstance(additional_epochs, (int, float)) or not math.isfinite(additional_epochs) or additional_epochs <= 0:
         raise ValueError("NUM_TRAIN_EPOCHS must be a positive number of additional epochs")
     path = Path(directory) / 'epoch_plan.json'
     epoch = 0.0
     if checkpoint:
         epoch = float(json.loads((Path(checkpoint) / 'trainer_state.json').read_text()).get('epoch') or 0)
+    # An unfinished request keeps its original target even if NUM_TRAIN_EPOCHS was edited since.
     if path.exists():
         plan = json.loads(path.read_text())
         if epoch + 1e-8 < plan['total_epochs']:
             return plan
+    # Start a new request measured from the epoch recorded in the verified checkpoint.
     plan = {'request_id': uuid.uuid4().hex, 'started_at': now(),
             'start_epoch': epoch, 'additional_epochs': additional_epochs,
             'total_epochs': epoch + additional_epochs}
@@ -119,23 +130,28 @@ class ResumeSchedule(TrainerCallback):
             import math
             state.eval_steps = (math.ceil(state.max_steps * args.eval_steps)
                                 if 0 < args.eval_steps < 1 else args.eval_steps)
+        # Only a resumed run needs this; LambdaLR exposes lr_lambdas while other schedulers do not.
         if state.global_step and hasattr(lr_scheduler, 'lr_lambdas'):
             rates = [base * fn(lr_scheduler.last_epoch)
                      for base, fn in zip(lr_scheduler.base_lrs, lr_scheduler.lr_lambdas)]
+            # Overwrite the restored learning rate so the first resumed update follows the new cosine horizon.
             for group, rate in zip(optimizer.param_groups, rates):
                 group['lr'] = rate
             lr_scheduler._last_lr = rates
 
 
+# Verify that all single-GPU Trainer + PEFT files exist, then record their hashes as a completion marker.
 def complete_checkpoint(path):
     path=Path(path)
     required=['trainer_state.json','optimizer.pt','scheduler.pt','rng_state.pth','adapter_config.json']
     if not all((path/p).is_file() for p in required) or not (path/'adapter_model.safetensors').is_file():
         raise ValueError(f'Incomplete single-GPU checkpoint: {path}')
+    # Hash every file except the marker itself; valid_checkpoint() rechecks these on resume.
     checks={p.name:sha256(p) for p in path.iterdir() if p.is_file() and p.name!='complete.json'}
     atomic_json(path/'complete.json',checks)
 
 
+# A checkpoint is trusted only if its marker exists and every recorded hash still matches.
 def valid_checkpoint(path):
     try:
         checks=json.loads((path/'complete.json').read_text())
@@ -144,40 +160,48 @@ def valid_checkpoint(path):
 
 
 def latest_checkpoint(directory):
+    # Newest first by step number; fall back to older intact checkpoints if the newest is partial.
     candidates=sorted(Path(directory).glob('checkpoint-*'),key=lambda p:int(p.name.split('-')[-1]),reverse=True)
     for path in candidates:
         if valid_checkpoint(path):return str(path)
+    # Checkpoints exist but none verify: stop rather than silently retraining from scratch.
     if candidates:raise RuntimeError('No verified complete checkpoint. Inspect storage; refusing to restart training silently.')
     return None
 
 
+# Trainer callback: append-only JSONL telemetry, time-based checkpoint triggers, and retention pruning.
 class RunLogger(TrainerCallback):
     def __init__(self, directory, save_seconds=300, keep=3, session=None):
         self.directory=Path(directory);self.directory.mkdir(parents=True,exist_ok=True)
         self.save_seconds=save_seconds;self.keep=keep;self.session=session or uuid.uuid4().hex
         self.started=time.monotonic();self.last_save=self.started
 
+    # Each record carries the session ID so steps replayed after a resume can be told apart.
     def event(self, kind, **data):
         record={'timestamp_utc':now(),'session':self.session,'event':kind,
                 'session_elapsed_seconds':time.monotonic()-self.started,**data}
+        # Append and fsync so a killed kernel loses at most the record being written.
         with (self.directory/'training_log.jsonl').open('a') as f:
             f.write(json.dumps(record,default=str)+'\n');f.flush();os.fsync(f.fileno())
 
     def on_log(self,args,state,control,logs=None,**kwargs):
         import torch
         memory={}
+        # Attach GPU memory counters so peak usage is visible in the log without extra tooling.
         if torch.cuda.is_available():
             memory={'cuda_allocated_bytes':torch.cuda.memory_allocated(),
                     'cuda_reserved_bytes':torch.cuda.memory_reserved(),
                     'cuda_peak_allocated_bytes':torch.cuda.max_memory_allocated()}
         self.event('metrics', **{'step':state.global_step,'epoch':state.epoch,**(logs or {}),**memory})
 
+    # Request a save once save_seconds have elapsed; Trainer performs it at the next step boundary.
     def on_step_end(self,args,state,control,**kwargs):
         if time.monotonic()-self.last_save>=self.save_seconds:control.should_save=True
         return control
 
     def on_save(self,args,state,control,**kwargs):
         path=Path(args.output_dir)/f'checkpoint-{state.global_step}'
+        # Copy the run configuration into the checkpoint so it is self-describing.
         config = self.directory / "training_config.json"
         if config.exists():
             atomic_json(path / "training_config.json", json.loads(config.read_text()))
@@ -189,6 +213,7 @@ class RunLogger(TrainerCallback):
                         key=lambda p:int(p.name.split('-')[-1]),reverse=True)
         for old in complete[self.keep:]:shutil.rmtree(old)
 
+    # Marks normal completion; if this event is missing from the log, the loop was interrupted.
     def on_train_end(self,args,state,control,**kwargs):
         self.event('training_loop_finished',step=state.global_step,epoch=state.epoch)
 
@@ -199,6 +224,7 @@ def acquire_run_lock(directory):
     path=Path(directory)/'.run.lock'
     handle=path.open('a+')
     try:
+        # Non-blocking exclusive lock: fail immediately if another kernel holds this directory.
         fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:
         handle.close()
