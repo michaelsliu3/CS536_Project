@@ -19,6 +19,7 @@
 \author{Michael Liu (msl196) \quad Ruiding Feng (rf711) \quad Li-Hua Peng (lp880)\\
 Machine Learning II / CS536, Rutgers University}
 \begin{document}
+\nolinenumbers
 \maketitle
 \begin{abstract}
 We study whether selecting context for each code change can reduce the input cost of LLM-assisted code review without reducing accuracy. Our planned method trains a small context selector while keeping the reviewer fixed. So far, we have built a repository-based data split, a Qwen3B QLoRA training workflow, and paired evaluation tools. We have also implemented fixed, random, and similarity-based context policies. Much of our work has involved making cloud runs recoverable and checking that the evaluation compares the same examples. Paired model results are still being collected, so we cannot yet assess the benefit of adaptation or context selection.

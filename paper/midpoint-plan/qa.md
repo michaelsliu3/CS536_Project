@@ -39,3 +39,12 @@ without changing the NeurIPS style.
 - Included implemented context-policy and offline-analysis progress. Synthetic
   analysis tests are distinguished from the cloud predictions still needed for
   the results table; no artificial scores were inserted.
+
+## Line-number removal
+
+- Disabled margin line numbering in `main.tex` at the user's request; body text,
+  author details, section numbering, and page numbering are unchanged.
+- Recompiled twice and visually checked all three pages. PDFKit selection found
+  no text in the left line-number margin on any page; the course notice remains.
+- The compiled PDF remains three US Letter pages with no unresolved citations
+  or overfull boxes. The reference style file is unchanged.

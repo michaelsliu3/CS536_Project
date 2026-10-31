@@ -5,8 +5,9 @@ not the older final-report plan under `paper/plan/`.
 
 The original `neurips_2026.sty` and `checklist.tex` are copied unchanged from
 `docs/report_format/neurips_2026/`. The report uses `nonanonymous` mode to retain
-the supplied template's layout and line numbering while showing the team names
-and NetIDs. A local notice override in `main.tex` identifies this as the CS536
+the supplied template's layout while showing the team names and NetIDs. Line
+numbering is disabled in `main.tex` at the user's request. A local notice
+override identifies this as the CS536
 midpoint report rather than a preprint or conference submission. Margins, fonts,
 and the reference style file are unchanged. The conference checklist is kept as
 a reference but is not included in the three-page course check-in.
