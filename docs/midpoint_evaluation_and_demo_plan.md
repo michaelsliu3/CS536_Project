@@ -206,3 +206,35 @@ Verification includes synthetic checkpoint corruption/fallback and append-only l
 Set `NUM_TRAIN_EPOCHS` to the additional epochs requested. After one completed epoch, setting it to 3 computes `TOTAL_NUM_EPOCHS=4`. `epoch_plan.json` preserves an unfinished request across crashes, even if the additional count is edited. Once the verified checkpoint reaches the target, rerunning the model/setup cell starts a new additional-epoch request; rerunning only the training cell retains its existing target. `TOTAL_NUM_EPOCHS` is calculated automatically, not manually configured. Matching completed runs are skipped only when their verified checkpoint has reached this target. Trainer restores optimizer moments, RNG and data position. The cosine schedule and warmup are recalculated for the new total horizon, and the restored optimizer learning rate is synchronized before the first resumed update. Extending a completed schedule can raise the learning rate; this is a continuation experiment, not equivalent to having planned four epochs originally. Session config snapshots preserve this history for reporting.
 
 Each verified checkpoint includes its training configuration. A root `checkpoints/active_run.json` pointer lets `log_training.sh` find the selected directory, including custom storage roots. Restart the watcher after selecting another run. Corrupt checkpoints and concurrent writers still produce errors rather than losing work silently. CPU tests cover interrupted recovery and extending a completed schedule; CUDA training has not been run for this change.
+
+### Local base loading for paired evaluation (October 31)
+
+The comparison notebook accepts `LOCAL_MODEL_DIR` and the training run manifest.
+For uploaded snapshots, it loads the base offline and accepts the adapter's original
+local path when it agrees with training provenance. It checks the recorded model,
+revision, weight-index fingerprint and shard presence. The recorded revision is a
+training-manifest assertion, not independently verified Hub provenance; the index
+hash alone does not verify weight contents. Actual local weight/config hashes are
+recorded in the evaluation protocol to prevent mixing caches. Set the path to
+`None` only for Hub loading. No adapter metadata needs editing or retraining.
+
+### Saved-evidence dashboard (October 31)
+
+The evaluation notebook now plots retained split/sample class counts and proportions,
+predicted-label distributions, validity outcomes, confusion matrices including invalid
+answers, per-class recall, paired outcomes, training/validation loss, learning rate,
+gradient norm, teacher-forced completion metrics, GPU memory and logged generation
+metrics. It exports PNG/PDF figures and supporting CSVs under the evaluation output's
+`figures/` directory without loading a model. Replayed steps retain the last observed
+value per metric; raw logs remain unchanged. Missing logs are reported explicitly.
+
+Inspection of the cloud `qwen3b_validation_v1` cache found all 200 base outputs invalid
+under strict JSON scoring (accuracy and macro-F1 zero), including code continuations
+and fenced JSON. The adapter predicted True for all 200 examples, matching the
+training-majority classifier at 87.5% accuracy and approximately 0.4667 macro-F1;
+the sample contains 175 True and 25 False labels. These are that cache's measurements,
+not the separate training-notebook generation results. Right-truncating formatted
+chat can remove the assistant generation marker; 58% of base responses hit the
+32-token cap. These are protocol concerns, not evidence of zero underlying base
+classification ability. Repairing prompt truncation requires a separately versioned
+paired run; the dashboard deliberately preserves original scoring and cached evidence.

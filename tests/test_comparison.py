@@ -1,10 +1,31 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
-from src.evaluation.comparison import parse_prediction, majority_label, evaluate_cached, summarize
+from src.evaluation.comparison import parse_prediction, majority_label, evaluate_cached, summarize, resolve_base_source, file_hash, MODEL_NAME
 from src.evaluation.prompts import build_user_prompt
 
 class ComparisonTests(unittest.TestCase):
+    def test_local_base_provenance(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'config.json').write_text('{}')
+            (root/'weights.safetensors').write_bytes(b'weights')
+            index = root/'model.safetensors.index.json'
+            index.write_text(json.dumps({'weight_map': {'x': 'weights.safetensors'}}))
+            run = {'model': MODEL_NAME, 'base_revision': 'pinned', 'training_config': {
+                'local_model_dir': '/old/location', 'local_model_index_sha256': file_hash(index)}}
+            config = {'base_model_name_or_path': '/old/location'}
+            source, identity = resolve_base_source(config, 'pinned', root, run)
+            self.assertEqual(source, str(root.resolve()))
+            self.assertIn('weights.safetensors', identity['base_files'])
+            with self.assertRaises(ValueError): resolve_base_source(config, 'other', root, run)
+            with self.assertRaises(ValueError): resolve_base_source({'base_model_name_or_path': '/wrong'}, 'pinned', root, run)
+            (root/'weights.safetensors').unlink()
+            with self.assertRaises(ValueError): resolve_base_source(config, 'pinned', root, run)
+            index.write_text('{}')
+            with self.assertRaises(ValueError): resolve_base_source(config, 'pinned', root, run)
+
     # Only an exact {"is_merged": <bool>} object counts; fences, ints, extra or duplicate keys are invalid.
     def test_strict_parser(self):
         self.assertIs(parse_prediction('{"is_merged":false}'),False)

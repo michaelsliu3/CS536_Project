@@ -150,9 +150,39 @@ def evaluate_cached(examples, constant, predict, protocol, output_dir):
     return records
 
 
+def resolve_base_source(adapter_config, revision, local_model_dir=None, run=None):
+    """Validate local provenance without rewriting the adapter's original metadata."""
+    recorded = adapter_config.get('base_model_name_or_path')
+    if local_model_dir is None:
+        if recorded != MODEL_NAME:
+            raise ValueError('Adapter was trained from a local path; supply local_model_dir and its run manifest.')
+        return MODEL_NAME, {}
+    root = Path(local_model_dir).expanduser().resolve()
+    run = run or {}
+    training = run.get('training_config', {})
+    if run.get('model') != MODEL_NAME or run.get('base_revision') != revision:
+        raise ValueError('Local base requires matching model and revision in the training run manifest')
+    if recorded not in (MODEL_NAME, training.get('local_model_dir')):
+        raise ValueError('Adapter base path does not match training provenance')
+    index = root / 'model.safetensors.index.json'
+    expected = training.get('local_model_index_sha256')
+    if not expected or not index.is_file() or file_hash(index) != expected:
+        raise ValueError('Local base weight index does not match the training fingerprint')
+    shards = sorted(set(json.loads(index.read_text())['weight_map'].values()))
+    for name in shards:
+        shard = (root / name).resolve()
+        if not shard.is_relative_to(root) or not shard.is_file():
+            raise ValueError(f'Missing or invalid local base shard: {name}')
+    # The index fingerprint is training evidence, not a checksum of weight contents.
+    # Hash actual local weights into the evaluation protocol to prevent cache mixing.
+    return str(root), {'base_source': 'local', 'base_revision_source': 'training_manifest',
+                       'base_files': {name: file_hash(root / name)
+                                      for name in ['config.json', 'model.safetensors.index.json', *shards]}}
+
+
 class QwenComparison:
     """One frozen base, unmerged adapter; disable_adapter provides the matched baseline."""
-    def __init__(self, adapter_dir, max_seq_length=2048, revision='main'):
+    def __init__(self, adapter_dir, max_seq_length=2048, revision='main', local_model_dir=None, run=None):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from peft import PeftModel
@@ -161,32 +191,31 @@ class QwenComparison:
             raise RuntimeError('Run inference on cloud NVIDIA; use saved metrics on the Mac.')
         adapter_dir = Path(adapter_dir)
         config = json.loads((adapter_dir/'adapter_config.json').read_text())
-        if config.get('base_model_name_or_path') != MODEL_NAME:
-            raise ValueError('Adapter does not identify the expected Qwen3B base')
+        source, source_identity = resolve_base_source(config, revision, local_model_dir, run)
         # disable_adapter() only removes the LoRA deltas; trained biases or saved modules would leak into the "base".
         if config.get('bias', 'none') != 'none' or config.get('modules_to_save'):
             raise ValueError('Matched disabled-adapter baseline requires bias=none and no modules_to_save; load a separate untouched base for other adapters.')
         weights = list(adapter_dir.glob('adapter_model*.safetensors')) + list(adapter_dir.glob('adapter_model*.bin'))
         if not weights:
             raise FileNotFoundError('Adapter weights missing')
-        self.tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
+        self.tokenizer = AutoTokenizer.from_pretrained(adapter_dir, local_files_only=True)
         self.tokenizer.truncation_side = 'right'
         self.max_seq_length = max_seq_length
         if max_seq_length <= 32:
             raise ValueError('Sequence length must exceed generation reserve')
         # Both conditions share one NF4-quantized base, so the adapter is the only difference between them.
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-        base = AutoModelForCausalLM.from_pretrained(MODEL_NAME, revision=revision,
+        base = AutoModelForCausalLM.from_pretrained(source, revision=revision, local_files_only=local_model_dir is not None,
             device_map={'':0}, dtype=dtype, quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=dtype))
         # Record the exact Hub commit so the evaluation can be reproduced later.
-        resolved_revision = getattr(base.config, '_commit_hash', None)
+        resolved_revision = revision if local_model_dir is not None else getattr(base.config, '_commit_hash', None)
         if not resolved_revision:
             raise ValueError('Cannot identify resolved base-model revision')
         self.model = PeftModel.from_pretrained(base, adapter_dir, is_trainable=False).eval()
         self.model.config.use_cache = True
         # Everything that could change outputs is hashed into the identity stored with the results.
-        self.identity = {'model': MODEL_NAME, 'base_revision':resolved_revision,
+        self.identity = {**source_identity, 'model': MODEL_NAME, 'base_revision':resolved_revision,
             'adapter_files':{p.name:file_hash(p) for p in [adapter_dir/'adapter_config.json',*weights]},
             'tokenizer_hash':digest(self.tokenizer.backend_tokenizer.to_str()),
             'chat_template':self.tokenizer.chat_template, 'max_seq_length':max_seq_length,
