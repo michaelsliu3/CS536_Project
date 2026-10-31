@@ -15,6 +15,12 @@ The central experiment keeps Qwen frozen and trains a compact context selector.
 feasibility test requested for the 3B reviewer; it is not the main method and
 defaults to 3B QLoRA on NVIDIA CUDA, with notebook preparation on the M4 Max.
 
+Context-selection baselines (`diff_only`, `all_context`, `fixed`, `random`, and
+BM25 `similarity`) and a local tokenizer preview are available in
+[src/context_selection](src/context_selection/README.md). They enforce measured
+chat-token budgets without model inference; see that guide for usage, tests,
+and evaluation limits.
+
 ## Repository Layout
 
 ```
