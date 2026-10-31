@@ -84,7 +84,7 @@ Evaluation compares the untouched base, the trained adapter, and a constant pred
 
 For the frozen-reviewer study, diff-only, all-context, fixed-mask, random, and BM25 similarity policies are implemented. They select among issue text, PR text, and code before and after the change; the diff is always present. Assembled prompts are checked against token budgets. We plan to train a compact Transformer selector from reviewer outcomes on training repositories. The selector has not been trained, and context-policy comparisons remain pending. Fixed masks and budgets will be chosen on validation data.
 
-\section{Progress: Successes and Challenges}
+\section{Progress and Preliminary Findings}
 We completed three epochs of QLoRA training with recoverable checkpoints and obtained paired predictions for the same 200 validation IDs. We checked protocol and source hashes and recomputed Table~\ref{tab:pilot}. The main challenge is interpreting the outputs: malformed base answers and majority-only adapter predictions prevent a claim of improved review quality. A corrected comparison remains pending.
 
 \begin{table}[ht]
