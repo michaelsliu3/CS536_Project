@@ -4,9 +4,13 @@ Main source: `main.tex`. This is the <=3-page November 2 midpoint draft,
 not the older final-report plan under `paper/plan/`.
 
 The original `neurips_2026.sty` and `checklist.tex` are copied unchanged from
-`docs/report_format/neurips_2026/`. The report uses `preprint` mode so the team
-names are visible without implying acceptance. The conference checklist is kept
-as a reference but is not included in the three-page course check-in.
+`docs/report_format/neurips_2026/`. The report uses `nonanonymous` mode to retain
+the supplied template's layout while showing the team names and NetIDs. Line
+numbering is disabled in `main.tex` at the user's request. The conference notice
+is suppressed, and the first page uses a centered page number, like the later
+pages. Margins, fonts,
+and the reference style file are unchanged. The conference checklist is kept as
+a reference but is not included in the three-page course check-in.
 
 ## Fill before submission
 
@@ -40,8 +44,18 @@ The current user request explicitly authorizes a short draft with placeholders;
 full-paper IEEE, literature-count and experiment quotas from the empirical skill
 are inapplicable to this three-page course deliverable.
 
-Open this folder in Codex to use the built-in LaTeX editor/compiler. A local
-standalone PDF can also be generated with `tectonic --keep-logs main.tex`.
+Compile from this directory using the installed LaTeX distribution. Run twice
+to resolve citations and the table reference:
+
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+```
+
+The revised draft uses the full research title and the member NetIDs supplied
+with the template. Its prose distinguishes implemented code, reported cloud
+workflow issues, pending measurements, and the planned learned selector. The
+tool acknowledgment remains included.
 
 ## Dataset illustration
 

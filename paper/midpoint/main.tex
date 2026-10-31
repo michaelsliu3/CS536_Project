@@ -1,6 +1,6 @@
 \documentclass{article}
 \PassOptionsToPackage{numbers,sort&compress}{natbib}
-\usepackage[preprint]{neurips_2026}
+\usepackage[nonanonymous]{neurips_2026}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{hyperref}
@@ -10,37 +10,41 @@
 \usepackage{microtype}
 \usepackage{xcolor}
 \hypersetup{hidelinks}
-\newcommand{\pending}[1]{\textbf{[Pending: #1]}}
-\title{Learning to Select Context for Code Review:\\Midpoint Progress Report}
-\author{Michael Liu \quad Ruiding Feng \quad Li-hua Peng\\
-Machine Learning II / CS536, Rutgers University}
+% Suppress the conference notice; number the first page like the later pages.
+\makeatletter
+\renewcommand{\@notice}{}
+\makeatother
+\newcommand{\pending}[1]{\textbf{[To complete: #1]}}
+\title{Learning to Select Context per Code Diff:\\An Accuracy--Cost Trade-off for LLM Code Review}
+\author{Michael Liu (msl196) \quad Ruiding Feng (rf711) \quad Li-Hua Peng (lp880)\\
+Machine Learning II, Rutgers University}
 \begin{document}
+\nolinenumbers
 \maketitle
+\thispagestyle{plain}
 \begin{abstract}
-Our project asks whether a learned selector can choose useful context for each code change while preserving a language model's review accuracy and reducing input tokens. The main study will keep the reviewer frozen and train a smaller context selector. At the midpoint, we have implemented repository-based data splitting, a preliminary Qwen3B adaptation workflow, checkpoint recovery, and a separate comparison notebook. This report describes that infrastructure, the planned baseline comparison, and lessons from cloud training. Quantitative evaluation remains pending; the result placeholders below do not establish an improvement in review quality or token efficiency.
+We study whether selecting context for each code change can reduce the input cost of LLM-assisted code review without reducing accuracy. Our planned method trains a small context selector while keeping the reviewer fixed. So far, we have built a repository-based data split, a Qwen3B QLoRA training workflow, and paired evaluation tools. We have also implemented fixed, random, and similarity-based context policies. Much of our work has involved making cloud runs recoverable and checking that the evaluation compares the same examples. Paired model results are still being collected, so we cannot yet assess the benefit of adaptation or context selection.
 \end{abstract}
-\noindent\textbf{Repository:} \url{https://github.com/michaelsliu3/CS536_Project}\\
-\textbf{Milestone:} November 2, 2026 midpoint check-in; draft with results pending.
+\noindent\textbf{Repository:} \url{https://github.com/michaelsliu3/CS536_Project}
 
-\section{Research question and current scope}
-Large language models can assist code review by examining proposed changes and related information. A change may need an issue description, a pull request (PR) description, or surrounding code to be understood. Supplying every field also increases the input length. ContextCRBench provides code changes with linked textual and code context \citep{hu2025}. Selective retrieval has also been studied for repository-level code completion \citep{wu2024}; whether a separate selector helps our code-review task remains an empirical question.
+\section{Research question}
+A code reviewer may need an issue description to understand a change's purpose or nearby code to see how it will be used. Giving the model every available field uses more tokens, even when some fields add little useful information. We ask: \emph{Can a learned selector choose context for each code change while maintaining review accuracy and using fewer tokens than fixed context choices?}
 
-Our central question is: \emph{Can a small trained selector choose context separately for each code change, maintaining review accuracy while using fewer tokens than fixed context choices?} Following instructor feedback, we focus on the accuracy--cost trade-off. Robustness is outside the core scope, and transfer to another reviewer is optional. The planned success criterion is accuracy within one percentage point of the best fixed strategy with at least 30\% fewer extra context tokens, or higher accuracy at a matched token budget. These are targets, not measured outcomes.
+We use ContextCRBench because it provides code changes together with issue, pull request (PR), and surrounding-code context \citep{hu2025}. Repoformer studies selective retrieval for code completion \citep{wu2024}; our question is whether a separate selector can help with code-review judgments. Following instructor feedback, we focus on this accuracy--cost trade-off. Robustness is outside the core study, and transfer to another reviewer is optional.
 
-The current Qwen3B fine-tuning run is a preliminary experiment for establishing the data, training, and evaluation workflow. It asks whether adapting a reviewer improves its merge-status predictions. This differs from the proposed main method, which keeps the reviewer unchanged and trains a context selector. Completing the pilot will not by itself answer the context-selection question.
+Our target is accuracy within one percentage point of the best fixed strategy with at least 30\% fewer extra context tokens, or higher accuracy at a matched budget. We first built a Qwen3B adaptation pilot to work through the data and evaluation pipeline. That pilot asks whether fine-tuning improves merge-status prediction. The main experiment will instead keep Qwen frozen and train the selector.
 
-\section{Implemented pilot and evaluation protocol}
-\paragraph{Data and task.}
-We use ContextCRBench and predict the Boolean merge-status label through a short JSON answer. Merge status is a proxy for code quality: a merged change is not necessarily defect-free, and a rejected change may have nontechnical reasons. Prompts include the code change and available issue, PR, and surrounding-code fields, while excluding the explicit label and review-answer fields. Field availability before the decision, indirect answer leakage, and near-duplicates still require manual audit.
+\section{Data and experimental setup}
+\paragraph{Task and split.}
+The reviewer returns a short JSON answer with the Boolean field \texttt{is\_merged}. Merge status is the benchmark target, but it is only a proxy for code quality: a merged change can contain a bug, and a rejected change can have nontechnical reasons. We exclude explicit outcome fields and human review answers from prompts. We still need to check whether issue and PR text contains later edits or quoted solutions.
 
-The splitter targets 80/10/10 training/validation/test proportions \emph{by repository}; row proportions can differ. It removes exact normalized-diff duplicates and excludes whole duplicate groups with conflicting labels. A saved manifest records membership and exclusions. Repository grouping reduces overlap between related changes across partitions, but does not establish temporal independence. The test partition is reserved for final evaluation after model and protocol choices are fixed. This is holdout validation, not cross-validation.
+Our split targets 80/10/10 training/validation/test proportions by repository, keeping related PR changes together. The proportions refer to repositories, so example counts can differ. The split code removes exact normalized-diff duplicates and excludes duplicate groups with conflicting labels. A saved manifest fixes membership and records exclusions. We use validation for development and reserve the test repositories for the final comparison. Grouping by repository does not by itself rule out near-duplicates or temporal leakage.
 
-\paragraph{A simple Python example from the dataset.}
-Training record \texttt{final\_json/63859.json} comes from
+\paragraph{A Python example.}
+Training record \texttt{final\_json/63859.json} is from
 \href{https://github.com/pandas-dev/pandas/pull/53773}{\texttt{pandas-dev/pandas}, PR \#53773}.
-The issue reports a \texttt{TypeError} when nested JSON contains \texttt{null}.
-The excerpt inside the recursive extraction function is copied from its diff; the header, function signature, outer context, and later
-lines are omitted. A leading \texttt{+} marks an added line.
+Its issue describes a \texttt{TypeError} when nested JSON contains \texttt{null}.
+The following four lines are copied from the diff; the header, function signature, and other lines are omitted. A leading \texttt{+} marks an addition.
 \begin{quote}
 \begin{verbatim}
 +        if data is None:
@@ -49,25 +53,23 @@ lines are omitted. A leading \texttt{+} marks an added line.
              data = [data]
 \end{verbatim}
 \end{quote}
-The added check returns immediately for missing data; otherwise processing continues.
-Our model receives the change and available context and predicts
-\texttt{is\_merged}. The recorded target here is \texttt{False}, kept out of the input;
-it does not prove that this check is incorrect. This is a data-format illustration,
-not a model prediction or a selected success case.
+The new guard returns before processing \texttt{None}. The dataset label is \texttt{False}, which records merge status rather than whether this guard is a correct fix. We show the example to explain the input format, not as evidence of model performance. The label is kept out of the prompt.
 
-\paragraph{Model and training.}
-The pilot uses Qwen2.5-Coder-3B-Instruct with quantized low-rank adaptation (QLoRA), which trains adapters through a frozen quantized base model \citep{dettmers2023}. The implemented configuration uses 4-bit NF4 with double quantization, adapter rank 16, scaling 32, and dropout 0.05. The learning rate is $2\times10^{-4}$ with a cosine schedule and 3\% warmup; weight decay is 0.01. Batch size one with eight accumulated batches gives an effective batch size of eight, and the maximum sequence length is 2,048 tokens. Loss is computed on the answer tokens. These describe the configured workflow; the submitted report must reconcile them with the saved cloud run configuration.
+\paragraph{Training pilot.}
+The notebook is configured for Qwen2.5-Coder-3B-Instruct with QLoRA \citep{dettmers2023}: 4-bit NF4, double quantization, adapter rank 16, scaling 32, and dropout 0.05. It uses a learning rate of $2\times10^{-4}$, a cosine schedule with 3\% warmup, and weight decay 0.01. Batch size one with eight accumulation steps gives an effective batch size of eight on one GPU. The sequence cap is 2,048 tokens, and loss is computed on answer tokens. We need to confirm the completed run's settings and epoch count against its saved cloud artifacts.
 
-Training runs on a cloud NVIDIA GPU. We save model revision, package versions, configuration, and persistent metrics. Checkpoints retain adapter, optimizer, scheduler, random state, and progress; interrupted runs resume toward the saved epoch target. Extending a completed schedule is a separate experimental decision.
+Cloud checkpoints save the adapter, optimizer, scheduler, random state, and training progress. Configuration and logs are preserved across sessions. Restarting a run restores its saved epoch target; extending a completed run changes the learning-rate schedule and must be recorded as a continuation experiment.
 
-\paragraph{Comparison protocol.}
-The evaluation notebook compares a constant classifier fixed from training-label counts, the untouched base model, and the same base plus the adapter. All use the same saved validation sample (up to 200 predetermined examples); the two language-model conditions share prompts, truncation, quantization, and deterministic decoding. Invalid JSON is counted as incorrect and reported separately. We will report accuracy, macro-F1, per-class scores, and malformed-output rate, then inspect paired improvements and regressions. Training-time validation loss and teacher-forced completion accuracy are diagnostics, not substitutes for independently generated answers.
+\paragraph{Evaluation and context policies.}
+The evaluation notebook compares the untouched base, the base with its trained adapter, and a constant prediction chosen from training-label counts. All three use the same saved validation sample, with up to 200 examples selected before inference. The two model conditions share prompts, truncation, quantization, and deterministic decoding. Invalid JSON counts as an error and is also reported separately. We will compare accuracy, macro-F1, per-class scores, and paired improvements and regressions.
 
-\section{Initial results: pending evaluation}
-No verified paired evaluation results are included in this draft. Table~\ref{tab:pilot} reserves the required baseline comparison; no dash represents a zero score. Training progress or a decreasing loss alone would not establish better held-out predictions.
+For the frozen-reviewer study, we have implemented diff-only, all-context, fixed-mask, random, and BM25 similarity policies. They select among issue text, PR text, and code before and after the change. The selection code checks token budgets on assembled prompts and uses fixed seeds for random choices. These implementations still need to be evaluated with real reviewer outputs. The best fixed mask and token budgets will be chosen on validation data.
+
+\section{Progress and results still needed}
+The implementation now covers repository splits, checkpoint recovery, paired prediction exports, and offline metrics and error analysis. We tested the analysis tools on synthetic predictions; verified cloud outputs are still needed to fill Table~\ref{tab:pilot}. Dashes indicate missing measurements, not zero scores. A falling training loss alone would not tell us whether generated judgments have improved.
 
 \begin{table}[ht]
-\caption{Planned comparison on the same frozen validation sample. All performance entries are pending; the final test set is not used here.}
+\caption{Comparison to be completed on the same saved validation sample. The final test partition is reserved.}
 \label{tab:pilot}
 \centering
 \begin{tabular}{lccc}
@@ -81,25 +83,22 @@ Qwen3B + trained adapter & --- & --- & ---\\
 \end{tabular}
 \end{table}
 
-\noindent\pending{Insert evaluated sample size, class counts, checkpoint identity, completed epochs, and the three methods' scores.}\\
-\pending{Add a compact training/validation curve and discuss paired successes and failures, including negative results.}
+\noindent\pending{Add the run/checkpoint identity, completed epochs, validation sample and class counts, Table~\ref{tab:pilot} scores, and a training/validation loss plot before submission.}
 
-\section{Lessons learned, successes, and challenges}
-\paragraph{Successes and lessons.}
-The main engineering progress is a reproducible path from dataset records to saved training state and a common evaluation interface. Freezing the split before training makes the three-way comparison interpretable. Separating evaluation from training allows us to inspect an intermediate adapter without retraining. Persistent logs and verified checkpoints also reduce dependence on a browser session; reconnecting to Jupyter does not necessarily restore its displayed output.
+\section{What we learned}
+Cloud training required more attention to recovery than we initially expected. Model-download timeouts led us to load a local copy of the weights, and limited system-disk space required moving checkpoints to persistent storage. We also changed run matching so that harmless notebook edits do not block recovery, while changes to training settings select a different run directory.
 
-\paragraph{Challenges and changes.}
-Conflicting labels for identical changes exposed ambiguity in the data, motivating exclusion of those groups instead of choosing a label arbitrarily. Cloud model-download timeouts motivated loading a local copy of the base weights. Checkpoint storage was moved off the nearly full system disk. A strict configuration check initially blocked harmless notebook edits; matching training configurations now resume automatically, while changed training settings select a separate run folder.
+Full validation was expensive enough to interrupt training frequently. We changed its interval from 100 to 1,000 optimizer steps while keeping frequent checkpoint saves. On resume, Trainer initially restored the older interval; the callback now reapplies the configured value. We still need timing measurements to quantify the effect of this change.
 
-Frequent full validation also interrupted training throughput. We changed the interval from 100 to 1,000 optimizer steps while keeping frequent checkpoint saves. Resume initially restored the old validation interval, so the callback now reapplies the requested cadence after loading checkpoint state. These are workflow corrections, not measured accuracy or speed improvements. Longer prompts remain a concern: truncation can remove useful context, so nominally supplying all fields does not guarantee the model sees them all.
+The data also needs careful interpretation. The Python example shows why merge status should not be read as a direct verdict on a fix. We need to inspect ambiguous labels and context timing before drawing conclusions. Long inputs are another concern: the 2,048-token cap can remove some context, so an all-context prompt does not guarantee that the reviewer sees every field. We will report truncation alongside the main metrics.
 
-\section{Next steps and remaining risks}
-The immediate priority is to complete the paired pilot evaluation, populate Table~\ref{tab:pilot}, and explain both gains and failures before the midpoint submission. We will verify the exact training configuration and data exclusions from saved artifacts, and add a compact loss plot and representative examples. A fixed validation sample will support development; the reserved test set will remain untouched during these decisions.
+\section{Next steps}
+Our immediate task is to recover the completed run's configuration and predictions, fill Table~\ref{tab:pilot}, and inspect both improvements and regressions. We will use those artifacts to check whether adaptation changed generated answers on held-out repositories. The pilot results will be reported separately from the context-selection experiment.
 
-The next research phase will compare diff-only, all-context, and fixed context combinations using a frozen reviewer, then add random and similarity-based selection. On training repositories only, cached reviewer outcomes will supply targets for a compact learned selector. We will measure accuracy and macro-F1 against extra context tokens and include selector overhead in runtime. A small pilot should establish whether context choices change predictions enough to justify larger target generation. If the selector fails to improve on the best fixed strategy, we will analyze where context helps or hurts. Repeated seeds and context-type ablations are planned, not completed.
+We will then run a small frozen-reviewer comparison of context policies. Before generating a larger outcome set, we need to see whether different context choices change enough judgments to make per-example selection useful. Reviewer outcomes from training repositories will provide targets for a compact transformer selector. We will compare its accuracy and extra context tokens with the fixed, random, and similarity baselines, including selector time in the runtime measurement. Repeated training seeds and context-type ablations are planned. If the selector does not beat the best fixed policy, we will analyze where context helps or hurts and report that result.
 
-\paragraph{Acknowledgments and tools.}
-We thank Professor Lesia Semenova for guidance on scope and evaluation. OpenAI Codex assisted with implementation, debugging, and this draft. The report uses the supplied NeurIPS style and repository writing skills; the team remains responsible for verifying code, sources, results, and final claims.
+\paragraph{Acknowledgments.}
+We thank Professor Lesia Semenova for feedback on the research question and evaluation. We used OpenAI Codex for coding, debugging, and editing assistance. Our team is responsible for checking the implementation, running the experiments, and interpreting the results.
 
 \begin{thebibliography}{3}
 \bibitem{hu2025}
