@@ -122,3 +122,14 @@ without changing the NeurIPS style.
 - Two pdfLaTeX passes succeed without warnings, overfull/underfull boxes, or
   unresolved references. All three pages rendered and visually inspected; the
   original layout, page numbers 1/2/3, and disabled line numbers are preserved.
+
+## Pilot-scope limitation
+
+- Added `Scope of the pilot` under limitations: QLoRA adapts reviewer adapters;
+  the proposed main study trains a selector for a fixed reviewer. Neither this
+  pilot nor more complex predictors establish learned context-selection gains.
+- Condensed repeated scope, policy, and diagnostic prose while retaining the
+  original measurements, caveats, remedies, and future-model comparison.
+- Two final pdfLaTeX passes and all-page visual inspection confirm three pages,
+  resolved references, no overfull boxes, and unchanged formatting/page numbers.
+  One underfull vertical-box warning has no visible clipping or overlap.

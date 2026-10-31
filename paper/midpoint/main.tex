@@ -32,7 +32,7 @@ Reviewing a change may require its issue description or nearby code, but includi
 
 ContextCRBench provides issue, pull request (PR), and surrounding-code context \citep{hu2025}. Repoformer studies selective retrieval for code completion \citep{wu2024}; we investigate context selection for review, focusing on the accuracy--cost trade-off following instructor feedback.
 
-Our target is accuracy within one percentage point of the best fixed strategy with at least 30\% fewer extra context tokens, or higher accuracy at a matched budget. The Qwen3B adaptation pilot checks the data and evaluation pipeline and asks whether fine-tuning improves merge-status prediction. It is separate from the main experiment, which will keep Qwen frozen and train the selector.
+We target accuracy within one percentage point of the best fixed strategy with at least 30\% fewer extra context tokens, or higher accuracy at a matched budget. Our Qwen3B adaptation pilot checks the data and evaluation pipeline; the selector study remains future work.
 
 \section{Data and experimental setup}
 \paragraph{Task and split.}
@@ -82,7 +82,7 @@ Inputs contain repository/language metadata, the diff, issue and PR text, and co
 \paragraph{Evaluation and context policies.}
 Evaluation compares the untouched base, the trained adapter, and a constant prediction chosen from training-label counts on the same saved 200 examples. The two model conditions share prompts, quantization, and deterministic decoding, with at most 2,016 input tokens and 32 generated tokens. Invalid JSON counts as an error and is reported separately. We report accuracy, macro-F1, and per-class recall alongside paired outputs.
 
-For the frozen-reviewer study, diff-only, all-context, fixed-mask, random, and BM25 similarity policies are implemented. They select among issue text, PR text, and code before and after the change; the diff is always present. Assembled prompts are checked against token budgets. We plan to train a compact Transformer selector from reviewer outcomes on training repositories. The selector has not been trained, and context-policy comparisons remain pending. Fixed masks and budgets will be chosen on validation data.
+Implemented policies include diff-only, all-context, fixed-mask, random, and BM25 similarity. They choose issue text, PR text, and before/after code, always retaining the diff and checking assembled prompt budgets. The planned compact Transformer selector will learn from training-repository reviewer outcomes. Context-policy evaluations and selector training remain pending; validation will determine fixed masks and budgets.
 
 \section{Progress and Preliminary Findings}
 We completed three epochs of QLoRA training with recoverable checkpoints and obtained paired predictions for the same 200 validation IDs. We checked protocol and source hashes and recomputed Table~\ref{tab:pilot}. The main challenge is interpreting the outputs: malformed base answers and majority-only adapter predictions prevent a claim of improved review quality. A corrected comparison remains pending.
@@ -103,20 +103,21 @@ Qwen3B + trained adapter & 87.5 & 0.467 & 0.0\\
 \end{table}
 
 \section{Lessons Learned and Limitations}
+\paragraph{Scope of the pilot.}
+Our QLoRA pilot trains reviewer adapters, while the proposal trains a selector for a fixed reviewer. The selector's accuracy--cost benefit remains untested; evaluating more complex predictors alone cannot replace comparisons between learned and fixed-context policies.
+
 \paragraph{Class imbalance.}
-True labels account for 79.5\% of training data and 175 of the 200 evaluation examples. The adapter predicts True on every example, matching the majority baseline with 87.5\% accuracy but zero recall for the 25 False examples. Its macro-F1 is only 0.467. This is consistent with majority-class bias, but we have not established that imbalance caused the behavior. We will test balanced training sampling or example-weighted answer loss, deriving weights from training labels only. Validation macro-F1 and minority-class recall will guide selection; the original validation and test distributions will be preserved.
+Training is 79.5\% True; the evaluation sample has 175 True and 25 False examples. The adapter predicts True throughout, matching the majority baseline at 87.5\% accuracy, macro-F1 0.467, and zero False recall. This is consistent with majority-class bias but does not establish imbalance as its cause. We will test balanced training sampling or example-weighted answer loss using training-label frequencies. Validation macro-F1 and minority recall will guide selection; validation/test distributions will stay unchanged.
 
 \paragraph{Output format and truncation.}
-The base model's zero score has a separate observed explanation: all 200 answers fail the strict parser. The 82 untruncated outputs contain Markdown code fences. CPU tokenization confirms that all 118 truncated inputs lose the assistant-start suffix; their saved outputs are not valid verdicts. Thus, the score combines format failure with task performance and cannot be attributed directly to class imbalance. We will shorten context before rendering the chat, preserve role boundaries and output space, and rerun both models under one newly versioned protocol. Constrained verdict decoding is another candidate to test. We will keep the original strict scores for comparison rather than silently changing the parser.
+All 200 base answers fail strict parsing: 82 untruncated outputs contain Markdown fences, and CPU tokenization confirms that 118 truncated inputs lose the assistant-start suffix. These failures explain the zero strict score; they do not establish imbalance as its cause. We will budget context before rendering chats, preserve role boundaries and output space, and rerun both models under a new protocol. Constrained verdict decoding is another candidate. Original strict scores will be retained.
 
 Merge status remains a proxy for code quality, and chronology and near-duplicate checks are unfinished. Language differences across repositories and only ten validation repositories also limit generalization claims.
 
 \section{Next steps}
-Our immediate task is to validate preprocessing, repeat the pilot comparison, and inspect per-class errors.
+Our immediate task is to validate preprocessing, repeat the pilot comparison, and inspect per-class errors. We also plan to test more complex predictive models under the same split and corrected evaluation protocol, comparing macro-F1, minority-class recall, and inference cost with Qwen3B.
 
-We also plan to test more complex predictive models under the same split and corrected evaluation protocol, comparing macro-F1, minority-class recall, and inference cost with Qwen3B.
-
-We will check whether context choices change enough frozen-reviewer judgments to justify a learned selector. If so, training-repository outcomes will supply its targets. We will compare accuracy, macro-F1, extra context tokens, and runtime including selection, with repeated seeds and context-type ablations. Negative findings will also be reported.
+We will test whether context choices justify a learned selector, then use training-repository outcomes as targets if appropriate. Comparisons will cover accuracy, macro-F1, extra context tokens, and runtime including selection, with repeated seeds, context-type ablations, and negative findings.
 
 \paragraph{Acknowledgments.}
 We thank Professor Lesia Semenova for feedback on the research question and evaluation. We used OpenAI Codex for coding, debugging, and editing assistance. Our team is responsible for checking the implementation, running the experiments, and interpreting the results.
