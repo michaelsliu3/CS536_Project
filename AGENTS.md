@@ -31,6 +31,35 @@ reread unless they change. Do not rely solely on memory from a previous chat.
 These requirements also apply to delegated agents; include this context requirement
 in any handoff.
 
+## Required LaTeX workflow — all agents
+
+**Trigger:** Before creating, editing, compiling, debugging, or reviewing any
+LaTeX (`.tex`, `.sty`, `.bib`) document, or writing a project paper/report in
+LaTeX, read the LaTeX skill. Do this even if the user does not name the skill.
+
+1. Complete the project-context reading above.
+2. Read [LaTeX project guidance](.cursor/skills/latex-document/PROJECT_GUIDANCE.md).
+3. Read the **entire** [LaTeX skill](.cursor/skills/latex-document/SKILL.md).
+   Codex can use `.agents/skills/latex-document/SKILL.md`; it links to the same
+   files. Cursor and every other agent can use the `.cursor/skills/` path
+   directly. If automatic skill discovery fails, open these paths manually.
+4. Read `docs/report_format/README.md` and the supplied files in
+   `docs/report_format/neurips_2026/`. **Use this NeurIPS 2026 template for project
+   reports**, not the skill's generic article/report or IEEE templates.
+5. Follow the relevant reference guides linked by the skill. For documents of
+   5+ pages, read `references/long-form-best-practices.md`; for bibliography work,
+   read `references/bibliography-guide.md`. Resolve these paths from the skill
+   directory, not the repository root.
+6. Compile and inspect the resulting pages when changing a report. Report any
+   unavailable compiler or unresolved errors honestly. Never invent results or
+   citations, or claim a successful compilation without verifying it.
+
+Course page limits and explicit user instructions take precedence over generic
+skill defaults. Use the empirical-writing/results skills for scientific content
+when appropriate, and this skill for LaTeX mechanics. Do not replace the chosen
+NeurIPS layout or compress its margins/fonts to fit more text. Include these
+paths and requirements in any delegated LaTeX task.
+
 ## Linux NVIDIA environment setup
 
 Instructions for agents setting up a **new Linux machine** with NVIDIA GPU. Windows setup is in [README.md](README.md).

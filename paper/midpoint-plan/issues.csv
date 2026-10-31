@@ -1,0 +1,4 @@
+ID,Phase,Title,Section_Path,Claim_ID,Evidence_Type,Experiment_ID,Result_Status,Description,Source_Policy,Target_Citations,Visualization,Acceptance,Status,Verified_Citations,Depends_On,Must_Verify,Notes
+W1,Writing,Midpoint draft,All,C0,mixed,,n/a,Write requested draft using existing project plan,standard,3,Pending comparison table,Three pages with explicit missing evidence,DONE,3,,no,User authorizes draft with placeholders
+E1,Experiment,Paired validation comparison,Initial results,C1,experiment,PILOT,placeholder,Majority versus base versus adapter,standard,0,Comparison table,Verified predictions and metrics,TODO,0,,yes,Awaiting user results
+Q1,QA,Compile and inspect,N/A,C0,n/a,,n/a,Check template fidelity citations and page count,N/A,0,None,PDF at most three pages without layout errors,DONE,0,W1,no,Compiled with desktop compiler and Tectonic; all three PDF pages visually inspected; no overfull boxes or unresolved citations.

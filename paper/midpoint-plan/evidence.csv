@@ -1,0 +1,8 @@
+Claim,Status,Source,Report treatment
+Context selection research question,verified,docs/initial_investigation_context.md and course proposal,Planned research direction
+Repository split and duplicate exclusion,verified,src/evaluation/splits.py,Implemented procedure; audit not assumed complete
+Prompt fields and answer-only objective,verified,src/evaluation/prompts.py and training notebook,Implemented configuration
+Checkpoint recovery and validation cadence,verified,src/training/runtime.py and training notebook,Engineering progress; no speedup claim
+Cloud difficulties,reported,User conversation,Qualitative lessons; no numeric runtime claims
+Paired majority/base/adapter performance,placeholder,Awaiting comparison notebook outputs,Table remains pending
+Learned selector accuracy-token improvement,planned,Project proposal,Future experiment only

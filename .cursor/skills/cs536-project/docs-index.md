@@ -7,6 +7,7 @@ also be read; distinguish official guidance from historical handoffs.
 
 | File | Context provided |
 |------|----------|
+| `docs/report_format/README.md` and `docs/report_format/neurips_2026/` | User-selected NeurIPS 2026 report format: original LaTeX template, style and checklist; supersedes writing skills’ IEEE defaults while course page limits still apply |
 | `docs/MLII_fall2026_project_kickoff.pdf` | Course values, allowed project types, compute/data rules, grading, proposal/midpoint/final requirements, team rules |
 | `docs/initial_investigation_context.md` | Historical investigation, professor feedback, decisions, and handoff context; verify historical observations against current sources |
 | `docs/context_selection_proposal_detailed.docx` | Current proposal: learned per-diff context selection, ContextCRBench, frozen Qwen reviewer, accuracy-cost evaluation, leakage rules, timeline, success criteria |

@@ -93,3 +93,9 @@ Audit and download ContextCRBench, verify its task mapping and chronology, then 
 ## Writing course documents
 
 When drafting the proposal, midpoint check-in, or final report, follow the kickoff milestone checklist in [docs-index.md](docs-index.md). Acknowledge people, tools, prior code, and LLM assistance.
+
+For LaTeX writing, editing, compilation or review, first follow the mandatory
+LaTeX workflow in root `AGENTS.md`. Read
+`../latex-document/PROJECT_GUIDANCE.md` and `../latex-document/SKILL.md`, then use
+`docs/report_format/neurips_2026/` as the project report template. The LaTeX skill
+supplements research-writing skills; it does not change the course page limits.
