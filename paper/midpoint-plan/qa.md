@@ -10,3 +10,9 @@
 - No cloud access, evaluation, training or fabricated quantitative results.
 - Local Tectonic was installed through Homebrew to export and inspect the PDF.
 - Results, dataset audit evidence and exact cloud run metadata still require filling.
+
+## Dataset-example revision
+
+Verified record 63859 against local JSON and training membership; four excerpt lines are verbatim; the issue description is paraphrased. The label is separate from inputs. Source hashes and
+omissions are recorded in dataset-example.json. Recompiled within three pages
+without changing the NeurIPS style.

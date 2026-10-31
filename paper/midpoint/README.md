@@ -42,3 +42,13 @@ are inapplicable to this three-page course deliverable.
 
 Open this folder in Codex to use the built-in LaTeX editor/compiler. A local
 standalone PDF can also be generated with `tectonic --keep-logs main.tex`.
+
+## Dataset illustration
+
+The report includes four verbatim diff lines from
+`data/contextcrbench/extracted/final_json/63859.json` (pandas PR #53773): a Python
+`None` guard. The issue description is paraphrased, and omitted lines are explicit.
+The target is `merged=False`, not a claim that the proposed fix is incorrect.
+Training membership and source bytes were checked locally. Source/manifest hashes
+and selection details are in `../midpoint-plan/dataset-example.json`.
+This is a data illustration, not a performance result. The full dataset stays ignored.

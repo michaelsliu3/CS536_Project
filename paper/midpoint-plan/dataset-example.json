@@ -1,0 +1,22 @@
+{
+  "record_id": "final_json/63859.json",
+  "source_path": "data/contextcrbench/extracted/final_json/63859.json",
+  "source_sha256": "aaeec4189b5d334be87fdf92601a24adf935b729625e8fd7d48058b2139e2255",
+  "split": "train",
+  "split_manifest_sha256": "143541c05ca9e05a3d2d546d814704259f1f2317ab2ed214c6a3ab8b50f13798",
+  "repository": "pandas-dev/pandas",
+  "pr_number": 53773,
+  "language": "python",
+  "issue_title": "BUG: is a child element contains NULL this results in a TypeError: 'NoneType' object is not iterable",
+  "pr_title": "BUG: handle none values in `json.normalize()`",
+  "merged": false,
+  "diff_excerpt": [
+    "+        if data is None:",
+    "+            return",
+    "         if isinstance(data, dict):",
+    "             data = [data]"
+  ],
+  "omissions": "Diff header, function signature, outer context and later lines; full issue/PR bodies and before/after snippets. Excerpt lines copied verbatim. Issue explanation in report is a paraphrase.",
+  "selection": "Readable Python None guard from training records; chosen for explanation, not model performance.",
+  "limitation": "Merge-status target False is not a correctness verdict. Issue body itself proposes this fix; chronology/embedded-solution audit remains necessary."
+}
