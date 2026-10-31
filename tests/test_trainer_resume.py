@@ -58,3 +58,27 @@ class TrainerResumeTests(unittest.TestCase):
             trainer.train(resume_from_checkpoint=checkpoint)
             self.assertEqual(trainer.state.global_step, 4)
             self.assertGreater(capture.lr, 0)
+
+    def test_resume_uses_new_validation_interval(self):
+        with tempfile.TemporaryDirectory() as d:
+            first_args = args(d)
+            first_args.max_steps = 2
+            first_args.eval_strategy = "steps"
+            first_args.eval_steps = 1
+            Trainer(model=model(), args=first_args, train_dataset=data, eval_dataset=data,
+                data_collator=default_data_collator, callbacks=[RunLogger(d), ResumeSchedule()]).train()
+            next_args = args(d)
+            next_args.eval_strategy = "steps"
+            next_args.max_steps = 6
+            next_args.eval_steps = 4
+            class Capture(TrainerCallback):
+                def __init__(self): self.steps = []
+                def on_evaluate(self, args, state, control, **kwargs):
+                    self.steps.append(state.global_step)
+            capture = Capture()
+            trainer = Trainer(model=model(), args=next_args, train_dataset=data, eval_dataset=data,
+                data_collator=default_data_collator, callbacks=[RunLogger(d), ResumeSchedule(), capture])
+            trainer.train(resume_from_checkpoint=latest_checkpoint(d))
+            self.assertEqual(trainer.state.eval_steps, 4)
+            self.assertIn(4, capture.steps)
+            self.assertTrue(set(capture.steps).issubset({4, 6}))  # Some versions also evaluate at completion.

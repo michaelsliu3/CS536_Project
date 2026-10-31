@@ -113,6 +113,12 @@ class ResumeSchedule(TrainerCallback):
     This is a continuation, not equivalent to originally training with that horizon.
     """
     def on_train_begin(self, args, state, control, optimizer=None, lr_scheduler=None, **kwargs):
+        # Trainer loads saved intervals before this callback. Honor the current
+        # validation cadence without altering restored training progress.
+        if args.eval_steps is not None:
+            import math
+            state.eval_steps = (math.ceil(state.max_steps * args.eval_steps)
+                                if 0 < args.eval_steps < 1 else args.eval_steps)
         if state.global_step and hasattr(lr_scheduler, 'lr_lambdas'):
             rates = [base * fn(lr_scheduler.last_epoch)
                      for base, fn in zip(lr_scheduler.base_lrs, lr_scheduler.lr_lambdas)]
