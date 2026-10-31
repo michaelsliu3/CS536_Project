@@ -179,6 +179,21 @@ examples. Test evaluation is separately gated. The notebook performs no training
 Copy its results directory to the Mac and leave inference disabled to display
 cached metrics, the comparison graph, and fixed demonstration examples.
 
+For paired error analysis, repository-bootstrap intervals, CSV tables, and
+report figures from those saved predictions, see the
+[offline analysis guide](src/evaluation/README.md). For example:
+
+```bash
+python scripts/analyze_predictions.py \
+  --predictions results/qwen3b-comparison/predictions.jsonl \
+  --models majority base adapter --reference base \
+  --output results/qwen3b-analysis-v1 --plots
+```
+
+Use the comparison notebook's actual output path. This command performs no
+inference or training; `--plots` uses Matplotlib. Real prediction artifacts are
+required before reporting model scores or token savings.
+
 ### Cloud checkpoints and recovery
 
 The training notebook fixes **3B QLoRA** on every profile; execution requires NVIDIA
