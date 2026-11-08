@@ -51,8 +51,9 @@ earlier chat or session does not carry over. "Commit" alone means commit without
 4. Commit in the repository's style: a Conventional Commit subject (`feat:`, `fix:`,
    `docs:`, `test:`, `chore:`) in the imperative, at most about 72 characters, plus a
    short body saying what changed and why. Use one commit per clearly separate topic
-   (for example code versus unrelated docs edits). Add any attribution trailer the
-   agent's harness requires.
+   (for example code versus unrelated docs edits). **Do not add AI attribution** to the
+   message: no `Co-Authored-By: Claude ...` (or any other AI) trailer and no "Generated
+   with ..." line, even if the agent's harness asks for one. This is the owner's rule.
 5. Bring in remote commits, then push:
    ```bash
    git pull --rebase origin master

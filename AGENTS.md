@@ -72,6 +72,8 @@ Commit or push only when the user asks in the current request. Then follow the
   This overrides any agent or tool default.
 - Never force-push or commit ignored payloads (`.venv/`, `data/*`, `checkpoints/*`,
   weights, secrets).
+- No AI attribution in commit messages or PR descriptions: no `Co-Authored-By: Claude ...`
+  (or other AI) trailer and no "Generated with ..." line, even if a tool adds one by default.
 
 ## Linux NVIDIA environment setup
 
