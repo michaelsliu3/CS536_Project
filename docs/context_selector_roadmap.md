@@ -16,7 +16,7 @@ The November 4 roadmap is retained at the end as a **retired historical plan**, 
 | Starting dataset | Start with AACR-Bench, reconstructing repository snapshots | Usable release size, supported languages, reference validity, and split feasibility |
 | ContextCRBench | Preserve the midpoint pilot; consider a separate transfer evaluation | Whether its review references and available snapshots support the same task |
 | Context gathering | **Implemented (Nov 8):** codebase-memory-mcp static code graph plus nested context levels (Section 5.5). RepoHyper was the earlier recommendation | Behavior on the other 8 AACR languages and on very large repositories; whether the levels separate review quality |
-| Selector | **Decided Nov 8:** for the ten levels, classical learned models (gradient-boosted trees, linear models, random forests, small MLP) on input-side features, compared with repository-grouped cross-validation; an LLM selector is the planned next comparison (Section 9.3) | Which algorithm and target work best; whether an LLM selector beats them by more than its cost; item-level selection later |
+| Selector | **Decided Nov 8:** for the ten levels, classical learned models (gradient-boosted trees, linear models, random forests, small MLP) on input-side features, compared with repository-grouped cross-validation. **Next step:** item-level selection (traced items, not lines), evaluated with live reviews. An LLM selector comparison is also planned (Section 9.3) | Which algorithm and target work best; how to train the item-level selector; whether an LLM selector beats the classical ones by more than its cost |
 | Reviewer | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call per (PR, level), our own fixed prompt, greedy decoding, JSON findings; Claude is an allowed fallback (Section 8.5.2) | Revision, quantization, memory and window fit, run-to-run noise, and whether it passes the pilot criteria |
 | Preprocessing | Avoid generative LLM calls for fetching, parsing, graph construction, and metadata extraction | Manual effort needed for reliable reference and adoption annotations |
 | Learning signal | **Decided Nov 8:** an offline (PR × level) outcome table scored with AACR's file-level semantic metric against all 1,506 references; labels compare levels within each PR (Sections 8.5.3–8.5.7) | Judge model, judge validation against a human audit, labeling rule and its parameter |
@@ -880,7 +880,7 @@ Start with a compact pretrained code encoder and learned ranker; evaluate budget
 
 Keep the reviewer frozen throughout a comparison. Using related Qwen models for selector and reviewer does not itself invalidate the experiment, but conclusions are conditional on that reviewer family. Transfer to a different reviewer is an optional stronger generalization test. Exact model names mentioned informally in conversation are not configuration choices until their existence, release, hardware requirements, and suitability are verified.
 
-### 9.3 Decided Nov 8: classical learned selectors first, an LLM selector next, item-level selection later
+### 9.3 Decided Nov 8: classical learned selectors first, then item-level selection
 
 **Status: decided, not built.** For the ten-level design (Section 5.5.3), the selector reads facts about a PR and picks one level. That is small tabular prediction, not a language task.
 
@@ -918,17 +918,21 @@ Keep the reviewer frozen throughout a comparison. Using related Qwen models for 
 
   Use pooled and per-PR scores, with uncertainty clustered by repository.
 
-**Planned next step (not decided): an LLM selector.** For example, a small Qwen model fine-tuned or prompted to output a level, or per-level scores, from the PR text, diff and the same features. Compare it with the best classical model on the same cross-validation folds and outcome table. Adopt it only if it improves the frontier by more than its own token and compute cost.
+**Planned (not decided): an LLM selector comparison.** For example, a small Qwen model fine-tuned or prompted to output a level, or per-level scores, from the PR text, diff and the same features. Compare it with the best classical model on the same cross-validation folds and outcome table. Adopt it only if it improves the frontier by more than its own token and compute cost. Its order relative to the item-level step below is not fixed. An LLM may also be the natural model for item-level selection.
 
-**Planned extension (not decided): selecting individual items instead of fixed levels.**
-- **The unit:** the traced items (functions, files, tests, doc sections, typically a few hundred per PR), not raw lines. Line selection would fragment code and make the space even larger.
-- **Live reviews:** the possible selections cannot all be reviewed in advance, so any selection outside a table needs a live review at evaluation (Section 9.2). That costs about one review per test PR per method.
-- **Training need not be fully live.** From cheapest to most expensive:
-  1. an offline table over sampled selections, then an item ranker (Section 9.1);
-  2. a learned stand-in for the reviewer's score, used for training and checked with live reviews;
+**Decided (Nov 8): the next step after the initial level selector is item-level selection.** The selector will choose individual pieces of context instead of one of the ten fixed levels, aiming for the same quality with fewer tokens.
+- **Items, not lines (decided):** the unit is the traced items (functions, files, tests, doc sections, typically a few hundred per PR). Selecting raw lines would fragment code and make the space even larger.
+- **No complete offline table (decided):** the possible selections cannot all be reviewed in advance. Evaluation therefore uses **live reviews**: every selection a method makes on a validation or test PR is reviewed and judged when it is made (Section 9.2). That costs about one review per PR per method. Each run on the cloud GPU needs the go-ahead.
+- **Training approach (open).** Training need not be fully live. Options, from cheapest to most expensive:
+  1. a partial offline table over sampled selections (random, budget-matched, leave-one-out, greedy removal), then an item ranker (Section 9.1);
+  2. a learned stand-in for the reviewer's score, trained on such samples, used to train the selector, and checked with live reviews;
   3. the reviewer in the training loop (reinforcement-learning style), likely too costly on one GPU.
-- **Combinations matter:** a caller may only help alongside its callee (Section 9.1).
-- **A bridge that keeps the offline table:** many more levels, as a grid of content type × depth (for example 8 × 3 = 24 levels, or 196 × 24 = 4,704 reviews).
+- **Combinations matter:** a caller may only help alongside its callee, so item scores are not independent (Section 9.1).
+- **What it reuses:**
+  - the tracer and its item pool (Section 5.5);
+  - the reviewer, Codex rubric and AACR judge (Section 8.5);
+  - the review and judging code in `src/review_outcomes/`, which can review any rendered selection.
+- **Optional bridge:** many more levels as a grid of content type × depth (for example 8 × 3 = 24 levels, or 196 × 24 = 4,704 reviews). It keeps a complete offline table while moving toward finer choices.
 
 ## 10. Splits, baselines, and experimental controls
 
@@ -1039,7 +1043,9 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 
 **Gate:** reproducible comparison against the best fixed policy with honest uncertainty. A negative result is acceptable if its cause is analyzed. Do not tune against the held-out test or silently redefine the quality metric to obtain a win.
 
-**Decided (Nov 8):** for the ten levels, Phase D first trains several classical models on input-side features. These are gradient-boosted trees, linear models, random forests and a small MLP, compared with repository-grouped cross-validation and several seeds; all evaluation is by outcome-table lookup (Section 9.3). An LLM selector is the planned next comparison on the same folds.
+**Decided (Nov 8):** for the ten levels, Phase D first trains several classical models on input-side features. These are gradient-boosted trees, linear models, random forests and a small MLP, compared with repository-grouped cross-validation and several seeds; all evaluation is by outcome-table lookup (Section 9.3). An LLM selector comparison on the same folds is also planned.
+
+**Next, after this initial selector (decided Nov 8): item-level selection.** The selector chooses individual traced items instead of a level, and evaluation uses live reviews instead of a complete offline table. The training approach is still open (Section 9.3).
 
 ### Phase E — frozen test and optional transfer
 
@@ -1096,7 +1102,7 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Labeling rule for the selector | Best trade-off (λ) vs smallest level within a tolerance vs per-level regression (Section 8.5.7), chosen on validation PRs |
 | Severity and adoption use | Reliable annotations; otherwise remain auxiliary or omitted |
 | Selector architecture and size | **Direction decided Nov 8:** classical models first, an LLM selector next (Section 9.3). Still needed: cross-validated results per algorithm and target, learning curves, and evidence that any LLM selector earns its cost; 17B is not assumed necessary |
-| Item-level selection | A planned extension (Section 9.3): live reviews at evaluation, plus a sampled-selection table, learned stand-in or reviewer-in-the-loop training |
+| Item-level selection | **Decided Nov 8** as the next step after the initial level selector: traced items, not lines, with live reviews at evaluation (Section 9.3). Still open: the training approach (partial sampled-selection table, learned stand-in for the reviewer, or reviewer in the loop) and its GPU budget |
 | Quality tolerance and token targets | Development evidence and explicit precision/recall safeguards |
 | Split proportions or grouped development folds | Actual post-filter repository/PR counts, not inherited 80/10/10 convention |
 | ContextCRBench transfer | Compatible references, snapshots, and overlap audit |
