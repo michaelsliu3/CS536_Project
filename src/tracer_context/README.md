@@ -94,28 +94,59 @@ PR, while `target_commit` can be an earlier version. In ollama/ollama#12185 the 
 commit has 197 changed lines and the final PR 64.
 
 The folder-per-PR runner above is for inspecting individual PRs in detail (full traces and
-selection reports). The dataset itself is built with the one-file builder below.
+selection reports). The dataset itself is built with `scripts/build_dataset.py` below.
 
-## The dataset: one file for every PR and level (main path)
+## The dataset: one command, one file (main path)
 
-`scripts/build_context_dataset.py` builds the context levels for many AACR-Bench entries into
-**one file**, `data/aacr_tracer/context_levels.jsonl.gz`. It uses no LLM and runs on a laptop.
+`scripts/build_dataset.py ROOT` builds the context levels for every AACR-Bench entry into
+**one file** in the dataset folder `ROOT`. It uses no LLM and runs on a laptop.
 
 ```bash
-.venv/bin/python scripts/build_context_dataset.py --list --languages Go     # plan and status
-.venv/bin/python scripts/build_context_dataset.py --entries cline__cline__5177,ollama__ollama__12185
-.venv/bin/python scripts/build_context_dataset.py --all                      # the whole dataset
+.venv/bin/python scripts/build_dataset.py data/aacr --dry-run      # setup checks and plan only
+.venv/bin/python scripts/build_dataset.py data/aacr                # build (or continue) everything
 ```
 
-- **Same steps per PR:** fetch the two commits, run the checks, fetch the PR text, trace once, then pack all ten levels (`configs/levels/*.yaml` by default).
-- **Clones are deleted:** entries are processed grouped by repository, and each clone is deleted after its repository's last selected entry, so a repository with several PRs is fetched once. Keep clones with `--keep-repos`.
-- **Resuming:** each PR is appended as one line as soon as it is done. Re-running skips PRs already built with the same commits, tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). After changing builder code without bumping `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`. A run cut off mid-write loses at most the PR in progress.
+Everything lives in `ROOT`:
+
+| Path | What |
+|---|---|
+| `positive_samples.json` | AACR-Bench entries, downloaded at the pinned commit and checksum-verified if missing |
+| `context_levels.jsonl.gz` | the output: one JSON line per PR with all levels |
+| `logs/build_<time>.log` | every run's log: terminal output plus debug lines and failure tracebacks |
+| `.work/` | temporary clones, tool caches and (if needed) the downloaded tool |
+| `.build.lock` | present while a build runs; a second build on the same folder refuses to start |
+
+`*.log` is git-ignored repo-wide. If `ROOT` is inside this repository and not already ignored,
+the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
+
+- **Setup checks first,** each failing with a fix:
+  - git, and `gh` logged in (it fetches the PR text);
+  - Python packages;
+  - the dataset file;
+  - the codebase-memory-mcp tool. If it's missing, the pinned v0.12.1 build for this platform is downloaded and checksum-verified.
+  - the reviewer tokenizer (tokenizer files only, downloaded if missing);
+  - no other tool session running;
+  - free disk space;
+  - the level configs.
+
+  `--offline` forbids every download. `--dry-run` stops after the checks and the plan.
+- **Per PR, grouped by repository:** fetch the two commits, run the checks, fetch the PR text, trace once, pack all ten levels (`configs/levels/*.yaml` by default), and append one line. Each clone is deleted after its repository's last PR.
+- **Errors don't stop the build:** a failed PR is retried (`--retries`, default 2, with a growing wait; a half-fetched clone is deleted first), then recorded with its stage and error, and the build moves on. Below `--min-free-gb` (default 10) of free disk, the build stops cleanly before the next repository.
+- **Progress:** each PR is logged to the terminal and the `.log` file, with counts and an estimate of the time left. A summary at the end lists the failed PRs.
+- **Resuming:** re-running the same command skips PRs already built with the same commits, tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). Ctrl+C, `kill -INT` or `kill -TERM` stop cleanly with exit code 130, and a crash loses at most the PR in progress. After changing builder code without bumping `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`.
+- **Exit codes:**
+  - 0: all built;
+  - 2: finished with failed PRs;
+  - 1: setup failed or the build crashed;
+  - 3: stopped for low disk;
+  - 130: interrupted.
+- **Subsets for testing:** `--entries`, `--languages` and `--limit`.
 
 Loading at train time:
 
 ```python
 from src.tracer_context.dataset import load_records, level_rows
-records = load_records("data/aacr_tracer/context_levels.jsonl.gz")   # {entry id: record}, built PRs only
+records = load_records("data/aacr/context_levels.jsonl.gz")   # {entry id: record}, built PRs only
 rows = level_rows(records.values())    # one dict per (entry, level): tokens, item counts, text
 ```
 
@@ -133,6 +164,8 @@ Each line (format `aacr-context-levels/v1`, documented in `dataset.py`) is one P
 | `audit` | checks that use the reference comments or the final PR's size. **For auditing only, never as selector inputs** |
 
 Reference comment text is never stored in this file; scoring reads it from the AACR file.
+
+**Repeatability caveat:** with `tracer.index_mode: full`, the tool's call and test links depend slightly on the folder the clone sits in. On ollama/ollama#12185 that changed the graph and the deeper levels' items (roadmap Section 5.5.6). Builds in the same folder are byte-identical, and `fast` mode was path-independent in our test. Build the whole dataset in one place, or switch to `fast`.
 
 ## Controlling the amount of context
 

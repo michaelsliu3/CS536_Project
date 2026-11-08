@@ -1,7 +1,7 @@
 """Build the offline (PR x level) outcome table from the context-level dataset file
-(`data/aacr_tracer/context_levels.jsonl.gz`, written by scripts/build_context_dataset.py).
+(`<root>/context_levels.jsonl.gz`, e.g. data/aacr/, written by scripts/build_dataset.py).
 
-Layout under `out_dir` (one folder per run, e.g. data/aacr_tracer/outcomes/<run_name>/):
+Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/):
   manifest.json                         run settings, prompt and dataset hashes
   reviews/<entry>/<level>.json          prompt hashes, backend identity, raw reply, parsed findings
   judgments/<entry>/<level>.json        AACR judge records per generated comment, per-reference flags

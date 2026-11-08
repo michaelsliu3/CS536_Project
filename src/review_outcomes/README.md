@@ -5,9 +5,9 @@ AACR-Bench's file-level semantic metric. This is the outcome table of roadmap Se
 Selector training and evaluation then only look up rows. Driver:
 [`notebooks/outcome_table.ipynb`](../../notebooks/outcome_table.ipynb).
 
-| Stage | Module | Output under `data/aacr_tracer/outcomes/<run>/` |
+| Stage | Module | Output under `data/aacr/outcomes/<run>/` |
 |---|---|---|
-| Find cells | `table.discover_cells` | one per (PR, level) in `data/aacr_tracer/context_levels.jsonl.gz`, from `scripts/build_context_dataset.py` |
+| Find cells | `table.discover_cells` | one per (PR, level) in `data/aacr/context_levels.jsonl.gz`, from `scripts/build_dataset.py data/aacr` |
 | Review | `prompts`, `backends`, `parse`, `table.run_reviews` | `reviews/<entry>/<level>.json`: raw reply, parsed findings, tokens, prompt hash, backend settings |
 | Judge | `judge`, `table.run_judgments` | `judgments/<entry>/<level>.json`: per generated comment, matched references and whether new; per reference, covered |
 | Table | `table.build_table`, `write_outputs` | `table.csv`/`table.jsonl` (per entry and level), `coverage.csv` (per reference and level), `manifest.json` |

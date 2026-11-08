@@ -1,6 +1,6 @@
 """One-file dataset of context levels for every AACR-Bench entry.
 
-`data/aacr_tracer/context_levels.jsonl.gz` holds one JSON line per PR with every level's
+`<root>/context_levels.jsonl.gz` (e.g. data/aacr/, built by scripts/build_dataset.py) holds one JSON line per PR with every level's
 review input text, so training and the outcome table load a single file:
 
     from src.tracer_context.dataset import load_records, level_rows
@@ -254,11 +254,28 @@ def group_by_repo(entries: list[dict]) -> list[tuple[str, list[dict]]]:
     return list(groups.items())
 
 
+class StopBuild(Exception):
+    """Raised by a `before_repo` hook to end the run cleanly (e.g. low disk space)."""
+
+
+def is_current(record: dict | None, key: str) -> bool:
+    return bool(record and record.get("status") == "ok" and record.get("build", {}).get("key") == key)
+
+
 def run(entries: list[dict], process: Callable[[dict], dict], key_of: Callable[[dict], str], out_path: Path,
         repos_dir: Path, keep_repos: bool = False, force: bool = False,
-        report: Callable[[dict, str, float], None] | None = None) -> Counter:
+        report: Callable[[dict, str, float], None] | None = None, retries: int = 0,
+        retry_wait: float = 30.0, before_repo: Callable[[str, list[dict]], None] | None = None,
+        on_retry: Callable[[dict, int], None] | None = None, sleep: Callable[[float], None] = time.sleep) -> Counter:
     """Build missing or outdated records, one repository at a time, deleting each clone after
-    its last entry (unless keep_repos). Returns counts of ok / failed / skipped."""
+    its last entry (unless keep_repos). Returns counts of ok / failed / skipped.
+
+    - Resumes: entries whose latest record is ok with the current build key are skipped.
+    - Retries: a failed entry is retried up to `retries` times after `retry_wait` seconds
+      (doubling); a failure while fetching first deletes the clone, which may be half-written.
+    - `before_repo(name, group)` runs before each repository with work to do; it may raise
+      StopBuild to stop cleanly. The output file is tidied up however the run ends.
+    """
     out_path, repos_dir = Path(out_path), Path(repos_dir)
     existing, truncated = read_records(out_path)
     if truncated:  # an interrupted append: keep the complete records only
@@ -267,23 +284,37 @@ def run(entries: list[dict], process: Callable[[dict], dict], key_of: Callable[[
     counts: Counter = Counter()
     try:
         for repo_name, group in group_by_repo(entries):
+            todo = [e for e in group if force or not is_current(done.get(e["id"]), key_of(e))]
             for entry in group:
-                previous = done.get(entry["id"])
-                if (not force and previous and previous.get("status") == "ok"
-                        and previous.get("build", {}).get("key") == key_of(entry)):
+                if entry not in todo:
                     counts["skipped"] += 1
                     if report:
-                        report(previous, "skipped", 0.0)
-                    continue
-                started = time.monotonic()
-                record = process(entry)
-                append_record(out_path, record)
-                done[entry["id"]] = record
-                counts[record["status"]] += 1
-                if report:
-                    report(record, record["status"], time.monotonic() - started)
-            if not keep_repos:
-                shutil.rmtree(repos_dir / repo_name, ignore_errors=True)
+                        report(done[entry["id"]], "skipped", 0.0)
+            if not todo:
+                continue
+            if before_repo:
+                before_repo(repo_name, todo)
+            try:
+                for entry in todo:
+                    started = time.monotonic()
+                    record = process(entry)
+                    for attempt in range(1, retries + 1):
+                        if record["status"] == "ok":
+                            break
+                        if on_retry:
+                            on_retry(record, attempt)
+                        if record.get("failed_stage") == "checkout":
+                            shutil.rmtree(repos_dir / repo_name, ignore_errors=True)
+                        sleep(retry_wait * 2 ** (attempt - 1))
+                        record = process(entry)
+                    append_record(out_path, record)
+                    done[entry["id"]] = record
+                    counts[record["status"]] += 1
+                    if report:
+                        report(record, record["status"], time.monotonic() - started)
+            finally:
+                if not keep_repos:
+                    shutil.rmtree(repos_dir / repo_name, ignore_errors=True)
     finally:
         records, _ = read_records(out_path)
         if records:

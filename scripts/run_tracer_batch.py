@@ -56,7 +56,7 @@ def trace_key(settings: dict, tool_version: str, record: dict) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-load_configs = load_level_configs  # shared with scripts/build_context_dataset.py
+load_configs = load_level_configs  # shared with scripts/build_dataset.py
 
 
 def run_entry(entry, configs, counters, args, binary, tool_version, dataset_sha) -> dict:
