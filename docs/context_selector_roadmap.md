@@ -2,7 +2,7 @@
 
 **Revised November 7, 2026. Status: research design, not an implemented or validated system.**
 
-**Update, November 8, 2026:** candidate gathering is now implemented with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the context levels and the batch runner, plus what was measured on three AACR entries. No reviewer, scorer or selector has been run or built; everything outside Section 5.5 remains a design.
+**Update, November 8, 2026:** candidate gathering is now implemented with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the context levels and the batch runner, plus what was measured on three AACR entries. Section 8.5 records the decisions on the output side, each with the options not chosen: the reviewer, its fixed prompt, the scoring metric, which references count, score granularity, and the offline outcome table. No reviewer, scorer or selector has been run or built; everything outside Section 5.5 remains a design.
 
 This revision records the discussion moving from ContextCRBench merge-status prediction to repository-aware **review generation**. Our intended product is a context-selection component: given a diff and a reproducibly gathered pool of repository evidence, choose a small subset for a frozen reviewer. The reviewer produces useful findings; the selector does not decide whether a PR should merge.
 
@@ -17,9 +17,9 @@ The November 4 roadmap is retained at the end as a **retired historical plan**, 
 | ContextCRBench | Preserve the midpoint pilot; consider a separate transfer evaluation | Whether its review references and available snapshots support the same task |
 | Context gathering | **Implemented (Nov 8):** codebase-memory-mcp static code graph plus nested context levels (Section 5.5). RepoHyper was the earlier recommendation | Behavior on the other 8 AACR languages and on very large repositories; whether the levels separate review quality |
 | Selector | Train a compact model to select existing evidence chunks | Encoder/ranker, graph-aware model, or small generative selector; no final size chosen |
-| Reviewer | Freeze a capable open-weight reviewer during comparisons | Exact model ID, revision, quantization, context window, decoding, and quality floor |
+| Reviewer | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call per (PR, level), our own fixed prompt, greedy decoding, JSON findings; Claude is an allowed fallback (Section 8.5.2) | Revision, quantization, memory and window fit, run-to-run noise, and whether it passes the pilot criteria |
 | Preprocessing | Avoid generative LLM calls for fetching, parsing, graph construction, and metadata extraction | Manual effort needed for reliable reference and adoption annotations |
-| Learning signal | Compare reviewer outcomes under candidate subsets against audited review references | A validated matching/scoring protocol and affordable supervision budget |
+| Learning signal | **Decided Nov 8:** an offline (PR × level) outcome table scored with AACR's file-level semantic metric against all 1,506 references; labels compare levels within each PR (Sections 8.5.3–8.5.7) | Judge model, judge validation against a human audit, labeling rule and its parameter |
 | Deployment shape | Upfront retrieval and selection, then one reviewer call with no further repository tools | Quality loss relative to an interactive agent and actual end-to-end savings |
 | Lavish | Leave existing Lavish artifacts unchanged | Update only on an explicit later request |
 
@@ -492,6 +492,8 @@ Each reviewer execution records task ID, pool hash, selected chunk IDs, exact re
 
 The cache key includes **all behavior-affecting inputs**, not just a PR and mask. Retry transient failures without treating them as model errors; preserve failed attempts. A new prompt, model, candidate order, or scoring version requires a new identity. Atomic writes and completion markers should allow resuming incomplete jobs without rerunning completed calls.
 
+For the level design, this cache is the (PR × level) outcome table of Section 8.5.6. Besides the fields above, it stores each review's AACR judge records: per generated comment, the matched reference indices and whether the coverage was new; per reference, covered or not.
+
 ## 8. Measuring review quality
 
 ### 8.1 Two complementary references
@@ -533,6 +535,252 @@ Run a small development pilot spanning local and cross-file findings, multiple r
 
 Proceed to selector training only if the reviewer recovers enough valid findings, contexts cause meaningful outcome differences, and scoring is credible. If full C fails because evidence was never retrieved, improve retrieval rather than expecting selection to repair it. If full C contains evidence but the reviewer cannot use it, reconsider the reviewer or task before spending on thousands of subset evaluations.
 
+### 8.5 Decisions of November 8, 2026: review generation, scoring and the outcome table
+
+**Status: decisions and plans only.** No review has been generated, no judge has run, and none of this is coded. Each subsection gives the decision, the options considered and not chosen (kept for reference), and what is still open. Facts about AACR-Bench below come from its public repository at commit `ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df` (`dataset/positive_samples.json`, `evaluation/judge.py`, `evaluation/evaluate.py`, `evaluation/reviewers/`, `docs/metrics.md`), read on November 8.
+
+#### 8.5.1 What AACR-Bench provides: an answer key and a test harness
+
+AACR-Bench has two separate parts:
+
+1. **The dataset is the answer key.** It contains 196 PRs and 1,506 reference comments, with no scores. Each record has the PR URL, `source_commit`, `target_commit`, `change_line_count`, the main language, a category, and the comments. Each comment has `note` (its text), `path`, `side`, `from_line`, `to_line`, `category`, `context` (Diff/File/Repo Level), `is_ai_comment`, and `source_model`.
+2. **The evaluation harness runs the test.** To benchmark a reviewer, it runs that reviewer on each PR to write new comments, then a judge LLM scores them against the answer key. Its built-in reviewers run Claude Code's `/code-review <base>...<head>` and Codex's `/review <base>...<head>` in a repository checkout (or the OCR tool). An added instruction reports each finding through an MCP tool as `file`, `line`, `summary` and `failure_scenario`.
+
+In our design, the Qwen reviewer is the system under test: it writes the comments, and AACR's answer key and judge score them.
+
+**Who wrote the reference comments** (counted from `positive_samples.json`):
+
+| | Human | AI-generated |
+|---|---|---|
+| Comments | 392 | 1,114 (74%) |
+| Context they need (diff / file / repo) | 196 / 136 / 60 | 558 / 382 / 174 |
+| Most common categories | Maintainability and Readability 221, Code Defect 127 | Code Defect 583, Maintainability and Readability 405 |
+
+- **AI sources:** GPT-5.2 379, Claude Code (Claude 4.5 Sonnet) 190, GLM-4.7 182, Qwen-Coder-480B 162, Gemini-3-Pro 101, DeepSeek-V3.2 100.
+- **Human coverage:** 178 of 196 PRs have at least one human comment.
+- **Size per PR:** the median PR has 6 reference comments.
+- **Overlap:** 428 comments sit on the same lines as another comment in the same PR, often several models raising the same issue.
+
+#### 8.5.2 Reviewer: how a review is produced
+
+**Decided: a one-call frozen reviewer.**
+
+- **Model:** `Qwen/Qwen3.8-27B` on the project's cloud GPU, one call per (PR, context level).
+- **Input:** a fixed system prompt plus that level's `context.md`.
+- **Decoding:** greedy.
+- **Output:** a JSON list of findings with `path`, `start_line`, `end_line`, `side` and `comment`. The `comment` field becomes the judge's `note`.
+- **What is verified so far:** the Hugging Face repository exists (Apache-2.0) and its tokenizer is cached at revision `37561816e66b5b9153b1b64c10968c18c1e6f4a0`.
+- **What is not verified:** that the model, plus the largest level's input, fits the GPU's memory and context window.
+
+Options considered and not chosen:
+
+| Option | Why not (or what it is kept for) |
+|---|---|
+| Several sampled reviews per (PR, level), k = 3–5, temperature > 0 | Estimates noise but multiplies cost by k. Kept as a fallback if greedy runs turn out not to repeat |
+| Agent reviewers (Claude Code, Codex) through AACR's harness | They choose their own context, so they cannot be selector labels. Kept as an optional reference point for `L07_agent` |
+
+**Determinism caveat:** greedy decoding on our GPU is not guaranteed to repeat exactly. vLLM's batch-invariant mode did not list the RTX PRO 6000 in the documentation checked on November 7. A pilot with repeated runs should measure run-to-run noise.
+
+**Decided: our own fixed review prompt.** It acts as the reviewer's "skill": one short system prompt covering what to look for (correctness, security, performance, maintainability), using only the diff and the context given, and the exact JSON output. It may borrow AACR's finding fields (summary, failure scenario, fix). Rules:
+
+- **Identical everywhere:** the same prompt for every PR and every level, versioned, with its hash stored with each outcome. The prompt never mentions levels or that context was trimmed.
+- **Fixed findings cap:** for example, "at most N findings, most important first". AACR's precision counts every generated comment, so the cap trades precision against recall and must not vary.
+- **Neutral missing-context rule:** for example, "if something you need is not shown, do not assume it", worded the same at every level.
+- **Freeze before scale:** tune the wording on a few development PRs at most, never on test PRs, then freeze. Changing it later means regenerating the table.
+
+Options considered and not chosen:
+
+| Option | Why not |
+|---|---|
+| Copy an agent's built-in review skill (Claude Code `/code-review`, Codex `/review`) as the prompt | Those instructions assume the reviewer can open files and run git; a one-call reviewer would be told to take actions it cannot. They also change between tool versions |
+| Run AACR's harness with agents | Agents pick their own context; useful only as a comparison baseline |
+
+**Decided: Claude is an allowed fallback reviewer.** Switch only if Qwen fails criteria fixed before a small pilot (about 10–20 PRs at every level):
+
+- valid JSON on nearly all outputs (for example ≥ 98%);
+- quality clearly rises from `L01` to the higher levels;
+- recall is not near zero at the best level;
+- run-to-run noise is smaller than the gaps between levels.
+
+Never mix reviewers in one outcome table: a switch means re-reviewing every cell. Keep the reviewer behind one interface (prompt in, findings JSON out) so a switch changes only the client.
+
+Differences to expect with Claude, from the Claude API documentation as cached on October 6, 2026:
+
+- **No greedy decoding:** current models reject `temperature`, `top_p` and `top_k`. On Claude Opus 5.5, thinking cannot be disabled; an effort level controls it instead.
+- **Guaranteed JSON:** structured outputs (`output_config.format`) enforce the findings schema.
+- **Refusals:** safety classifiers can decline a request; count them like malformed outputs.
+- **Dated cost estimate:** vllm#17425 totals about 453k Qwen tokens per PR across the ten levels, which gives roughly 89M input tokens for 196 PRs. Claude's tokenizer counts differently.
+
+  | Model | Input $/MTok | Rough input cost | With the Batch API (50% off) |
+  |---|---|---|---|
+  | Claude Opus 5.5 | $4 | ~$355 | ~$178 |
+  | Claude Sonnet 5.5 | $2 | ~$178 | ~$89 |
+
+  Output, including thinking, adds more ($20 and $10 per MTok respectively).
+- **Prompt caching:** helps across levels only if each level's text is the previous level's text with new blocks appended. The current renderer interleaves items by rank.
+- **Judge family:** if Claude reviews, use a judge from another model family, or at least report the correlation.
+- **Reproducibility:** record the exact model ID and run dates; API models are eventually retired.
+
+A middle path stays open: keep Qwen for the table and run Claude on a subset, as the optional second-reviewer test in Section 9.2.
+
+#### 8.5.3 Scoring: AACR's file-level semantic coverage metric
+
+**Decided: AACR's official metric is the primary score**, so results compare with numbers produced by AACR's own harness. As implemented in `evaluation/judge.py`:
+
+1. **Group by file.** Generated and reference comments are compared only within the same normalized file path. A generated comment on a file with no references is counted as a miss without calling the judge.
+2. **One judge call per generated comment.** The judge sees that comment and the numbered list of all references for the same file, and returns every reference that expresses the same concern. Line numbers are context only, and one generated comment can cover several references. The judge is any OpenAI-compatible model (`JUDGE_MODEL`), called at temperature 0.
+3. **No credit for repeats.** In generation order, a comment counts toward precision only if it covers at least one reference not already covered.
+4. **Scores:**
+   - recall = references covered ÷ references;
+   - precision = comments that covered something new ÷ generated comments;
+   - balanced score = their harmonic mean.
+
+   AACR's `summary` pools counts over all PRs before dividing.
+
+The harness writes `metrics/<benchmark>/<reviewer>/<run_id>/metrics_<reviewer>_<timestamp>.json`, which contains:
+
+- `ex_info`: run information and `score_mode`;
+- `summary`: the totals and the three scores;
+- `eval_res`: one entry per PR, with each generated comment's `matched_gt_indices`, `judge_reason` and `hit_new_gt`, and a `file_semantic_match` flag on each reference.
+
+The older one-to-one metric (`--use-deprecated-score`: path, side, line distance, then semantic match) is not comparable and is not used.
+
+**Worked example (illustrative only).** The references are vllm#17425's real 8 comments. The review is **made up** and the judge outcomes are expected, not observed.
+
+| Ref | File : lines | Source | Concern |
+|---|---|---|---|
+| #0 | `logger.py` 55–58 | AI (Claude Code) | `lru_cache` keys on `*args`, breaking "print once" |
+| #1 | `logger.py` 55–58 | AI (GPT-5.2) | the cache can grow without bound |
+| #2 | `weight_utils.py` 718–721 | AI (GPT-5.2) | does `warning_once` accept `(msg, *args)`? |
+| #3 | `weight_utils.py` 719 | AI (Claude Code) | two spaces before `# noqa` |
+| #4 | `qwen2_moe.py` 465 | AI (Claude Code) | two spaces before `# noqa` |
+| #5 | `profiling.py` 218–224 | AI (GPT-5.2) | use `%d` for the token count |
+| #6 | `profiling.py` 243–249 | AI (GPT-5.2) | same `%d` point |
+| #7 | `profiling.py` 249 | Human | unhashable value passed to the `lru_cache`-wrapped `warning_once` |
+
+| Made-up comment | File : line | Judge matches | New coverage? |
+|---|---|---|---|
+| G1: `_get_mm_num_tokens` returns a dict; `warning_once` is cached, so `TypeError` | `profiling.py` 249 | #7 | yes |
+| G2: same problem in the encoder path | `profiling.py` 224 | #7 | no (repeat) |
+| G3: caching on `*args` prints the same message again | `logger.py` 56 | #0 | yes |
+| G4: split the long warning string | `weight_utils.py` 718 | none | no |
+| G5: any comment | `config.py` 400 | no references on the file | no |
+
+Here recall = 2/8 = 0.250, precision = 2/5 = 0.400, and the balanced score = 0.308. G4 and G5 count as misses even if they are valid issues the references lack, so precision is pessimistic.
+
+**Decided: keep per-reference coverage.** Store which references each review covered, not only the totals. This allows any later variant (human only, per source model, per context label) without new judge calls.
+
+Options considered and not chosen as the primary score:
+
+| Option | Role |
+|---|---|
+| Retention versus the `L10_all` review (which findings survive with less context) | A comparison point for Section 8.1, not the truth |
+| Rubric score from a judge, without references (usefulness 1–10) | Secondary only: it credits findings missing from the references but is noisy and favors long reviews |
+| Side-by-side preference between levels | Possible for "same quality with less context" claims; adjacent levels only, to limit cost |
+| AACR's deprecated one-to-one metric | Not comparable with the current metric |
+
+**Open: which judge model.**
+
+| Judge option | Trade-off |
+|---|---|
+| A local open model on our GPU | Free, but correlated with the reviewer if it is the same family |
+| An API model (Claude or GPT) | Stronger, but costs money. AACR's judge makes one call per generated comment: about 16k calls for 196 PRs × 10 levels × an assumed ~8 comments |
+| AACR's mock matcher | Pipeline testing only |
+
+Whichever is chosen must be validated against a blinded human audit (Section 8.2).
+
+#### 8.5.4 Which references count
+
+**Decided: score against all 1,506 references, AI-generated included**, as AACR's own metric does. Dropping AI comments would leave 392 references and 18 PRs with none. The AI comments need repository context as often as the human ones (8.5.1) and carry most of the defect findings.
+
+Required diagnostics:
+
+- **Human-only recall (392 comments):** the stricter check of whether reviews catch what real reviewers caught.
+- **Recall per AI source model:** a reviewer may match its own family's comments more easily. 162 references come from Qwen-Coder-480B and 190 from Claude Code. Report any outsized same-family advantage.
+- **Repeats:** many references repeat one issue. AACR's matching lets one generated comment cover several references, so issues many models flagged weigh more. Report this, and consider a version that groups duplicate references later.
+
+Caveats:
+
+- **Not ground truth:** AI references are "what strong models flagged and, per the AACR paper, experts accepted". We have not audited that verification (Section 4.2).
+- **Some are low value or questionable:** some are nitpicks (vllm#17425 has two "two spaces before `# noqa`" comments), and at least one is known to be inconsistent with its file (Langflow PR 6044, Section 4.4).
+- **Not all from agents:** only the Claude Code comments are known, from their source name, to come from an agent working in the repository.
+
+Option considered and not chosen as the primary set: human comments only. It is kept as the secondary score above.
+
+#### 8.5.5 Score granularity
+
+The metric works at four levels:
+
+1. **Per generated comment:** which references it covered, and whether any were new.
+2. **Per reference:** covered or not.
+3. **Per PR:** that PR's counts and scores.
+4. **Pooled over PRs:** what AACR's `summary` reports.
+
+Pooled and per-PR-averaged scores differ. With PR A covering 2 of 8 references and a hypothetical PR B covering 3 of 4:
+
+- **pooled recall** = 5/12 = 0.417, so PRs with many references weigh more;
+- **averaged recall** = (0.25 + 0.75)/2 = 0.50.
+
+**Decided:**
+
+- **Store:** per-PR counts and per-reference coverage for every (PR, level).
+- **Report:** pooled scores (comparable with AACR) and per-PR averages, as Section 8.3 already requires.
+- **Treat per-PR scores as coarse:** with a median of 6 references, a PR with one reference scores 0 or 1. Labels built from per-PR differences need a tolerance or repeated reviews.
+
+#### 8.5.6 When the reviewer runs: an offline outcome table
+
+**Decided: an offline outcome table.**
+
+- **Built once:** during data processing, the frozen reviewer reviews every (PR, level) and the judge scores every review, in batch jobs on the cloud GPU. That is 196 × 10 = 1,960 reviews, × k if sampled.
+- **No reviewer in training or evaluation:** selector training and evaluation are table lookups.
+- **Why this works:** the selector chooses among the ten fixed levels (Section 5.5.3), so every possible choice is already reviewed. This meets Section 9.2's rule that a chosen context must actually have been reviewed.
+- **Test cells:** test PRs are reviewed during processing like the rest, which is valid because the reviewer is never trained. Their scores are used only in the single final evaluation, never for tuning.
+- **Selector inputs:** input-side features only (PR text, diff, trace statistics, each level's token count); never reviews or scores.
+
+The reviewer must run again when:
+
+- a level is changed or added (only the affected cells);
+- the reviewer, prompt, decoding settings or judge changes (the whole table);
+- new PRs are added;
+- the selector picks a context outside the ten levels, for example at item level;
+- the system is used for real, which is application, not evaluation.
+
+Options considered and not chosen:
+
+| Option | Why not |
+|---|---|
+| Reviewer in the loop during training and evaluation | Needed only for arbitrary item-level subsets; far too slow on one GPU |
+| Hybrid: table for training, live runs for test-time choices never reviewed | Only relevant if selection later moves to item level (Section 9.1) |
+
+#### 8.5.7 How the pieces fit
+
+1. **Post-processed dataset (inputs and answer key, no scores):**
+   - per PR: each level's `context.md` and token counts, plus metadata (language, repository, split);
+   - per reference: ID, location, human or AI, source model, category and context label.
+2. **Outcome table (after the reviewer and judge):**
+   - per (PR, level): the generated comments, counts, recall, precision, balanced score and tokens;
+   - per generated comment: matched references and whether the coverage was new;
+   - per (reference, level): covered or not.
+3. **Labels: compare levels within each PR, not against the dataset.** The dataset has no score to compare with. Candidate labeling rules, to choose on validation PRs:
+   - **best trade-off:** maximize quality − λ × (tokens ÷ the largest level's tokens);
+   - **smallest sufficient level:** the smallest level within a tolerance (for example 90%) of the PR's best quality;
+   - **per-level regression:** predict each level's quality, then pick the cheapest level above a quality floor.
+
+   Illustration with **made-up** numbers for vllm#17425 and λ = 0.2:
+
+   | Level | Tokens | Recall | Recall − 0.2 × (tokens ÷ 133k) |
+   |---|---|---|---|
+   | `L01` | 5k | 0.125 | 0.118 |
+   | `L04` | 25k | 0.250 | 0.212 (best trade-off) |
+   | `L07` | 45k | 0.250 | 0.182 |
+   | `L10` | 133k | 0.375 | 0.175 |
+
+   The "best trade-off" label is `L04`; the "within 90% of best recall" label is `L10`. The rule changes the label, so the rule and its parameter are frozen on validation data.
+4. **Evaluation:** for each test PR, the selector picks a level; look up that cell's score and tokens and pool them over test PRs. Compare against:
+   - always using one fixed level;
+   - a random level per PR;
+   - the per-PR oracle (best level), which is an upper bound.
+
 ## 9. Selector objective and supervision
 
 Let D be the mandatory diff, C the fixed candidate pool, S a subset of C, R the frozen reviewer, H the audited references, and T the actual reviewer prompt-token cost. Conceptually, we want:
@@ -548,6 +796,8 @@ These are empirical constraints, not guaranteed per-task promises. A single-refe
 A training surrogate can combine measured quality and normalized token cost, for example `utility = quality - lambda * token_fraction`. This is a proposed objective, not a validated score. Tune lambda on validation and display the resulting frontier rather than selecting a favorable test point.
 
 ### 9.1 How to obtain labels
+
+**Decided Nov 8 for the level design:** S is restricted to the ten nested levels of Section 5.5.3. Labels come from the (PR × level) outcome table by comparing levels within each PR (Section 8.5.7), so every choice is covered and no subset search is needed. The general subset guidance below still applies if selection later moves to item-level subsets.
 
 The human comment is a reference for judging the reviewer; it is not directly a selector output. Generate selector supervision by evaluating multiple subsets:
 
@@ -671,6 +921,8 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 
 **Gate:** repeatable outcomes with complete provenance, meaningful quality variation, and enough independent training tasks. Publish the achieved coverage of subset search; do not call it exhaustive or optimal. If outcomes are flat, deepen retrieval/reviewer/error analysis rather than force a learning claim.
 
+**Decided (Nov 8):** for the level design, Phase C's outcomes are the offline (PR × level) table of Section 8.5.6: 196 × 10 reviews by the frozen reviewer, each scored by the judge, with per-reference coverage stored. Run a pilot of about 10–20 PRs first, both to check the reviewer against the criteria in Section 8.5.2 and to estimate GPU time. Each cloud run needs fresh authorization.
+
 ### Phase D — learned selector and validation frontier
 
 **Deliver:** compact trained selector, configuration and checkpoints, three-seed results where feasible, matched-budget baselines, learning curves, and end-to-end validation predictions.
@@ -727,8 +979,11 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Python-only or broader language scope | Parse support and independent repository counts after filtering |
 | RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: behavior on the other languages and very large repositories |
 | Fixed-budget versus content-defined context levels | With fixed budgets, levels did not contain their named content on vllm#17425 (Section 5.5.4); compare both on a pilot |
-| Reviewer model/size/precision | Measured review quality, memory, latency, and window fit |
-| Review matcher/judge | Agreement with blinded human audit and treatment of unknown findings |
+| Reviewer model/size/precision | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call, greedy (Section 8.5.2). Still needed: memory and window fit, latency, run-to-run noise |
+| Switching the reviewer to Claude | Allowed only if Qwen fails pilot criteria fixed in advance (Section 8.5.2); a switch regenerates the whole table |
+| Review prompt wording and findings cap | Development PRs only, then frozen and versioned (Section 8.5.2) |
+| Review matcher/judge | **Metric decided Nov 8:** AACR's file-level semantic coverage (Section 8.5.3). **Judge model still open** (local open model vs API model); needs agreement with a blinded human audit and a stated treatment of unknown findings |
+| Labeling rule for the selector | Best trade-off (λ) vs smallest level within a tolerance vs per-level regression (Section 8.5.7), chosen on validation PRs |
 | Severity and adoption use | Reliable annotations; otherwise remain auxiliary or omitted |
 | Selector architecture and size | Compact baseline results and learning curves; 17B is not assumed necessary |
 | Quality tolerance and token targets | Development evidence and explicit precision/recall safeguards |
