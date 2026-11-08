@@ -1,0 +1,59 @@
+# Settings for scripts/build_tracer_context.py (codebase-memory-mcp context builder).
+# Three stages: `tracer` decides what the tool collects (changing it needs a re-trace),
+# `selection` and `ranking` decide what is kept, `packing` decides how much text fits.
+# The numbers below are starting points, not tuned values.
+version: 1
+
+tracer:
+  binary: data/codebase_memory_trial/bin/codebase-memory-mcp   # relative to the project root
+  workers: 4            # pinned: 1 worker builds a slightly different graph than 2+
+  index_mode: full      # full | moderate | fast
+  callers:              # inbound walk: who uses the changed code
+    depth: 2
+    edge_types: [CALLS, USAGE, TESTS, MENTIONS, DEFINES, REFERENCES_FILE]
+  callees:              # outbound walk: what the changed code calls
+    depth: 2            # the tool follows only CALLS links outbound
+
+selection:
+  seed_scope: innermost # innermost: drop a changed class when a changed method inside it is kept | all
+  drop_labels: [Module, File, Folder, Project, Package]
+  drop_builtins: true
+  test_globs:           # callers in these paths count as tests
+    - "tests/**"
+    - "test/**"
+    - "**/tests/**"
+    - "**/test/**"
+    - "**/test_*.py"
+    - "**/*_test.py"
+    - "**/*_test.go"
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/src/test/**"
+  limits:               # per kind: deepest hop kept and most items kept (null = no limit)
+    changed: {max_hop: 0, max_items: null}
+    callee:  {max_hop: 2, max_items: 40}
+    caller:  {max_hop: 2, max_items: 40}
+    test:    {max_hop: 1, max_items: 5}
+    doc:     {max_hop: 2, max_items: 3}
+
+ranking:
+  # Items are sorted by these keys in order; path, line and name always break ties.
+  #   hop: 0 (changed) first   kind: kind_order   edge: edge_order
+  #   same_file: items in a changed file first   size: shorter items first
+  rank_by: [hop, kind, edge, same_file, size]
+  kind_order: [changed, callee, caller, test, doc]
+  edge_order: [CALLS, USAGE, TESTS, MENTIONS, REFERENCES_FILE, DEFINES]
+
+packing:
+  token_budget: 8000            # tokens of context text, excluding the diff and prompt
+  tokenizer: Qwen/Qwen3.8-27B   # loaded offline only; "approx" = UTF-8 bytes / 4
+  # Most of the budget each kind may use in the first pass (null = no cap). Shares scale
+  # with token_budget. The diff is already in the prompt, so changed code gets a cap.
+  kind_shares: {changed: 0.35, callee: 0.3, caller: 0.2, test: 0.1, doc: 0.05}
+  redistribute_unused: true     # second pass: leftover budget goes to the next-ranked items
+  max_lines_per_item: {changed: 40, default: 120}
+  oversize: {changed: hunks, default: head}   # hunks: windows around changed lines | head | skip
+  hunk_context_lines: 5
+  include_decorators: true      # the tool's ranges start below decorators/annotations
+  extend_doc_sections: true     # the tool's Markdown sections cover only the heading
+  line_numbers: false
