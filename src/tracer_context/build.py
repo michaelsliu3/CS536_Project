@@ -1,31 +1,43 @@
-"""Turn a codebase-memory-mcp trace into a ranked, token-budgeted review context.
+"""Turn a codebase-memory-mcp trace into a ranked, token-budgeted review input.
 
 Pure functions over the trace dict written by ``src.tracer_context.cbm.trace`` and the
 files of the checked-out PR head. No model or tool calls happen here; token counting
 is supplied by the caller.
+
+The output has up to three sections: the PR title and description, the diff, and the
+repository context (code items ranked and packed into the token budget). A config can
+name a parent level; the parent's chosen items are then included first, so every line a
+smaller level shows is also shown by the larger one.
 """
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import json
 import re
 import warnings
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable
 
-KINDS = ("changed", "callee", "caller", "test", "doc")
+KINDS = ("changed", "file", "callee", "caller", "test", "search", "guide", "doc")
 RANK_KEYS = ("hop", "kind", "edge", "same_file", "size")
 OVERSIZE_POLICIES = ("hunks", "head", "skip")
-RENDER_VERSION = 1
+RENDER_VERSION = 2
 SEPARATOR = "\n\n"  # between items in the context text
+CONTEXT_HEADING = "## Repository context"
+WHOLE_FILE = 10 ** 9  # end line meaning "to the end of the file"
+_NOT_CODE_LABELS = ("Section", "File", "Guide", "TextHit")
 
 # Expected config shape: a type, a tuple of allowed values, or a nested dict.
 _OPT_INT = (int, type(None))
+_OPT_STR = (str, type(None))
 SCHEMA = {
     "version": int,
+    "level": {"name": str, "parent": _OPT_STR},
+    "input": {"pr_text": bool, "diff": bool, "strip_html_comments": bool},
     "tracer": {
         "binary": str,
         "workers": int,
@@ -35,9 +47,14 @@ SCHEMA = {
     },
     "selection": {
         "seed_scope": ("innermost", "all"),
+        "member_labels": list,
+        "fold_max_lines": int,
         "drop_labels": list,
         "drop_builtins": bool,
         "test_globs": list,
+        "file_exclude_globs": list,
+        "guide_scope": ("root", "ancestors"),
+        "search": {"min_name_length": int, "max_hits_per_name": int, "window_lines": int},
         "limits": dict,
     },
     "ranking": {"rank_by": list, "kind_order": list, "edge_order": list},
@@ -48,7 +65,7 @@ SCHEMA = {
         "redistribute_unused": bool,
         "max_lines_per_item": dict,
         "oversize": dict,
-        "hunk_context_lines": int,
+        "hunk_context_lines": dict,
         "include_decorators": bool,
         "extend_doc_sections": bool,
         "line_numbers": bool,
@@ -92,18 +109,29 @@ def _check(value, spec, where):
             raise ValueError(f"{where}: expected {spec}, got {type(value).__name__}")
 
 
+def _per_kind(packing, key, check, message):
+    table = packing[key]
+    if "default" not in table or not set(table) <= set(KINDS) | {"default"}:
+        raise ValueError(f"config.packing.{key} needs 'default' and only kind names as keys")
+    if not all(check(v) for v in table.values()):
+        raise ValueError(f"config.packing.{key} values must be {message}")
+
+
 def validate_config(cfg: dict) -> dict:
     """Reject missing or unknown keys and bad values, so typos never pass silently."""
     _check(cfg, SCHEMA, "config")
     if cfg["version"] != 1:
         raise ValueError("config.version must be 1")
-    for key in ("workers",):
-        if cfg["tracer"][key] < 1:
-            raise ValueError(f"config.tracer.{key} must be >= 1")
+    level = cfg["level"]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", level["name"]) or level["parent"] == level["name"]:
+        raise ValueError("config.level.name must be a simple name, and not its own parent")
+    if cfg["tracer"]["workers"] < 1:
+        raise ValueError("config.tracer.workers must be >= 1")
     for walk in ("callers", "callees"):
         if not 1 <= cfg["tracer"][walk]["depth"] <= 15:
             raise ValueError(f"config.tracer.{walk}.depth must be 1-15")
-    limits = cfg["selection"]["limits"]
+    selection = cfg["selection"]
+    limits = selection["limits"]
     if set(limits) != set(KINDS):
         raise ValueError(f"config.selection.limits must have exactly {list(KINDS)}")
     for kind, limit in limits.items():
@@ -111,20 +139,21 @@ def validate_config(cfg: dict) -> dict:
         for key, value in limit.items():
             if value is not None and value < 0:
                 raise ValueError(f"config.selection.limits.{kind}.{key} must be >= 0 or null")
+    if selection["fold_max_lines"] < 0:
+        raise ValueError("config.selection.fold_max_lines must be >= 0")
+    search = selection["search"]
+    if search["min_name_length"] < 1 or search["max_hits_per_name"] < 0 or search["window_lines"] < 0:
+        raise ValueError("config.selection.search: min_name_length >= 1, others >= 0")
     ranking = cfg["ranking"]
     if not set(ranking["rank_by"]) <= set(RANK_KEYS) or len(set(ranking["rank_by"])) != len(ranking["rank_by"]):
         raise ValueError(f"config.ranking.rank_by: use distinct keys from {list(RANK_KEYS)}")
     if sorted(ranking["kind_order"]) != sorted(KINDS):
         raise ValueError(f"config.ranking.kind_order must list each of {list(KINDS)} once")
     packing = cfg["packing"]
-    for key in ("oversize", "max_lines_per_item"):
-        if "default" not in packing[key] or not set(packing[key]) <= set(KINDS) | {"default"}:
-            raise ValueError(f"config.packing.{key} needs 'default' and only kind names as keys")
-    if not all(v in OVERSIZE_POLICIES for v in packing["oversize"].values()):
-        raise ValueError(f"config.packing.oversize values must be in {list(OVERSIZE_POLICIES)}")
-    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1
-               for v in packing["max_lines_per_item"].values()):
-        raise ValueError("config.packing.max_lines_per_item values must be integers >= 1")
+    is_int = lambda v, low: isinstance(v, int) and not isinstance(v, bool) and v >= low  # noqa: E731
+    _per_kind(packing, "oversize", lambda v: v in OVERSIZE_POLICIES, f"one of {list(OVERSIZE_POLICIES)}")
+    _per_kind(packing, "max_lines_per_item", lambda v: is_int(v, 1), "integers >= 1")
+    _per_kind(packing, "hunk_context_lines", lambda v: is_int(v, 0), "integers >= 0")
     shares = packing["kind_shares"]
     if not set(shares) <= set(KINDS):
         raise ValueError(f"config.packing.kind_shares keys must be in {list(KINDS)}")
@@ -134,10 +163,20 @@ def validate_config(cfg: dict) -> dict:
             raise ValueError(f"config.packing.kind_shares.{kind} must be between 0 and 1, or null")
     if sum(s for s in shares.values() if s is not None) > 1 + 1e-9:
         raise ValueError("config.packing.kind_shares must add up to at most 1")
-    for key in ("token_budget", "hunk_context_lines"):
-        if packing[key] < 0:
-            raise ValueError(f"config.packing.{key} must be >= 0")
+    if packing["token_budget"] < 0:
+        raise ValueError("config.packing.token_budget must be >= 0")
     return cfg
+
+
+def merge_config(base: dict, override: dict) -> dict:
+    """Deep merge for config inheritance: mappings merge key by key, anything else replaces."""
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_config(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
 
 
 def config_sha256(cfg: dict) -> str:
@@ -167,12 +206,13 @@ def glob_to_regex(pattern: str) -> re.Pattern:
 
 
 def is_test_path(path: str, globs) -> bool:
+    """True when `path` matches any of the globs (used for test paths and file exclusions)."""
     return any(glob_to_regex(g).match(path) for g in globs)
 
 
 def parse_hunks(diff_text: str) -> dict[str, list[list[int]]]:
-    """New-side changed line ranges per file from `git diff -U0`. Pure deletions become a
-    one-line marker at the following line."""
+    """New-side line ranges per file from `git diff`. With -U0 these are the changed lines;
+    pure deletions become a one-line marker at the following line."""
     hunks: dict[str, list[list[int]]] = {}
     current = None
     for line in diff_text.splitlines():
@@ -209,24 +249,83 @@ def _excluded(item_or_row, reason, **extra):
     return entry
 
 
+def _guide_items(trace: dict, selection: dict) -> list[Item]:
+    """Repository guide files at the root (and .github/.cursor), plus, with `ancestors`,
+    guides in any directory that contains a changed file."""
+    ancestors = {"."}
+    for path in trace["changed_files"]:
+        ancestors.update(str(parent) for parent in PurePosixPath(path).parents)
+    items = []
+    for path in trace.get("guide_files", []):
+        parent = str(PurePosixPath(path).parent)
+        if parent in (".", ".github", ".cursor/rules") or (
+                selection["guide_scope"] == "ancestors" and parent in ancestors):
+            items.append(Item(path, "Guide", path, 1, WHOLE_FILE, "guide", 1, "GUIDE"))
+    return items
+
+
+def _search_items(trace: dict, selection: dict) -> tuple[list[Item], list[dict]]:
+    """Windows around text-search hits for changed symbols' names, merged per file."""
+    search, excluded, windows = selection["search"], [], {}
+    for name, entry in sorted(trace.get("text_hits", {}).items()):
+        row = {"qn": name, "kind": "search", "hop": 1, "file": None}
+        if len(name) < search["min_name_length"]:
+            excluded.append(_excluded(row, "search_name_too_short"))
+            continue
+        if entry["total"] > search["max_hits_per_name"]:
+            excluded.append(_excluded(row, "search_name_too_common", hits=entry["total"]))
+            continue
+        for path, line in entry["hits"]:
+            low, high = max(1, line - search["window_lines"]), line + search["window_lines"]
+            windows.setdefault(path, []).append((low, high, name))
+    items = []
+    for path in sorted(windows):
+        merged = []
+        for low, high, name in sorted(windows[path]):
+            if merged and low <= merged[-1][1] + 1:
+                merged[-1][1] = max(merged[-1][1], high)
+                merged[-1][2].add(name)
+            else:
+                merged.append([low, high, {name}])
+        for low, high, names in merged:
+            items.append(Item(f"{path}:{low}-{high}", "TextHit", path, low, high, "search", 1, "TEXT",
+                              ", ".join(sorted(names))))
+    return items, excluded
+
+
 def collect_items(trace: dict, selection: dict) -> tuple[list[Item], list[dict]]:
-    """Seeds, callers and callees as typed items; drop noise; merge duplicates."""
+    """Every candidate item, typed and deduplicated, plus the reasons for dropping others."""
     nodes, excluded = trace["nodes"], []
     seeds = [Item(s["qn"], s["label"], s["file"], int(s["start"]), int(s["end"]), "changed", 0)
              for s in trace["seeds"]]
+    members = set(selection["member_labels"])
+
+    def foldable(item):  # struct fields, constants, 1-2 line interface methods, ...
+        return item.label in members or item.end - item.start + 1 <= selection["fold_max_lines"]
+
+    def contains(outer, inner):
+        return (outer is not inner and outer.file == inner.file and outer.start <= inner.start
+                and inner.end <= outer.end and (outer.start, outer.end) != (inner.start, inner.end))
+
     if selection["seed_scope"] == "innermost":
+        # Keep the innermost changed symbols, ignoring members so a struct beats its fields.
         kept = []
         for seed in seeds:
-            inner = sorted(t.qn for t in seeds if t is not seed and t.file == seed.file
-                           and seed.start <= t.start and t.end <= seed.end
-                           and (t.start, t.end) != (seed.start, seed.end))
+            inner = sorted(t.qn for t in seeds if not foldable(t) and contains(seed, t))
             if inner:
                 excluded.append(_excluded(seed, "contains_changed", by=inner[0]))
             else:
                 kept.append(seed)
-        seeds = kept
+        # A member inside a kept changed symbol is shown as part of it.
+        seeds = []
+        for seed in kept:
+            outer = sorted(c.qn for c in kept if contains(c, seed)) if foldable(seed) else []
+            if outer:
+                excluded.append(_excluded(seed, "folded_into", by=outer[0]))
+            else:
+                seeds.append(seed)
     seed_qns = {s["qn"] for s in trace["seeds"]}
-    drop_labels = set(selection["drop_labels"])
+    drop_labels = set(selection["drop_labels"]) | members
     candidates = list(seeds)
 
     for row in trace["callers"]:
@@ -268,7 +367,17 @@ def collect_items(trace: dict, selection: dict) -> tuple[list[Item], list[dict]]
         candidates.append(Item(row["qn"], row["label"], node["file"], node["start"], node["end"],
                                "callee", int(row["hop"]), "CALLS", callee_via.get(row["qn"])))
 
-    # One item per symbol: keep the closest relation, remember every kind it had.
+    for path in trace["changed_files"]:  # whole changed files (post-change version)
+        if is_test_path(path, selection["file_exclude_globs"]):
+            excluded.append(_excluded({"qn": path, "kind": "file", "hop": 0, "file": path}, "file_excluded"))
+        else:
+            candidates.append(Item(path, "File", path, 1, WHOLE_FILE, "file", 0))
+    candidates += _guide_items(trace, selection)
+    search_items, search_excluded = _search_items(trace, selection)
+    candidates += search_items
+    excluded += search_excluded
+
+    # One item per name: keep the closest relation, remember every kind it had.
     by_qn: dict[str, list[Item]] = {}
     for item in candidates:
         by_qn.setdefault(item.qn, []).append(item)
@@ -301,7 +410,7 @@ def rank_key(item: Item, ranking: dict, changed_files) -> tuple:
             parts.append(ranking["kind_order"].index(item.kind))
         elif key == "edge":
             order = ranking["edge_order"]
-            parts.append(-1 if item.kind == "changed" else
+            parts.append(-1 if item.kind in ("changed", "file") else
                          order.index(item.edge) if item.edge in order else len(order))
         elif key == "same_file":
             parts.append(0 if item.file in changed_files else 1)
@@ -387,16 +496,20 @@ def _merge(ranges):
     return [tuple(r) for r in merged]
 
 
+def _per_kind_value(packing, key, kind):
+    return packing[key].get(kind, packing[key]["default"])
+
+
 def choose_segments(start, end, kind, file_hunks, packing):
     """Line segments to show for an item, or None when an oversize item is skipped."""
-    limit = packing["max_lines_per_item"].get(kind, packing["max_lines_per_item"]["default"])
+    limit = _per_kind_value(packing, "max_lines_per_item", kind)
     if end - start + 1 <= limit:
         return [(start, end)]
-    policy = packing["oversize"].get(kind, packing["oversize"]["default"])
+    policy = _per_kind_value(packing, "oversize", kind)
     if policy == "skip":
         return None
     if policy == "hunks":
-        ctx = packing["hunk_context_lines"]
+        ctx = _per_kind_value(packing, "hunk_context_lines", kind)
         windows = [(max(start, a - ctx), min(end, b + ctx)) for a, b in file_hunks if b >= start and a <= end]
         if windows:
             segments, shown = [], 0
@@ -411,6 +524,12 @@ def choose_segments(start, end, kind, file_hunks, packing):
 
 
 def _header(item: Item, start: int, end: int) -> str:
+    if item.kind == "file":
+        return f"### changed file: {item.file}  [lines {start}-{end}]"
+    if item.kind == "guide":
+        return f"### guide: {item.file}  [lines {start}-{end}]"
+    if item.kind == "search":
+        return f"### text search for {item.via}: [{item.file}:{start}-{end}]"
     title = item.kind if item.kind == "changed" else f"{item.kind} (hop {item.hop})"
     header = f"### {title}: {item.qn}  [{item.file}:{start}-{end}]"
     if item.via and item.kind == "callee":
@@ -418,6 +537,11 @@ def _header(item: Item, start: int, end: int) -> str:
     elif item.via:
         header += f"  {item.edge or 'LINKS'} {item.via}"
     return header
+
+
+def _fence(text: str) -> str:
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 def render_item(item: Item, lines: list[str], segments, start: int, end: int, line_numbers: bool) -> str:
@@ -432,43 +556,82 @@ def render_item(item: Item, lines: list[str], segments, start: int, end: int, li
     if previous is not None and previous < end:
         body.append(f"... (lines {previous + 1}-{end} omitted)")
     code = "\n".join(body)
-    longest = max((len(run) for run in re.findall(r"`+", code)), default=0)
-    fence = "`" * max(3, longest + 1)
+    fence = _fence(code)
     language = LANG_BY_EXT.get(Path(item.file).suffix.lower(), "")
     return f"{_header(item, start, end)}\n{fence}{language}\n{code}\n{fence}"
 
 
-def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[str], int],
-                  tokenizer_name: str) -> tuple[str, dict]:
-    """Return (context text, selection report) for one traced PR."""
-    selection, ranking, packing = cfg["selection"], cfg["ranking"], cfg["packing"]
+def render_pr(pr: dict, strip_html_comments: bool) -> str:
+    body = (pr.get("body") or "").replace("\r\n", "\n")
+    if strip_html_comments:  # invisible on GitHub; PR templates are full of them
+        body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    return f"## Pull request\n\nTitle: {(pr.get('title') or '').strip()}\n\n{body or '(no description)'}"
+
+
+def render_diff(diff: str) -> str:
+    fence = _fence(diff)
+    return f"## Diff\n\n{fence}diff\n{diff.rstrip()}\n{fence}"
+
+
+def _overlaps(segments_a, segments_b) -> bool:
+    return any(a <= d and c <= b for a, b in segments_a for c, d in segments_b)
+
+
+def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[str], int], tokenizer_name: str,
+                  pr: dict | None = None, parent_report: dict | None = None) -> tuple[str, dict]:
+    """Return (review input text, selection report) for one traced PR.
+
+    `pr` ({title, body, ...}) is required when `input.pr_text` is on. `parent_report` is the
+    selection report of this config's parent level; its items are included first."""
+    selection, ranking, packing, inputs = cfg["selection"], cfg["ranking"], cfg["packing"], cfg["input"]
+    if inputs["pr_text"] and pr is None:
+        raise ValueError("this config includes the PR title and description, but no PR text was given")
+    if inputs["diff"] and "diff" not in trace:
+        raise ValueError("this trace has no diff (an older trace format); trace the PR again")
+    if bool(cfg["level"]["parent"]) != (parent_report is not None):
+        raise ValueError(f"level {cfg['level']['name']!r}: parent {cfg['level']['parent']!r} needs its report "
+                         "(and only then)")
     changed_files = set(trace["changed_files"])
     hunks = trace["hunks"]
     items, excluded = collect_items(trace, selection)
-    ranked, limited = apply_limits(items, selection["limits"], ranking, changed_files)
+    forced = list(parent_report["included"]) if parent_report else []
+    forced_qns = {f["qn"] for f in forced}
+    ranked, limited = apply_limits([it for it in items if it.qn not in forced_qns],
+                                   selection["limits"], ranking, changed_files)
     excluded += limited
 
-    file_cache: dict[str, list[str] | None] = {}
+    repo_root = repo.resolve()
+    file_cache: dict[str, tuple[list[str] | None, str | None]] = {}
     decorator_cache: dict[str, dict[int, int]] = {}
 
     def read(path):
         if path not in file_cache:
             full = (repo / path).resolve()
-            ok = full.is_file() and repo.resolve() in full.parents
-            file_cache[path] = full.read_text(encoding="utf-8", errors="replace").splitlines() if ok else None
+            if not (full.is_file() and repo_root in full.parents):
+                file_cache[path] = (None, "missing_file")
+            else:
+                raw = full.read_bytes()
+                file_cache[path] = ((None, "binary") if b"\0" in raw[:8192]
+                                    else (raw.decode("utf-8", errors="replace").splitlines(), None))
         return file_cache[path]
 
-    def prepare(rank, item):
-        """Rendered block for an item, or None after recording why it cannot be shown."""
-        lines = read(item.file)
+    def render(item, lines, segments, start, end):
+        block = render_item(item, lines, segments, start, end, packing["line_numbers"])
+        # Count the block with the separator that follows it, so the sum tracks the joined text.
+        return block, count_tokens(block + SEPARATOR)
+
+    def prepare(item):
+        """A rendered candidate, or None after recording why it cannot be shown."""
+        lines, problem = read(item.file)
         if lines is None:
-            excluded.append(_excluded(item, "missing_file"))
+            excluded.append(_excluded(item, problem))
             return None
         start, end = max(1, item.start), min(item.end, len(lines))
         if end < start:
             excluded.append(_excluded(item, "bad_range"))
             return None
-        if packing["include_decorators"] and item.label != "Section":
+        if packing["include_decorators"] and item.label not in _NOT_CODE_LABELS:
             if item.file.endswith(".py") and item.file not in decorator_cache:
                 decorator_cache[item.file] = python_decorator_starts("\n".join(lines))
             start = annotation_start(lines, start, item.file, decorator_cache.get(item.file))
@@ -478,73 +641,112 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         if segments is None:
             excluded.append(_excluded(item, "oversize"))
             return None
-        block = render_item(item, lines, segments, start, end, packing["line_numbers"])
-        shown = sum(b - a + 1 for a, b in segments)
-        # Count the block with the separator that follows it, so the sum tracks the joined text.
-        return {"rank": rank, "item": item, "block": block, "tokens": count_tokens(block + SEPARATOR),
-                "start": start, "end": end, "lines_shown": shown}
+        block, tokens = render(item, lines, segments, start, end)
+        return {"item": item, "lines": lines, "start": start, "end": end, "segments": segments,
+                "block": block, "tokens": tokens}
 
     budget = packing["token_budget"]
     shares = packing["kind_shares"]
     caps = {kind: None if shares.get(kind) is None else int(budget * shares[kind]) for kind in KINDS}
-    chosen, deferred, packed = [], [], {}
+    chosen = []  # in the order items were added
     used, used_by_kind = 0, Counter()
 
-    def overlapping(prep):
-        """An already-chosen item sharing lines with this one (nested classes/methods), if any."""
-        item = prep["item"]
-        return next((qn for (s, e, qn) in packed.get(item.file, [])
-                     if s <= prep["end"] and prep["start"] <= e), None)
+    for entry in forced:  # the parent level's items, exactly as the parent showed them
+        item = Item(entry["qn"], entry["label"], entry["file"], entry["start"], entry["end"], entry["kind"],
+                    entry["hop"], entry.get("edge"), entry.get("via"), tuple(entry.get("relations", ())))
+        lines, problem = read(item.file)
+        if lines is None:
+            raise ValueError(f"parent item {item.qn} cannot be shown: {problem}")
+        segments = [tuple(s) for s in entry["segments"]]
+        block, tokens = render(item, lines, segments, entry["start"], entry["end"])
+        chosen.append({"item": item, "lines": lines, "start": entry["start"], "end": entry["end"],
+                       "segments": segments, "block": block, "tokens": tokens, "pass": 0, "forced": True})
+        used += tokens
+        used_by_kind[item.kind] += tokens
+    if used > budget:
+        raise ValueError(f"level {cfg['level']['name']!r}: token_budget {budget} is below the {used} tokens "
+                         f"of its parent's items")
 
-    def add(prep, pass_number):
-        nonlocal used
+    def try_add(prep, pass_number, enforce_caps):
+        """Add a candidate if it fits; return (reason, by) when it does not."""
+        nonlocal used, chosen
         item = prep["item"]
-        used += prep["tokens"]
+        blocking = [p for p in chosen if p["item"].file == item.file and _overlaps(p["segments"], prep["segments"])]
+        if blocking and item.kind != "file":
+            return "overlaps_included", blocking[0]["item"].qn
+        if blocking:  # a changed file absorbs the items it overlaps, so their lines stay visible
+            merged = _merge(list(prep["segments"]) + [s for p in blocking for s in p["segments"]])
+            block, tokens = render(item, prep["lines"], merged, prep["start"], prep["end"])
+            prep = {**prep, "segments": merged, "block": block, "tokens": tokens}
+        freed = Counter()
+        for p in blocking:
+            freed[p["item"].kind] += p["tokens"]
+        cap = caps[item.kind]
+        if enforce_caps and cap is not None and used_by_kind[item.kind] - freed[item.kind] + prep["tokens"] > cap:
+            return "kind_share", None
+        if used - sum(freed.values()) + prep["tokens"] > budget:
+            return "budget", None
+        for p in blocking:
+            excluded.append(_excluded(p["item"], "superseded_by", by=item.qn, forced=p["forced"]))
+        chosen = [c for c in chosen if all(c is not p for p in blocking)]
+        used += prep["tokens"] - sum(freed.values())
+        used_by_kind.subtract(freed)
         used_by_kind[item.kind] += prep["tokens"]
-        packed.setdefault(item.file, []).append((prep["start"], prep["end"], item.qn))
-        chosen.append({**prep, "pass": pass_number})
+        chosen.append({**prep, "pass": pass_number, "forced": False})
+        return None, None
 
-    for rank, item in enumerate(ranked, 1):  # pass 1: rank order, within kind shares
-        prep = prepare(rank, item)
+    deferred = []
+    for item in ranked:  # pass 1: rank order, within kind shares
+        prep = prepare(item)
         if prep is None:
             continue
-        other = overlapping(prep)
-        if other:
-            excluded.append(_excluded(item, "overlaps_included", by=other))
-        elif caps[item.kind] is not None and used_by_kind[item.kind] + prep["tokens"] > caps[item.kind]:
-            deferred.append((prep, "kind_share"))
-        elif used + prep["tokens"] > budget:
-            deferred.append((prep, "budget"))
-        else:
-            add(prep, 1)
+        reason, by = try_add(prep, 1, True)
+        if reason == "overlaps_included":
+            excluded.append(_excluded(item, reason, by=by))
+        elif reason:
+            deferred.append((prep, reason))
     for prep, reason in deferred:  # pass 2: leftover budget, rank order, shares ignored
-        other = overlapping(prep)
-        if other:
-            excluded.append(_excluded(prep["item"], "overlaps_included", by=other))
-        elif packing["redistribute_unused"] and used + prep["tokens"] <= budget:
-            add(prep, 2)
-        else:
-            excluded.append(_excluded(prep["item"], reason if not packing["redistribute_unused"] else "budget",
-                                      tokens=prep["tokens"]))
+        if not packing["redistribute_unused"]:
+            excluded.append(_excluded(prep["item"], reason, tokens=prep["tokens"]))
+            continue
+        again, by = try_add(prep, 2, False)
+        if again == "overlaps_included":
+            excluded.append(_excluded(prep["item"], again, by=by))
+        elif again:
+            excluded.append(_excluded(prep["item"], "budget", tokens=prep["tokens"]))
 
     def join(preps):
-        return SEPARATOR.join(p["block"] for p in sorted(preps, key=lambda p: p["rank"]))
+        ordered = sorted(preps, key=lambda p: rank_key(p["item"], ranking, changed_files))
+        return SEPARATOR.join(p["block"] for p in ordered)
 
     text = join(chosen)
     total = count_tokens(text) if chosen else 0
-    while chosen and total > budget:  # token merges at block edges can still add a few tokens
-        dropped = chosen.pop()  # the item added last is the marginal one
+    while total > budget:  # token merges at block edges can still add a few tokens
+        removable = [p for p in chosen if not p["forced"]]
+        if not removable:
+            break
+        dropped = removable[-1]  # the item added last is the marginal one
+        chosen = [c for c in chosen if c is not dropped]
         excluded.append(_excluded(dropped["item"], "budget", tokens=dropped["tokens"]))
         text = join(chosen)
         total = count_tokens(text) if chosen else 0
-    chosen.sort(key=lambda p: p["rank"])
+
+    sections = []
+    pr_section = render_pr(pr, inputs["strip_html_comments"]) if inputs["pr_text"] else ""
+    diff_section = render_diff(trace["diff"]) if inputs["diff"] else ""
+    sections += [s for s in (pr_section, diff_section) if s]
+    if text:
+        sections.append(f"{CONTEXT_HEADING}{SEPARATOR}{text}")
+    full = "\n\n".join(sections)
+
     included = []
-    for prep in chosen:
-        item = prep["item"]
-        included.append({"rank": prep["rank"], "pass": prep["pass"], "kind": item.kind, "hop": item.hop,
-                         "qn": item.qn, "label": item.label, "file": item.file, "start": prep["start"],
-                         "end": prep["end"], "lines_shown": prep["lines_shown"],
-                         "truncated": prep["lines_shown"] < prep["end"] - prep["start"] + 1,
+    for position, prep in enumerate(sorted(chosen, key=lambda p: rank_key(p["item"], ranking, changed_files)), 1):
+        item, segments = prep["item"], prep["segments"]
+        shown = sum(b - a + 1 for a, b in segments)
+        included.append({"rank": position, "pass": prep["pass"], "forced": prep["forced"], "kind": item.kind,
+                         "hop": item.hop, "qn": item.qn, "label": item.label, "file": item.file,
+                         "start": prep["start"], "end": prep["end"], "segments": [list(s) for s in segments],
+                         "lines_shown": shown, "truncated": shown < prep["end"] - prep["start"] + 1,
                          "tokens": prep["tokens"], "edge": item.edge, "via": item.via,
                          "relations": list(item.relations)})
 
@@ -552,13 +754,20 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
                       for e in excluded)
     report = {
         "render_version": RENDER_VERSION,
+        "level": cfg["level"],
         "config_sha256": config_sha256(cfg),
+        "parent_config_sha256": parent_report["config_sha256"] if parent_report else None,
         "config": cfg,
         "tokenizer": tokenizer_name,
         "token_budget": budget,
+        "input_tokens": count_tokens(full) if full else 0,
+        "pr_tokens": count_tokens(pr_section) if pr_section else 0,
+        "diff_tokens": count_tokens(diff_section) if diff_section else 0,
         "context_tokens": total,
         "tokens_by_kind": {kind: sum(i["tokens"] for i in included if i["kind"] == kind) for kind in KINDS},
         "kind_caps": caps,
+        "pr": ({"title": pr.get("title"), "edited_after_review": pr.get("edited_after_review")}
+               if inputs["pr_text"] else None),
         "trace": {k: trace[k] for k in ("tool_version", "repo", "base", "head", "merge_base")},
         "counts": {
             "changed_files": len(trace["changed_files"]),
@@ -572,4 +781,20 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
                                                     e.get("qn") or "")),
         "warnings": trace.get("warnings", []),
     }
-    return text, report
+    return full, report
+
+
+def shown_lines(report: dict) -> set[tuple[str, int]]:
+    """Every (file, line) a report's context shows."""
+    return {(i["file"], line) for i in report["included"] for a, b in i["segments"] for line in range(a, b + 1)}
+
+
+def nesting_check(parent: dict, child: dict) -> dict:
+    """Whether everything the parent level shows is also in the child level."""
+    missing = shown_lines(parent) - shown_lines(child)
+    inputs_p, inputs_c = parent["config"]["input"], child["config"]["input"]
+    return {"parent": parent["level"]["name"], "missing_lines": len(missing),
+            "pr_text_kept": inputs_c["pr_text"] or not inputs_p["pr_text"],
+            "diff_kept": inputs_c["diff"] or not inputs_p["diff"],
+            "ok": not missing and (inputs_c["pr_text"] or not inputs_p["pr_text"])
+            and (inputs_c["diff"] or not inputs_p["diff"])}

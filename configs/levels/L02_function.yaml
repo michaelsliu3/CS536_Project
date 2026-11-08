@@ -1,0 +1,7 @@
+# L02 function: + the full changed functions/classes, like expanding the diff on GitHub.
+inherit: L01_min.yaml
+level: {name: L02_function, parent: L01_min}
+selection:
+  limits:
+    changed: {max_hop: 0, max_items: null}
+packing: {token_budget: 4000}

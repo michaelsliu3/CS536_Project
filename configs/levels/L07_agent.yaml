@@ -1,0 +1,10 @@
+# L07 agent: + what coding agents (Codex, Cursor, Claude Code) also read: repository guide
+# files (README, CONTRIBUTING, AGENTS.md, ...) and text-search hits for the changed names.
+# An estimate of agent behavior, to be calibrated by logging real agent reviews.
+inherit: L06_tests1.yaml
+level: {name: L07_agent, parent: L06_tests1}
+selection:
+  limits:
+    guide: {max_hop: 1, max_items: 5}
+    search: {max_hop: 1, max_items: 30}
+packing: {token_budget: 40000}

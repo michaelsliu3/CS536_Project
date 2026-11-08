@@ -20,47 +20,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.tracer_context.build import build_context, validate_config  # noqa: E402
-from src.tracer_context.cbm import TracerError, trace, tracer_settings  # noqa: E402
-
-
-def load_config(path: Path) -> dict:
-    import yaml
-
-    return validate_config(yaml.safe_load(path.read_text(encoding="utf-8")))
-
-
-def make_counter(name: str):
-    if name == "approx":
-        return (lambda text: (len(text.encode("utf-8")) + 3) // 4), "approx (UTF-8 bytes / 4)"
-    try:
-        from transformers import AutoTokenizer
-
-        tokenizer = AutoTokenizer.from_pretrained(name, local_files_only=True)
-    except Exception as error:  # noqa: BLE001 - report any loading failure the same way
-        raise SystemExit(
-            f"Tokenizer {name!r} is not available offline ({type(error).__name__}).\n"
-            f"Download only its tokenizer files, e.g.\n"
-            f"  .venv/bin/hf download {name} tokenizer.json tokenizer_config.json\n"
-            "or pass --tokenizer with a cached tokenizer, or --tokenizer approx for a rough count.")
-    return (lambda text: len(tokenizer.encode(text, add_special_tokens=False))), tokenizer_label(name)
-
-
-def tokenizer_label(name: str) -> str:
-    """Name plus the cached Hugging Face snapshot revision, when there is one."""
-    try:
-        from huggingface_hub import try_to_load_from_cache
-
-        path = try_to_load_from_cache(name, "tokenizer.json")
-    except Exception:  # noqa: BLE001 - a local directory or an odd cache layout
-        return name
-    if isinstance(path, str) and "/snapshots/" in path:
-        return f"{name}@{path.split('/snapshots/')[1].split('/')[0]}"
-    return name
-
-
-def write_json(path: Path, data) -> None:
-    path.write_text(json.dumps(data, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+from src.tracer_context.aacr import FetchError, fetch_pr_text  # noqa: E402
+from src.tracer_context.build import build_context  # noqa: E402
+from src.tracer_context.cbm import TRACE_FORMAT, TracerError, trace, tracer_settings  # noqa: E402
+from src.tracer_context.runtime import load_config, make_counter, write_json  # noqa: E402
 
 
 def main():
@@ -75,9 +38,21 @@ def main():
                         help="Reuse --out/trace.json (only selection/ranking/packing changes take effect)")
     parser.add_argument("--keep-index", action="store_true",
                         help="Keep the tool's graph database in --out/index_cache (e.g. for its UI)")
+    parser.add_argument("--pr-url", help="GitHub PR URL; needed when the config includes the PR title/description")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if cfg["level"]["parent"]:
+        parser.error(f"{args.config} is a nested level (parent {cfg['level']['parent']!r}); "
+                     "build levels with scripts/run_tracer_batch.py, which packs parents first")
+    pr = None
+    if cfg["input"]["pr_text"]:
+        if not args.pr_url:
+            parser.error("this config includes the PR title and description: pass --pr-url")
+        try:
+            pr = fetch_pr_text(args.pr_url)
+        except (FetchError, ValueError) as error:
+            raise SystemExit(f"error: {error}")
     if args.budget is not None:
         if args.budget < 0:
             parser.error("--budget must be >= 0")
@@ -95,6 +70,8 @@ def main():
             parser.error(f"--skip-trace: {trace_path} does not exist")
         data = json.loads(trace_path.read_text(encoding="utf-8"))
         head = subprocess_head(repo)
+        if data.get("format") != TRACE_FORMAT:
+            parser.error("--skip-trace: the saved trace is an older format; run without --skip-trace")
         if data["tracer_settings"] != tracer_settings(cfg["tracer"]):
             parser.error("--skip-trace: config.tracer changed since the trace; run without --skip-trace")
         if data["head"] != head:
@@ -113,7 +90,7 @@ def main():
                 shutil.rmtree(cache, ignore_errors=True)
         write_json(trace_path, data)
 
-    text, report = build_context(data, repo, cfg, count_tokens, tokenizer_name)
+    text, report = build_context(data, repo, cfg, count_tokens, tokenizer_name, pr=pr)
     (out / "context.md").write_text(text + ("\n" if text else ""), encoding="utf-8")
     write_json(out / "selection.json", report)
 
@@ -122,6 +99,7 @@ def main():
           f"callers found {counts['callers_found']}, callees found {counts['callees_found']}")
     print(f"included {len(report['included'])} items, {report['context_tokens']}/{report['token_budget']} tokens "
           f"({tokenizer_name}): {counts['included_by_kind']}")
+    print(f"whole input {report['input_tokens']} tokens (PR text {report['pr_tokens']}, diff {report['diff_tokens']})")
     print(f"excluded: {counts['excluded_by_reason']}")
     for warning in report["warnings"]:
         print(f"warning: {warning}")

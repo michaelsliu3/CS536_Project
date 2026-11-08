@@ -1,0 +1,7 @@
+# L06 tests-1: + tests that directly exercise the changed code.
+inherit: L05_callers1.yaml
+level: {name: L06_tests1, parent: L05_callers1}
+selection:
+  limits:
+    test: {max_hop: 1, max_items: 10}
+packing: {token_budget: 28000}

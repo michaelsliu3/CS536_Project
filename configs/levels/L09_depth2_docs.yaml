@@ -1,0 +1,8 @@
+# L09 depth-2-docs: + documentation sections and tests up to two hops away.
+inherit: L08_depth2.yaml
+level: {name: L09_depth2_docs, parent: L08_depth2}
+selection:
+  limits:
+    doc: {max_hop: 2, max_items: 10}
+    test: {max_hop: 2, max_items: 25}
+packing: {token_budget: 80000}

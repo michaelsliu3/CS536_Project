@@ -1,0 +1,7 @@
+# L04 callees-1: + definitions of what the changed code calls directly.
+inherit: L03_file.yaml
+level: {name: L04_callees1, parent: L03_file}
+selection:
+  limits:
+    callee: {max_hop: 1, max_items: 40}
+packing: {token_budget: 20000}

@@ -1,0 +1,79 @@
+# Base for the nested context levels in configs/levels/ (not a level itself).
+# Every level inherits from the one before it (L01 inherits this file) and only lists what it
+# adds. Each level names its parent; the batch runner includes the parent's items first, so a
+# level shows every line its parent shows. All levels share this `tracer` section: each PR is
+# traced once, deep enough for the largest level, and levels choose depth via selection.limits.
+# Budgets and limits are starting points to be checked on a pilot, not tuned values.
+version: 1
+
+level: {name: base, parent: null}
+
+input:
+  pr_text: false
+  diff: false
+  strip_html_comments: true
+
+tracer:
+  binary: data/codebase_memory_trial/bin/codebase-memory-mcp
+  workers: 4                    # pinned: 1 worker builds a slightly different graph than 2+
+  index_mode: full
+  callers:
+    depth: 3
+    edge_types: [CALLS, USAGE, TESTS, MENTIONS, DEFINES, REFERENCES_FILE]
+  callees:
+    depth: 3                    # the tool follows only CALLS links outbound
+
+selection:
+  seed_scope: innermost
+  member_labels: [Field, Property, Variable, Constant, EnumMember]
+  fold_max_lines: 2
+  drop_labels: [Module, File, Folder, Project, Package]
+  drop_builtins: true
+  test_globs:
+    - "tests/**"
+    - "test/**"
+    - "**/tests/**"
+    - "**/test/**"
+    - "**/__tests__/**"
+    - "**/test_*.py"
+    - "**/*_test.py"
+    - "**/*_test.go"
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/src/test/**"
+  file_exclude_globs:           # lockfiles, generated and minified files are not shown whole
+    - "**/*.lock"
+    - "**/package-lock.json"
+    - "**/pnpm-lock.yaml"
+    - "**/go.sum"
+    - "**/*.min.js"
+    - "**/*.min.css"
+    - "**/*.svg"
+  guide_scope: ancestors
+  search: {min_name_length: 4, max_hits_per_name: 50, window_lines: 5}
+  limits:                       # everything off; levels switch kinds on
+    changed: {max_hop: 0, max_items: 0}
+    file:    {max_hop: 0, max_items: 0}
+    callee:  {max_hop: 0, max_items: 0}
+    caller:  {max_hop: 0, max_items: 0}
+    test:    {max_hop: 0, max_items: 0}
+    search:  {max_hop: 0, max_items: 0}
+    guide:   {max_hop: 0, max_items: 0}
+    doc:     {max_hop: 0, max_items: 0}
+
+ranking:
+  rank_by: [hop, kind, edge, same_file, size]
+  kind_order: [changed, file, callee, caller, test, search, guide, doc]
+  edge_order: [CALLS, USAGE, TESTS, MENTIONS, REFERENCES_FILE, DEFINES]
+
+packing:
+  token_budget: 0               # tokens of repository context (the PR text and diff are extra)
+  tokenizer: Qwen/Qwen3.8-27B
+  kind_shares: {}               # no per-kind caps; nesting and limits decide the mix
+  redistribute_unused: true
+  max_lines_per_item: {default: 120, changed: 200, file: 400, guide: 200}
+  oversize: {default: head, changed: hunks, file: hunks}
+  hunk_context_lines: {default: 5, file: 30}
+  include_decorators: true
+  extend_doc_sections: true
+  line_numbers: false

@@ -1,0 +1,7 @@
+# L03 file: + the full changed files (windows around the changes for files over 400 lines).
+inherit: L02_function.yaml
+level: {name: L03_file, parent: L02_function}
+selection:
+  limits:
+    file: {max_hop: 0, max_items: null}
+packing: {token_budget: 16000}

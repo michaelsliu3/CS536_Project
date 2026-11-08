@@ -8,14 +8,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from src.tracer_context.build import parse_hunks
 
-TRACE_FORMAT = 1
+TRACE_FORMAT = 2
 _BATCH = 200  # qualified names per graph query
+_GREP_BATCH = 40  # names per `git grep`
+_MAX_HITS_KEPT = 200  # per name; the total is still recorded
+# Files agents and contributors read for repository conventions.
+_GUIDE_NAME = re.compile(r"(?i)^(readme|contributing|agents|claude|gemini|architecture|development|developing|"
+                         r"hacking|styleguide|style_guide|coding_style|code_style)(\.(md|markdown|rst|txt|adoc))?$")
+_GUIDE_PATH = re.compile(r"^(\.cursorrules|\.github/copilot-instructions\.md|\.cursor/rules/[^/]+\.mdc?)$")
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_NOT_SYMBOLS = {"File", "Module", "Folder", "Project", "Package", "Section"}
 
 
 class TracerError(RuntimeError):
@@ -77,6 +86,40 @@ def _batches(names):
         yield names[i:i + _BATCH]
 
 
+def guide_files(repo: Path) -> list[str]:
+    tracked = [p for p in _git(repo, "ls-files", "-z").split("\0") if p]
+    return sorted(p for p in tracked if _GUIDE_NAME.match(PurePosixPath(p).name) or _GUIDE_PATH.match(p))
+
+
+def text_hits(repo: Path, seeds: list[dict]) -> dict:
+    """Whole-word `git grep` hits for each changed symbol's short name, like an agent's search."""
+    names: dict[str, list[str]] = {}
+    for seed in seeds:
+        short = seed["qn"].rsplit(".", 1)[-1]
+        if seed["label"] not in _NOT_SYMBOLS and _IDENTIFIER.fullmatch(short):
+            names.setdefault(short, []).append(seed["qn"])
+    found: dict[str, list[tuple[str, int]]] = {name: [] for name in names}
+    ordered = sorted(names)
+    for i in range(0, len(ordered), _GREP_BATCH):
+        batch = ordered[i:i + _GREP_BATCH]
+        args = ["git", "-C", str(repo), "grep", "-n", "-w", "-F", "-I", "--no-color"]
+        for name in batch:
+            args += ["-e", name]
+        result = subprocess.run(args, capture_output=True, text=True, errors="replace")
+        if result.returncode not in (0, 1):  # 1 = no matches
+            raise TracerError(f"git grep failed: {result.stderr.strip()[:300]}")
+        patterns = {n: re.compile(rf"(?<![A-Za-z0-9_]){re.escape(n)}(?![A-Za-z0-9_])") for n in batch}
+        for line in result.stdout.splitlines():
+            parts = line.split(":", 2)
+            if len(parts) < 3 or not parts[1].isdigit():
+                continue
+            for name, pattern in patterns.items():
+                if pattern.search(parts[2]):
+                    found[name].append((parts[0], int(parts[1])))
+    return {name: {"total": len(found[name]), "seeds": sorted(names[name]),
+                   "hits": [list(h) for h in sorted(found[name])[:_MAX_HITS_KEPT]]} for name in ordered}
+
+
 def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path) -> dict:
     """Index `repo` into a fresh `cache_dir` and return the trace dict (names without the
     tool's path-derived project prefix, so traces compare across machines)."""
@@ -89,6 +132,8 @@ def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path
     head = _git(repo, "rev-parse", "HEAD").strip()
     merge_base = _git(repo, "merge-base", base, "HEAD").strip()
     hunks = parse_hunks(_git(repo, "diff", "-U0", "--no-color", "--no-ext-diff", merge_base, "HEAD"))
+    diff = _git(repo, "diff", "-U3", "--no-color", "--no-ext-diff", merge_base, "HEAD")  # as GitHub shows it
+    guides = guide_files(repo)
 
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
@@ -148,6 +193,7 @@ def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path
                for r in result["impacted"]]
         return sorted(out, key=lambda r: (int(r["hop"]), r["qn"]))
 
+    stripped_seeds = sorted(({**s, "qn": strip(s["qn"])} for s in seeds), key=lambda s: (s["file"], s["start"], s["qn"]))
     return {
         "format": TRACE_FORMAT,
         "tool_version": version,
@@ -160,7 +206,10 @@ def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path
                                              "parse_unusable_count", "not_indexed_files_count")},
         "changed_files": sorted(callers["changed_files"]),
         "hunks": hunks,
-        "seeds": sorted(({**s, "qn": strip(s["qn"])} for s in seeds), key=lambda s: (s["file"], s["start"], s["qn"])),
+        "diff": diff,
+        "guide_files": guides,
+        "text_hits": text_hits(repo, stripped_seeds),
+        "seeds": stripped_seeds,
         "callers": rows(callers, ("qn", "label", "file", "hop", "via_qn", "via_edge")),
         "callees": rows(callees, ("qn", "label", "file", "hop")),
         "nodes": dict(sorted(nodes.items())),

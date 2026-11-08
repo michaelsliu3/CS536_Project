@@ -1,0 +1,6 @@
+# L01 min: what one ContextCRBench entry gives a reviewer. PR title and description plus the
+# diff; no repository context.
+inherit: ../tracer_levels_base.yaml
+level: {name: L01_min, parent: null}
+input: {pr_text: true, diff: true}
+packing: {token_budget: 0}
