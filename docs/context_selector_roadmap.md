@@ -1,3 +1,608 @@
+# Context selector roadmap: preserve code-review quality with less repository context
+
+**Revised November 7, 2026. Status: research design, not an implemented or validated system.**
+
+This revision records the discussion moving from ContextCRBench merge-status prediction to repository-aware **review generation**. Our intended product is a context-selection component: given a diff and a reproducibly gathered pool of repository evidence, choose a small subset for a frozen reviewer. The reviewer produces useful findings; the selector does not decide whether a PR should merge.
+
+The November 4 roadmap is retained at the end as a **retired historical plan**, including its reported measurements. Its task, labels, phase checklist, model defaults, success thresholds, and schedule are not the active specification. No experiments were rerun for this documentation revision.
+
+## 1. Decisions, scope, and precedence
+
+| Topic | Current direction | What remains unproven or undecided |
+|---|---|---|
+| Main task | Reduce context tokens while preserving meaningful review findings | Whether a learned selector improves over strong retrieval and fixed-budget baselines |
+| Starting dataset | Start with AACR-Bench, reconstructing repository snapshots | Usable release size, supported languages, reference validity, and split feasibility |
+| ContextCRBench | Preserve the midpoint pilot; consider a separate transfer evaluation | Whether its review references and available snapshots support the same task |
+| Context gathering | Adapt an existing published repository retrieval method; RepoHyper is the leading starting point | Exact implementation, language coverage, graph parameters, and portability |
+| Selector | Train a compact model to select existing evidence chunks | Encoder/ranker, graph-aware model, or small generative selector; no final size chosen |
+| Reviewer | Freeze a capable open-weight reviewer during comparisons | Exact model ID, revision, quantization, context window, decoding, and quality floor |
+| Preprocessing | Avoid generative LLM calls for fetching, parsing, graph construction, and metadata extraction | Manual effort needed for reliable reference and adoption annotations |
+| Learning signal | Compare reviewer outcomes under candidate subsets against audited review references | A validated matching/scoring protocol and affordable supervision budget |
+| Deployment shape | Upfront retrieval and selection, then one reviewer call with no further repository tools | Quality loss relative to an interactive agent and actual end-to-end savings |
+| Lavish | Leave existing Lavish artifacts unchanged | Update only on an explicit later request |
+
+### Context that still governs the work
+
+Read every document in `docs/`, the project skill, and its index before implementation, as required by `AGENTS.md`. The professor's emphasis remains: study the quality–cost trade-off, include strong baselines, train a learned selector rather than making greedy removal the final contribution, and explain failures. Robustness experiments remain outside the core scope; transfer is optional.
+
+The existing proposal, project skill, and midpoint plan contain the older binary task and four-field mask formulation. This roadmap records the user's newer intended direction and takes precedence for those design choices; it does **not** retroactively change the completed pilot or assert instructor approval. The course kickoff says topic changes after the midpoint require approval. Confirm whether this task/dataset refinement needs that approval before presenting it as an approved scope change. Writing this plan is not evidence that approval has occurred.
+
+The course final report remains 5–8 pages in the supplied NeurIPS format, with an unlimited appendix, baselines, ablations, several seeds, honest limitations, and runnable code. Dates in the kickoff are approximate; use the current course announcement for submission timing. No new responsibility assignments are implied by this revision.
+
+### Research questions, revised for actual reviews
+
+- **RQ1:** How do fixed context policies and repository retrieval choices affect a frozen reviewer's finding quality and input-token count?
+- **RQ2:** Can a learned selector choose a smaller evidence subset per diff and improve the quality–cost frontier over the best fixed policy at matched budgets?
+- **RQ3:** Which dependencies and context types help, have no effect, or cause harmful/distraction effects, and where does the selector fail?
+
+The previous “within one percentage point of accuracy” threshold concerned a binary label. Do not reuse it as if it were a justified tolerance for review F1. Choose quality tolerances and practical savings targets on development data, document them, and freeze them before test evaluation. A target such as 30% fewer additional context tokens is an aspiration, not a result or automatic success criterion.
+
+## 2. What we are building
+
+```mermaid
+flowchart LR
+    A["PR diff and exact repository revisions"] --> B["Static parsing, graph construction and retrieval"]
+    M["PR and issue metadata available at review time"] --> B
+    B --> C["Frozen, bounded candidate evidence pool C"]
+    C --> S["Trained selector: choose subset S"]
+    A --> S
+    S --> P["Diff plus selected verbatim evidence"]
+    P --> R["Frozen reviewer: one call, no tools"]
+    R --> O["Review findings with locations and explanations"]
+```
+
+The diff is mandatory input. Selection concerns additional evidence: related functions, callers/callees, imported definitions, classes, tests, configuration, PR descriptions, and linked issue information when available. A selector may choose no extra evidence. It selects text already present in the candidate pool rather than inventing a summary or rewriting code.
+
+For a real application, this could sit before a larger remote reviewer. A smaller local selector may make that remote call cheaper. The research experiment should first use a reproducible frozen reviewer so that differences can be attributed to context rather than changing model behavior. Supporting a commercial reviewer later is a deployment possibility, not required for the initial experiment.
+
+### Three different meanings of context
+
+1. **Repository universe U:** files in a pinned repository snapshot and permitted metadata. This can be much larger than any prompt.
+2. **Candidate pool C:** evidence retrieved from U under a fixed policy, with explicit size limits and provenance. This is the operational “all context” baseline.
+3. **Selected evidence S:** a subset of C chosen for the reviewer. Every policy receives the same C for a given task.
+
+“All context” never means that the whole repository was sent, that every relevant dependency was recovered, or that a human actually read every candidate. Record both the raw retrieved pool and the pool admitted after deterministic upstream limits. If the admitted pool cannot fit the reviewer's window, it is not a valid full-pool comparator until a common overflow policy is defined.
+
+We can assume the human had access to the repository as a motivating ideal. We cannot infer their reading history from their comment. Human references therefore describe desired findings, not ground-truth context-selection masks. We also cannot guarantee that a reviewer with sufficient evidence will discover every human finding.
+
+### One call versus an interactive harness
+
+An LLM consumes the serialized prompt supplied to it; attention is not a mechanism for avoiding the cost of supplied input tokens. Tool-enabled agents can request more evidence over multiple calls. Our primary setting disables that loop, making the evidence budget measurable. A model may still report insufficient evidence; score that transparently rather than quietly granting extra context.
+
+The inspected Codex source at revision `57a808a3920f05f2d4b9eab2d0493e1df136ae6b` constructs initial instructions/history and exposes tools. Its AGENTS discovery and review prompts do not constitute a fixed algorithm that retrieves all relevant code before the first model call. Subsequent searching is model-directed. Thus “copy Codex's exact upfront context search” is not an available specification. Cursor's proprietary retrieval behavior has not been established here. See the pinned [AGENTS discovery](https://github.com/openai/codex/blob/57a808a3920f05f2d4b9eab2d0493e1df136ae6b/codex-rs/core/src/agents_md.rs), [turn construction](https://github.com/openai/codex/blob/57a808a3920f05f2d4b9eab2d0493e1df136ae6b/codex-rs/core/src/session/turn.rs), and [review requests](https://github.com/openai/codex/blob/57a808a3920f05f2d4b9eab2d0493e1df136ae6b/codex-rs/prompts/src/review_request.rs).
+
+An interactive agent comparison would be a separate experiment: include all tool-output tokens, repeated calls, latency, and its potentially higher quality. Do not claim that beating a one-shot all-pool baseline proves superiority to Codex or Cursor.
+
+## 3. What the midpoint work contributed
+
+The 3B QLoRA pilot established useful infrastructure: dataset indexing and deduplication, repository splits, training and restart handling, checkpoints, provenance, prediction caching, comparison notebooks, and cost/error plots. It also exposed label imbalance, formatting failures, and prompt-budget problems before the main selector experiment.
+
+It did **not** train a context selector or establish that review quality was preserved with fewer tokens. Its merge-status objective was a preliminary adaptation experiment. Existing adapter performance should not be described as evidence of RQ2 success.
+
+The historical base-model score of zero was caused by strict output parsing failures in the inspected evaluation cache. This is an evaluation/protocol failure, not proof that the model cannot review code or that all source examples are malformed. Inspect raw responses and report invalid-output rates separately. The adapter's strong majority-class accuracy likewise does not establish useful review behavior.
+
+Preserve v1 splits, prompt text, trained artifacts, and original caches. New review-generation artifacts need a distinct task/protocol namespace. Do not overwrite the historical experiment to make it appear to have measured the new task.
+
+## 4. Dataset choice and audit gates
+
+### 4.1 Why start with AACR-Bench
+
+AACR is more directly aligned with repository-level review findings than an `is_merged` target. Its public records link PRs and commit revisions to reference comments. A PR record can contain several comments; one record is not necessarily one comment, and the included references are not necessarily the complete GitHub discussion. Repository contents must be fetched separately.
+
+The [AACR repository](https://github.com/alibaba/aacr-bench) describes 200 PRs across 50 repositories and ten languages, with 2,145 comments. The inspected [paper version](https://arxiv.org/html/2601.19494v3) reports 1,505 comments, including human-derived and AI-generated expert-verified material. The earlier inspection of the public positive JSON found 196 entries. These are **release/count discrepancies to resolve**, not interchangeable totals. Pin the dataset commit, count actual records and reference provenance, and publish a release-specific data card before allocating splits.
+
+The paper describes curated popular repositories and filtered PRs, rather than a representative random sample of all software changes. Its filtering includes review activity and adopted feedback, followed by augmentation and expert annotation. That creates selection bias toward reviewable changes. Neither successful training nor broad deployment performance follows from its benchmark size.
+
+### 4.2 Required release audit
+
+For every raw record, retain the original JSON and its hash, dataset revision, repository URL, PR number, source/target commits, and all original annotation fields. Produce counts for:
+
+- PRs, repositories, languages, reference comments, and unique finding identities.
+- Human-derived, AI-generated/expert-verified, and unknown-provenance references.
+- Context-level annotations where supplied: diff, file, repository.
+- Accessible and inaccessible revisions, missing files, failed parses, unsupported languages.
+- Duplicate PRs, overlapping/forked repositories, duplicate patches, and repeated findings.
+- References consistent with the actual diff and snapshot versus unresolved mismatches.
+- Samples usable under the proposed language/backend and reviewer token budget.
+
+The filenames `positive_samples.json` and `negative_samples.json` are not sufficient definitions of labels. Verify their semantics against the authors' construction/evaluation code before using the latter as “no findings” or “bad reviews.” A closed PR is not a bad review; a merged PR can contain bad reviews or unresolved defects. Keep unknown semantics quarantined rather than guessing.
+
+### 4.3 Exact revisions and temporal leakage
+
+Treat the dataset's source and target fields as revision pointers whose meaning must be verified by reconstructing the intended comparison. Typically the source identifies the before/base side and target the proposed/head side; neither name alone proves that target is the historical snapshot seen by every reviewer or the final merged commit.
+
+1. Resolve both SHAs, verify repository membership, and reconstruct the dataset's intended diff convention. Record whether the comparison uses the two exact trees or a merge base; do not silently choose a different convention.
+2. Associate each reference with its reviewed commit, file side, line span, and timestamp where recoverable.
+3. Retrieve candidate code only from allowed before/after snapshots. Never retrieve from a later fix or today's default branch.
+4. Admit PR/issue text only if its review-time version is available or its temporal uncertainty is explicitly recorded. Later-edited descriptions can leak fixes.
+5. Keep reference comments, later commits, approval events, merge outcomes, and adoption evidence in a separate annotation channel inaccessible to retrieval and selection.
+6. Preserve `source` versus `target` on chunks. Before-change and after-change code are different evidence, even with the same path.
+
+A PR with references from multiple incompatible revisions must be split into versioned tasks or excluded under a declared rule. All tasks from that PR stay in the same data split.
+
+### 4.4 Real cases discussed: use as audit fixtures, not fabricated examples
+
+These are concrete leads from the earlier dataset inspection. Revalidate against the pinned release before turning them into fixtures:
+
+| Case | Why it matters | Required check |
+|---|---|---|
+| ComfyUI PR 8446 | A `lora_dtype` default/options inconsistency illustrates a potentially local finding | Verify exact option/default strings, target file and lines; determine whether the diff alone contains the evidence |
+| vLLM PR 17425 | A changed logging call can require following `warning_once` into the logger implementation and understanding cached-call argument hashability | Retrieve the relevant definition through code relationships without using the reference comment as the query |
+| Langflow PR 6044 | A missing-return annotation appeared inconsistent with the inspected target file | Resolve revision/line mapping or quarantine the reference; do not train against a known mismatch |
+| linera-protocol PR 3151 | A selected documentation-style comment illustrates that a record's references are not the whole PR conversation | Preserve category and provenance; do not automatically equate wording feedback with a serious defect |
+
+Dataset source: [public positive samples](https://github.com/alibaba/aacr-bench/blob/main/dataset/positive_samples.json). The examples are audit observations, not measured retrieval or selector successes.
+
+### 4.5 Is AACR enough?
+
+It is a reasonable starting point for a feasibility study and compact selector; adequacy depends on usable independent PRs, repositories, language coverage, and outcome variation. Several comments or hundreds of sampled subsets from one PR do not create hundreds of independent training tasks.
+
+A 17B selector is an option discussed, not a chosen architecture or a size justified by the available data. Fine-tuning pretrained models requires less data than training from scratch, but cannot eliminate overfitting or repository memorization. Start with a compact neural ranker and learning curves. Consider a larger selector only if it solves a demonstrated limitation within the cost budget.
+
+Mining the top 1,000 starred repositories is a possible later expansion, not the immediate plan. It would require its own licensing, temporal reconstruction, annotation, and bias audits; stars do not guarantee trustworthy review labels.
+
+### 4.6 ContextCRBench transfer is conditional
+
+ContextCRBench is a benchmark, but benchmark records can be partitioned for training if evaluation remains disjoint and the study clearly states the altered protocol. The important limitation is task alignment, not the word “benchmark.”
+
+For this project, preserve its completed pilot and first establish AACR results. A later ContextCRBench transfer study must verify available human review references, revision pointers, and repository reconstruction. PR title/body, issue context, and nearby before/after code do not themselves supply complete call chains or related classes.
+
+If only packaged context fields are recoverable, report transfer in that **restricted-context setting**. Do not claim a repository-aware test. Do not use `is_merged` as a substitute for generated-review quality, and check repository/PR overlap with AACR before calling the result external validation.
+
+## 5. Repository exploration: reuse RepoHyper, adapt the task
+
+### 5.1 Recommendation and boundaries
+
+**Use RepoHyper's search–expand structure as the leading candidate-generation design.** It provides a published basis for going beyond local surrounding code. Our contribution would be studying review-quality-preserving selection and token cost on this candidate pool, not claiming to invent repository graphs.
+
+RepoHyper represents repository entities and relationships, retrieves embedding-nearest anchors, expands through graph connections, and refines candidates with a learned link predictor. The paper evaluates repository-level code completion on RepoBench, not review generation. Its reported configuration includes three initial anchors, depth four, an expansion limit of 1,000, and two final retrieved snippets. The expansion limit is not “1,000 snippets sent to the LLM,” and two snippets do not imply a fixed token count. [RepoHyper paper, Sections 3–4](https://arxiv.org/html/2403.06095v3).
+
+The named RSG representation belongs to RepoHyper's design; graph-based program analysis predates it. [PyCG](https://arxiv.org/abs/2103.00587) is relevant for Python call relationships, while [code property graphs](https://conferences.computer.org/sp/pdfs/sp/2014/4686a590.pdf) combine program representations for analysis. Reuse an existing implementation where practical rather than implementing an unrestricted multilingual analyzer for this course project.
+
+### 5.2 What to inspect and reuse
+
+The [official RepoHyper implementation](https://github.com/FSoft-AI4Code/RepoHyper) contains useful starting points:
+
+| Component | Upstream location | Our adaptation |
+|---|---|---|
+| Source parsing | `src/repo_graph/parse_source_code.py` | Extract stable chunks and source spans at pinned revisions |
+| Call relationships | `scripts/data/generate_call_graphs.py` | Recover Python call edges with unresolved-call reporting |
+| Graph and embeddings | `src/repo_graph/repo_to_graph.py` | Cache by revision, parser version, encoder revision, and chunk hash |
+| Anchor and neighborhood search | `src/repo_graph/search_policy/knn_search.py` | Query from diff-visible symbols/text; freeze deterministic candidate pool |
+| Graph refinement | `train_gnn.py` | Optional ranker or baseline; completion-trained relevance is not review-quality supervision |
+
+The inspected implementation includes environment-specific paths and device assumptions, and code defaults differ from the paper settings. Pin an upstream commit and make all parameters explicit. Confirm licensing from actual license files before copying code; do not rely on a README badge. No claim is made here that upstream runs unmodified on our environment.
+
+The initial practical gate is **Python versus multilingual coverage**. RepoHyper's supplied pipeline is Python-oriented, while AACR spans ten languages. A Python-only pilot is legitimate if clearly reported and large enough after filtering. Do not present Python parsing as coverage of the full benchmark. If too few independent repositories remain, use a language-agnostic lexical baseline plus explicitly supported parsing backends, or revise the dataset scope before training.
+
+### 5.3 Proposed deterministic candidate generation
+
+```mermaid
+flowchart TD
+    A["Pinned source and target trees"] --> B["Parse symbols, spans, imports and call relationships"]
+    B --> G["Revision-specific repository graph"]
+    D["Diff and changed symbols only"] --> Q["Lexical or embedding search query"]
+    Q --> K["Top-K anchor nodes"]
+    G --> E["Bounded graph expansion"]
+    K --> E
+    E --> C["Candidate functions, classes, callers, tests and definitions"]
+    M["Permitted PR and issue metadata"] --> C
+    C --> N["Deduplicate, preserve provenance, apply common pool limit"]
+    N --> P["Immutable candidate pool for every selection policy"]
+```
+
+Proposed rules, to be finalized in Phase B:
+
+- Construct queries from changed symbols, changed lines, paths, and allowed metadata. Never query with the answer comment, reference defect category, or gold file location.
+- Keep lexical retrieval as a reproducible baseline; embedding retrieval is allowed under the user's “no LLM preprocessing” preference.
+- Explore definitions, callers, callees, imports, ownership, and inheritance where the backend supports them. Record edge type and uncertainty; static analysis is incomplete for dynamic dispatch, reflection, generated code, and runtime configuration.
+- Add tests/configuration only through a declared rule, such as symbol references or path conventions. Label those rules as our additions rather than original RepoHyper features.
+- Keep chunks independently attributable: revision, path, symbol, line span, content hash, retrieval rank, and route from the diff.
+- Deduplicate overlapping evidence. Do not count shared text repeatedly without reporting it.
+- Bound anchors, traversal depth, visited nodes, chunk sizes, and total pool tokens separately. These are different controls.
+- Split oversized chunks deterministically around syntax boundaries; record omitted spans. Encoder truncation must also be logged, even if the reviewer later receives the full chunk.
+- Use a deterministic order for the full pool and selected chunks. Study order effects separately rather than changing order opportunistically.
+- Count the final rendered prompt using the actual reviewer tokenizer, including headers, chat template, diff, and instructions. Reserve output tokens before packing.
+
+Any learned expansion patterns or trainable graph ranker must be fit only on the training split. A frozen externally pretrained encoder may be shared, with its provenance documented. Do not mine patterns from held-out reference locations.
+
+### 5.4 Alternatives and their role
+
+| Work | Useful idea in plain words | Fit and limitation for our project |
+|---|---|---|
+| [DraCo](https://arxiv.org/abs/2405.19782) | Follow code dependencies to retrieve definitions relevant to completion | Strong alternative for dependency-aware Python retrieval; review adaptation still needed |
+| [GraphCoder](https://arxiv.org/abs/2406.07003) | Use code structure and dependencies in coarse-to-fine retrieval | Useful when statement-level evidence matters; potentially greater graph-building effort |
+| [RLCoder](https://arxiv.org/abs/2407.19487) | Learn which retrieval helps the downstream model, including when to stop | Closest inspiration for outcome-based retrieval learning; completion likelihood reward must be replaced/validated for reviews |
+| [Repoformer](https://proceedings.mlr.press/v235/wu24a.html) | Learn when retrieval is worthwhile | Useful retrieve-or-skip baseline; not by itself arbitrary minimum-subset selection |
+| [RepoCoder](https://arxiv.org/abs/2303.12570) | Retrieve related code and improve retrieval through generation iterations | Useful retrieval baseline; the full iterative method differs from our one-call reviewer setting |
+| [RECOMP](https://arxiv.org/abs/2310.04408) | Select useful sentences or generate a shorter summary from retrieved passages | It includes extractive selection, not only whole-document summarization; not a repository-code exploration method |
+
+These papers establish working architectures in their original tasks, not proof that our adaptation works. Implement one strong retrieval route and a simple baseline before attempting to combine all of them. RepoHyper is the starting recommendation; RLCoder is a learning-objective influence, not a requirement to run expensive online reinforcement learning.
+
+## 6. Preprocessing without generative LLMs
+
+The user's constraint means **no generative LLM in the preprocessing stage**, not “no machine learning.” Parsers, static analysis, embeddings, nearest-neighbor search, graph algorithms, and conventional classifiers are acceptable.
+
+Separate three stages so their costs and assumptions remain visible:
+
+```mermaid
+flowchart LR
+    A["Stage 1: fetch, reconstruct, parse, retrieve; no generative LLM"] --> B["Audited tasks and candidate pools"]
+    B --> C["Stage 2: frozen reviewer runs on sampled subsets"]
+    H["Audited reference findings"] --> Q["Outcome scoring"]
+    C --> Q
+    Q --> T["Stage 3: train selector on cached outcomes"]
+    T --> V["Held-out end-to-end reviewer evaluation"]
+```
+
+Stage 1 can be largely automated. Determining semantic correctness, severity, and whether feedback caused a fix cannot be made reliable merely by writing more deterministic heuristics. Use explicit unknown values and targeted human audits. Stage 2 necessarily calls the reviewer LLM if supervision is based on its behavior. A separate LLM judge is optional and remains an explicit design decision.
+
+### 6.1 Review quality is not PR outcome
+
+Keep these annotation dimensions separate:
+
+| Dimension | Meaning | Appropriate evidence |
+|---|---|---|
+| Correctness | The finding identifies a real issue in this snapshot | Code inspection, reproducible behavior/tests, expert verification |
+| Severity | Consequence if the issue remains | Documented impact rubric and audit; not category name alone |
+| Actionability | A developer can understand and address the finding | Specific location, mechanism, and useful explanation |
+| Adoption | Feedback was apparently acted upon | Suggestion application, linked fix, later change, explicit reply |
+| Provenance/confidence | How the annotation was obtained and how certain it is | Human/AI origin, expert review, evidence links, audit outcome |
+
+A review can be correct and useful even if never adopted, or if the PR closes unmerged. A merged PR does not prove a comment correct. A wording/documentation suggestion can be valid; prioritizing defects over style is a declared task policy, not a universal truth about review quality.
+
+Do not collapse these fields into an invented “ground truth score” before validating the rubric. Begin with audited finding correctness and recovery. Add severity-weighted metrics only where severity labels are defensible, alongside unweighted metrics.
+
+### 6.2 Linking comments to later changes
+
+Fetch review threads, suggestion blocks, replies, commit history, and relevant patches where permitted. Store each proposed link with evidence and confidence:
+
+- **Stronger adoption evidence:** a suggestion patch is applied, or an explicit reply identifies a fix commit whose change addresses the finding.
+- **Weaker evidence:** a later commit changes the same lines or symbol. This is correlation and can reflect unrelated work.
+- **Insufficient by itself:** resolved thread, approval, PR merge, or temporal proximity.
+
+Map lines across renames and edits, distinguish review-time code from later fixes, and manually audit a sample of every rule. Report rule precision rather than labeling every match causal. For retrospectively generated AI references there may be no historical comment that could have caused a commit; adoption should be not applicable, not false. Adoption remains an auxiliary analysis unless validated strongly enough for a specific training use.
+
+### 6.3 Negative examples
+
+Three different negatives must not be confused:
+
+1. A context chunk that did not help this reviewer under this tested subset.
+2. A generated finding audited as unsupported or incorrect.
+3. A task audited as containing no in-scope findings.
+
+None is equivalent to an unmerged PR. Missing human comments are not proof of defect-free code. A chunk may appear useless alone yet be essential in combination with another chunk. Build negatives from evaluated outcomes or explicit audits, and retain uncertainty.
+
+## 7. Data artifacts and interfaces
+
+Use separate artifacts for model inputs and labels. The following paths are **proposed**, not already implemented:
+
+```text
+data/aacr/raw/<release>/                    original metadata, hashes, source revision
+data/aacr/manifests/<protocol>/             task eligibility and grouped splits
+data/aacr/snapshots/<repo>/<commit>/        cached code; large and gitignored
+data/aacr/processed/<protocol>/tasks.jsonl  diff and allowed metadata
+data/aacr/processed/<protocol>/chunks.jsonl candidate text and provenance
+data/aacr/annotations/<protocol>/          references, audits, adoption evidence
+results/context_selector/<protocol>/      reviewer outputs, outcomes, costs, plots
+configs/context_selector/                 small reproducible configurations
+```
+
+Pin schemas and validate them before generating large caches. Keep downloaded repositories, weights, and large generated artifacts out of git; retain small manifests/configuration and reproduction instructions.
+
+### 7.1 Task and candidate schema
+
+Illustrative schema only: values below are placeholders, not an actual AACR record or observed token count.
+
+```json
+{
+  "schema_version": "review_context_v1",
+  "task_id": "owner/repo:pr-123:reviewed-revision",
+  "dataset_revision": "PINNED_DATASET_COMMIT",
+  "repository": "owner/repo",
+  "pr_number": 123,
+  "source_commit": "SOURCE_SHA",
+  "target_commit": "TARGET_SHA",
+  "split": "train",
+  "diff_artifact": "diffs/task.patch",
+  "candidate_pool_id": "POOL_CONTENT_HASH",
+  "retrieval_protocol_id": "RETRIEVAL_CONFIG_HASH",
+  "candidates": [
+    {
+      "chunk_id": "CHUNK_CONTENT_AND_LOCATION_HASH",
+      "kind": "callee_definition",
+      "revision_side": "target",
+      "path": "package/helper.py",
+      "symbol": "validate_value",
+      "line_start": 10,
+      "line_end": 30,
+      "text_artifact": "chunks/helper.txt",
+      "retrieval_route": ["changed_function", "calls", "validate_value"],
+      "tokenizer_id": "PINNED_REVIEWER_TOKENIZER",
+      "token_count": 120
+    }
+  ]
+}
+```
+
+Actual chunks must have verifiable text hashes and spans; metadata chunks use appropriate nullable file fields and provenance URLs/timestamps. Store diff tokens, raw pool tokens, admitted pool tokens, exclusions, unresolved graph edges, and metadata temporal uncertainty in the task audit. A selected chunk ID must resolve to this task's candidate pool.
+
+### 7.2 Reference annotation schema
+
+References live separately from the task input. Required fields include:
+
+- Stable reference/finding ID and PR/version association.
+- Original text plus normalized issue identity, category, path/line information, and original provenance fields.
+- `origin`: human-derived, AI-generated/expert-verified, or unknown.
+- `correctness_status`: verified, disputed, unknown; audit evidence and annotator agreement.
+- Optional severity/actionability annotations with rubric version.
+- Optional adoption evidence with confidence and event/commit links.
+- Revision consistency, eligibility reason, and quarantine status.
+
+Do not expose reference text, context-level gold annotations, severity labels, or adoption fields to the selector through convenience joins. Candidate metadata such as actual edge type is permissible; metadata derived from the answer is not.
+
+### 7.3 Cached outcome schema
+
+Each reviewer execution records task ID, pool hash, selected chunk IDs, exact rendered prompt hash, model/tokenizer revision, precision, decoding settings, raw output, parsed findings, parse status, input/output token counts, runtime, and errors. Scoring adds reference-set hash, matcher/rubric version, matched and unmatched findings, uncertainty, and quality metrics.
+
+The cache key includes **all behavior-affecting inputs**, not just a PR and mask. Retry transient failures without treating them as model errors; preserve failed attempts. A new prompt, model, candidate order, or scoring version requires a new identity. Atomic writes and completion markers should allow resuming incomplete jobs without rerunning completed calls.
+
+## 8. Measuring review quality
+
+### 8.1 Two complementary references
+
+For each task, compare the selected-context review with:
+
+1. **Audited dataset findings:** does it identify the actual issues represented in the references?
+2. **The same frozen reviewer using full C:** which useful findings are retained or lost when context is reduced?
+
+The human/expert reference is the target for meaningful quality. The full-pool reviewer is a controlled comparator, not an oracle. It can miss issues or hallucinate. Matching its wrong answer is not success.
+
+Report end-to-end quality over the full eligible population. Separately analyze findings that the full-pool reviewer recovered, to isolate selection loss. Never report only the recoverable subset without disclosing that filtering: it can hide a poor reviewer or incomplete candidate generation.
+
+### 8.2 Output and matching
+
+Request findings with a path/line span when identifiable, issue explanation, and optional evidence IDs. Allow an explicit empty finding list. Optional insufficient-context reporting is useful but must not remove a task from recall calculations.
+
+Use semantic issue matching rather than exact comment text. A paraphrase can identify the same bug; similar words can describe different bugs. Match each reference at most once and deduplicate repeated generated findings. Location agreement is useful where line mapping is trustworthy, but should not be the sole criterion.
+
+Options for matching are manual adjudication, a validated rule/embedding-assisted workflow, or a separately validated LLM judge. **The judge choice is still open.** If an LLM judge is used, record its identity, prompt, cost, and agreement with blinded human audits. Prefer an independent judge family for a sensitivity check when feasible; shared model family is not automatically invalid, but correlated preferences must be acknowledged.
+
+An unmatched generated finding is not automatically false because benchmark references may be incomplete. Audit unmatched findings on a declared sample or full pilot, report unknowns, and distinguish reference-based precision from adjudicated precision. Lexical metrics such as ROUGE can be secondary diagnostics, not the main evidence of correctness.
+
+### 8.3 Required metrics
+
+- Finding precision, recall, and F1 under the frozen matching protocol; report handling of empty references/predictions explicitly.
+- PR-level macro summaries and finding-level micro summaries so PRs with many references do not silently dominate.
+- Retention of correct full-pool findings, newly recovered findings, and lost findings.
+- Unsupported/incorrect finding rate, unknown-match rate, malformed-output rate, and execution-failure rate.
+- Severity-stratified recall only where severity has been audited; show unweighted results too.
+- Reviewer prompt tokens, additional evidence tokens, generated tokens, selector cost, retrieval cost, and latency.
+- Confidence intervals clustered by PR or repository, as appropriate to the split and number of clusters.
+
+Full-pool failure should be decomposed into missing evidence, reviewer reasoning failure, reference mismatch, formatting failure, and uncertain cause where possible. Gold evidence inspection is permitted for post-hoc auditing, never for constructing the evaluated candidate pool.
+
+### 8.4 Feasibility before expensive supervision
+
+Run a small development pilot spanning local and cross-file findings, multiple repositories, and varying pool sizes. Compare diff-only, local context, graph retrieval, and full-pool review. Manually inspect outputs and references.
+
+Proceed to selector training only if the reviewer recovers enough valid findings, contexts cause meaningful outcome differences, and scoring is credible. If full C fails because evidence was never retrieved, improve retrieval rather than expecting selection to repair it. If full C contains evidence but the reviewer cannot use it, reconsider the reviewer or task before spending on thousands of subset evaluations.
+
+## 9. Selector objective and supervision
+
+Let D be the mandatory diff, C the fixed candidate pool, S a subset of C, R the frozen reviewer, H the audited references, and T the actual reviewer prompt-token cost. Conceptually, we want:
+
+```text
+minimize T(D, S)
+subject to quality(R(D, S), H) preserving a declared quality floor,
+           and precision/recall losses versus R(D, C) staying within tolerance.
+```
+
+These are empirical constraints, not guaranteed per-task promises. A single-reference task may have discrete quality outcomes; use aggregate constraints and per-finding retention diagnostics. Choose tolerance and aggregation rules on development data. F1 alone can conceal unacceptable precision or recall loss, so retain both safeguards.
+
+A training surrogate can combine measured quality and normalized token cost, for example `utility = quality - lambda * token_fraction`. This is a proposed objective, not a validated score. Tune lambda on validation and display the resulting frontier rather than selecting a favorable test point.
+
+### 9.1 How to obtain labels
+
+The human comment is a reference for judging the reviewer; it is not directly a selector output. Generate selector supervision by evaluating multiple subsets:
+
+1. Include empty-extra-context, full pool, and strong fixed retrieval policies.
+2. Sample several token budgets and top-k policies, plus seeded random subsets matched by token budget.
+3. Evaluate leave-one-out removals or bounded greedy removal as diagnostic/search procedures.
+4. Include some combinations that can reveal dependencies between chunks.
+5. Cache reviewer outputs and scores, then form preferred-subset pairs, utility targets, or chunk-level marginal-value targets with their limitations recorded.
+
+There are up to `2^N` subsets for N candidates. Do not transfer the old “evaluate all 16 masks” design to arbitrary repository chunks. Budget the search explicitly. The best observed subset is a **search-derived reference**, not the globally minimal sufficient context.
+
+Chunk-level usefulness is conditional: a caller and callee can be useful together but useless separately. Avoid assuming independent binary relevance labels completely solve the problem. A budget-conditioned reranker with a deterministic packing step is a practical first model; a graph-aware or sequential chooser is an ablation/extension if interactions matter.
+
+### 9.2 Training and evaluation loops
+
+```mermaid
+flowchart TD
+    A["Training tasks and candidate pools"] --> B["Sample subsets under fixed budgets"]
+    B --> R["Frozen reviewer executions"]
+    R --> Q["Score against audited references"]
+    Q --> L["Cached subset preferences and utilities"]
+    L --> S["Train compact selector"]
+    S --> V["Select evidence for validation tasks"]
+    V --> E["Run reviewer on the selected subsets"]
+    E --> F["Choose operating point on validation frontier"]
+    F --> T["Freeze all settings and evaluate held-out test"]
+```
+
+Training can use cached labels without running the reviewer at every gradient step. Ranking loss and cached utility are useful training diagnostics. They are not a substitute for end-to-end validation: if the selector chooses a subset that has never been evaluated, the reviewer must run on that subset to measure actual review quality.
+
+Start with a compact pretrained code encoder and learned ranker; evaluate budget awareness and graph features separately. A small generative selector must emit valid candidate IDs, not code summaries; reject or repair invalid IDs under a fixed documented rule. A 17B selector is a later size/cost comparison if justified, not the default.
+
+Keep the reviewer frozen throughout a comparison. Using related Qwen models for selector and reviewer does not itself invalidate the experiment, but conclusions are conditional on that reviewer family. Transfer to a different reviewer is an optional stronger generalization test. Exact model names mentioned informally in conversation are not configuration choices until their existence, release, hardware requirements, and suitability are verified.
+
+## 10. Splits, baselines, and experimental controls
+
+### 10.1 Splits
+
+Freeze groups before learning anything from labels. Prefer repository-disjoint train/validation/test splits; keep every PR revision, comment, candidate subset, and duplicate/fork cluster together. Audit near-duplicate diffs across groups. A random comment-level split leaks shared code and PR context.
+
+An 80/10/10 split is a starting ratio, not a rule. After Python filtering, the repository count may make that ratio produce an unusably small validation/test set. Publish actual counts and language/context-level composition. If necessary, use grouped development cross-validation with a separately locked test set, or report a deliberately limited pilot. Do not claim robust cross-repository generalization from one or two held-out repositories.
+
+Selection training data are independent at PR/repository level, not at subset level. Report both counts. Repository-disjoint evaluation reduces project leakage but does not eliminate possible pretraining contamination in public models.
+
+### 10.2 Baselines
+
+| Policy | Purpose |
+|---|---|
+| Diff only | Minimum mandatory input; reveals findings that need no additional context |
+| Local surrounding code | Practical simple context baseline |
+| Metadata plus local context | Tests the value of PR/issue evidence |
+| Full admitted pool C | Controlled high-context comparator |
+| Lexical/BM25 top chunks at each budget | Cheap retrieval baseline |
+| Embedding top chunks at each budget | Semantic similarity baseline |
+| RepoHyper-style search/refinement at each budget | Strong structure-aware baseline |
+| Random selection matched by token budget, several seeds | Tests whether learned selection beats arbitrary reduction |
+| Best fixed policy chosen on validation | Primary practical comparator |
+| Learned selector | Proposed method |
+| Best evaluated subset / bounded greedy search | Offline diagnostic upper reference; not deployable performance and not a true oracle |
+
+All methods share the diff, permitted metadata rules, candidate pool, token accounting, reviewer, decoding, and scorer. If a method changes candidate generation, label it a retrieval ablation rather than attributing the gain entirely to selection. Report raw chunk retrieval followed by common packing as well as any method-specific packing where needed.
+
+### 10.3 Controls and ablations
+
+Freeze model revisions, prompt template, tokenizer, quantization, output cap, decoding seed/settings, chunk order, budget, and scoring protocol. Use at least three selector training seeds when feasible and separate them from split variability. Bootstrap paired comparisons over meaningful groups; with few repositories, acknowledge wide or unstable intervals.
+
+Prioritize ablations that answer the question: graph expansion versus similarity alone; budget-aware versus budget-unaware selector; graph features versus text only; metadata inclusion; independent ranking versus interaction-aware selection; and selector size versus total cost. Avoid a combinatorial sweep that prevents any complete held-out result.
+
+Inspect RQ3 failures by context level, relationship type, chunk length, pool coverage, repository, language, reference provenance, and severity where available. Show actual correct-to-incorrect and incorrect-to-correct review changes with code evidence, not only a frontier plot.
+
+## 11. Token, money, and latency accounting
+
+Reducing remote reviewer input can be useful without reducing total tokens or latency. For example, a selector reading 20,000 tokens and sending 4,000 to the reviewer reduces that reviewer's evidence input by 80%, but processes 24,000 input tokens across two models before overhead. This is an illustrative calculation, not a measured result.
+
+Record separately:
+
+- Reviewer input/output tokens and context-window usage.
+- Selector input/output tokens if generative, or encoded tokens/chunks and compute time if an encoder.
+- Repository indexing, retrieval, and graph-construction time, with cold versus cached runs.
+- End-to-end wall-clock latency, throughput, peak memory, and hardware.
+- Local/cloud compute cost and remote API cost under a dated pricing assumption, when applicable.
+- Offline supervision/judging cost and training cost, separate from deployment cost.
+- Cache reuse and the number of future reviews over which indexing/training costs are amortized.
+
+A local model is not computationally free. Do not claim significant dollar savings until measured under a deployment scenario. Compare quality at matched reviewer-token budgets and report the total-system frontier as well. Avoid conflating fewer additional-context tokens with the same percentage reduction in the entire prompt, whose mandatory diff/instructions remain.
+
+## 12. Implementation phases and acceptance gates
+
+These phases replace the retired A–F plan below. Each should become a scoped implementation task with its own tests and measured artifact counts. No full training or cloud execution is authorized merely by this roadmap.
+
+### Phase A — release, references, and temporal reconstruction
+
+**Deliver:** pinned raw release, schema inventory, eligibility manifest, revision audit, provenance counts, negative-file semantics investigation, and grouped split proposal.
+
+**Tasks:** fetch metadata; reconstruct a small set of exact comparisons; validate real cases from Section 4; map comments to reviewed versions; audit correctness and incomplete references; prototype adoption-evidence rules without turning them into quality labels.
+
+**Gate:** enough independent usable PRs/repositories remain for the declared scope; mismatches are resolved or quarantined; no future fixes or answer comments enter inputs. Confirm course scope approval if required. If this fails, narrow the claim or obtain more appropriate data before building a large training set.
+
+### Phase B — reproducible retrieval and full-pool reviewer pilot
+
+**Deliver:** pinned retrieval backend, versioned graph/chunk schema, candidate-pool manifests, exact prompt renderer, fixed reviewer pilot, matching rubric, and cost report.
+
+**Tasks:** adapt RepoHyper components; start with supported languages; compare lexical/local retrieval; measure candidate counts and token distributions; log unresolved edges and overflow; manually assess diff-only versus full-pool outputs.
+
+**Gate:** identical inputs reproduce candidate IDs and prompt hashes; no reference-driven retrieval; all prompts fit under explicit rules; reviewer/scorer behavior is credible; some context-sensitive findings exist. Measure coverage before assuming all necessary evidence is in C.
+
+### Phase C — bounded subset-outcome generation
+
+**Deliver:** training subset schedule, cached reviewer outputs, adjudicated/scored outcomes, utility/preferences, and completed-versus-pending job manifest.
+
+**Tasks:** estimate cost from the pilot; choose a bounded subset count and budget grid; include strong baseline subsets; inspect chunk interactions; separate unknown matches from incorrect findings; checkpoint progress atomically.
+
+**Gate:** repeatable outcomes with complete provenance, meaningful quality variation, and enough independent training tasks. Publish the achieved coverage of subset search; do not call it exhaustive or optimal. If outcomes are flat, deepen retrieval/reviewer/error analysis rather than force a learning claim.
+
+### Phase D — learned selector and validation frontier
+
+**Deliver:** compact trained selector, configuration and checkpoints, three-seed results where feasible, matched-budget baselines, learning curves, and end-to-end validation predictions.
+
+**Tasks:** train on cached outcome preferences/utilities; enforce valid IDs and budgets; run reviewer for new chosen subsets; choose an operating point on validation; assess whether larger selectors earn their added cost.
+
+**Gate:** reproducible comparison against the best fixed policy with honest uncertainty. A negative result is acceptable if its cause is analyzed. Do not tune against the held-out test or silently redefine the quality metric to obtain a win.
+
+### Phase E — frozen test and optional transfer
+
+**Deliver:** locked protocol manifest, paired test predictions, quality/cost tables and plots, clustered uncertainty, failure cases, and explicit limitations.
+
+**Tasks:** evaluate eligible held-out AACR tasks; audit unmatched findings and major losses under the predetermined protocol; distinguish retrieval failures from selection/reviewer failures. Only then consider a compatible ContextCRBench transfer set or second reviewer if time permits.
+
+**Gate:** every reported number traces to a task set, model, prompt, output, scoring version, and cost record. Unexpected test outcomes become analysis, not another tuning cycle. Necessary bug fixes require a disclosed protocol correction and fresh comparison of all affected methods.
+
+### Phase F — report and demonstration
+
+**Deliver:** course-length NeurIPS report, reproducibility instructions, and optional one-call review demo.
+
+**Report:** explain the midpoint pilot as infrastructure and lessons; distinguish it from the new review task. State dataset filtering, reference provenance, graph limitations, reviewer dependence, selection bias, and total costs. Show a quality–cost frontier, context-level breakdown, cost decomposition, and several concrete success/failure cases.
+
+**Demo:** show diff, candidate evidence, selected chunks, token counts, and resulting findings. It illustrates the pipeline but is not experimental evidence. Do not require a Cursor/Codex integration, Ollama deployment, or remote GUI to complete the study.
+
+### Suggested order under course time constraints
+
+Complete A and a small B before committing to C's compute. Prioritize one supported retrieval backend, one credible frozen reviewer, one compact learned selector, and rigorous baselines. Cut multilingual coverage, model-size sweeps, adoption scoring, transfer, and interactive harness comparisons before cutting reference validation or held-out evaluation. The original November 4 calendar is retired; assign dates and owners after the feasibility gates reveal the actual workload.
+
+## 13. Existing code to reuse and what must change
+
+The repository already contains `src/evaluation/`, `src/context_selection/`, `src/training/runtime.py`, `src/models/qwen.py`, and tests for those components. Reuse hashing, atomic writes, caching patterns, grouped evaluation infrastructure, plots, and resume handling where their interfaces apply.
+
+The current binary parser, majority classifier, four-context-type masks, and merge-label metrics do not implement this new task. Do not merely rename `merged` to `quality` or reuse a 16-output mask head for variable-size candidate pools. Add distinct review-task schemas, prompt/rendering code, finding matching, candidate selectors, and protocol IDs. Keep historical notebooks runnable and results interpretable.
+
+Recommended implementation checks:
+
+- Reconstruct known diffs from pinned snapshots; verify source/target line mapping and renamed files.
+- Prove label-only fields cannot enter retrieval queries, selector inputs, or rendered prompts.
+- Verify deterministic graph/chunk IDs, deduplication, token limits, and zero-extra-context behavior.
+- Handle unsupported parsing, unresolved calls, unavailable snapshots, and oversized diffs explicitly.
+- Validate generated IDs, output parsing, duplicate findings, empty-reference cases, and unknown matches.
+- Resume interrupted outcome generation without duplicating completed calls or mixing protocol versions.
+- Verify all subsets/versions of a PR remain grouped and that no test labels affect learned retrieval or selection.
+
+Choose new module names during implementation; paths in Section 7 are proposals. This document does not claim that the new AACR pipeline, graph retriever, scoring system, or selector has been coded.
+
+## 14. Open decisions that must stay visible
+
+| Decision | Evidence needed before freezing |
+|---|---|
+| Exact AACR release and usable size | Release hash, actual counts, reference provenance, and mismatch audit |
+| Python-only or broader language scope | Parse support and independent repository counts after filtering |
+| RepoHyper adaptation versus alternate backend | Portability, candidate coverage, runtime, and reproducibility pilot |
+| Reviewer model/size/precision | Measured review quality, memory, latency, and window fit |
+| Review matcher/judge | Agreement with blinded human audit and treatment of unknown findings |
+| Severity and adoption use | Reliable annotations; otherwise remain auxiliary or omitted |
+| Selector architecture and size | Compact baseline results and learning curves; 17B is not assumed necessary |
+| Quality tolerance and token targets | Development evidence and explicit precision/recall safeguards |
+| Split proportions or grouped development folds | Actual post-filter repository/PR counts, not inherited 80/10/10 convention |
+| ContextCRBench transfer | Compatible references, snapshots, and overlap audit |
+| Scope refinement approval | Course clarification if this qualifies as a post-midpoint topic change |
+
+No open item should silently become an asserted fact in a later paper. Distinguish a design recommendation, a configured experiment, and a measured result in every phase document.
+
+## 15. Reading and citation map
+
+Use primary sources, pin code revisions when implementing, and cite our modifications separately from the original methods:
+
+- [AACR-Bench paper](https://arxiv.org/html/2601.19494v3) and [dataset/code](https://github.com/alibaba/aacr-bench): task, curation, provenance, benchmark protocol.
+- [RepoHyper paper](https://arxiv.org/html/2403.06095v3) and [implementation](https://github.com/FSoft-AI4Code/RepoHyper): graph retrieval starting point.
+- [DraCo](https://arxiv.org/abs/2405.19782), [GraphCoder](https://arxiv.org/abs/2406.07003), and [PyCG](https://arxiv.org/abs/2103.00587): dependency-aware retrieval and static-analysis alternatives/components.
+- [RLCoder](https://arxiv.org/abs/2407.19487), [Repoformer](https://proceedings.mlr.press/v235/wu24a.html), and [RepoCoder](https://arxiv.org/abs/2303.12570): learned retrieval utility, retrieval gating, and iterative retrieval baselines.
+- [RECOMP](https://arxiv.org/abs/2310.04408): extractive/abstractive compression of retrieved evidence; useful conceptual comparison, not a code graph algorithm.
+- [Code property graphs](https://conferences.computer.org/sp/pdfs/sp/2014/4686a590.pdf): earlier graph-based program analysis; avoid claiming RepoHyper originated all such representations.
+
+These references motivate the proposed architecture. They do not establish that our selected evidence preserves review quality, that AACR is sufficient for a large selector, or that a local selector produces net savings. Those are empirical questions for this plan.
+
+---
+
+## Historical appendix — November 4 roadmap, retired
+
+The following is preserved verbatim for provenance. **Do not execute its phase checklist as the current plan.** Its “measured” labels refer to the November 4 local audit and have not been revalidated in this revision. Its binary labels, four-field masks, configurations, thresholds, assignments, and dates are historical. The active replacement is Sections 1–15 above.
+
+<details>
+<summary>Expand the retired merge-status / fixed-mask roadmap and historical audit</summary>
+
 # Next-stage roadmap: learning to select context per code diff
 
 Status: planning document written Nov 4, 2026. It is a plan, not measured results, except where numbers are explicitly labeled **measured**. It supersedes the earlier, shorter version of this roadmap.
@@ -636,3 +1241,5 @@ The appendix covers the audits, ablations, the adapter re-evaluation, sensitivit
 - **Too few minority-class examples** in validation and test after cleaning. Use PR-cluster intervals, AUROC and balanced accuracy, and present the `label_v2_relabel` sensitivity population.
 - **Compute overrun.** Cut the Phase C sample size first, then the number of validation masks (greedy-reachable masks only), and never the test pairing.
 - **Schedule slip.** Phases B2 and C can overlap once the reviewer is frozen, and Phase D can start on partial Phase C data, because the targets are append-only.
+
+</details>
