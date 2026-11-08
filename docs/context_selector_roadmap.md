@@ -364,6 +364,43 @@ Known limits:
 - **Counts depend on the reviewer tokenizer:** the earlier Qwen2.5-Coder counts were about 5% lower on the same text.
 - **PR text is current, not historical:** edits after review are flagged but not undone.
 
+#### 5.5.6 The dataset builder: one file for every PR and level (November 8, 2026)
+
+**Status:** built and tested on 3 PRs; the whole dataset has **not** been run.
+
+**What it does:** `scripts/build_context_dataset.py` (code in `src/tracer_context/dataset.py`) builds the context levels for many AACR entries into **one file**, `data/aacr_tracer/context_levels.jsonl.gz`, one JSON line per PR. The outcome-table notebook and selector training load just that file.
+- **Clones are deleted:** entries run grouped by repository, and each clone is deleted after that repository's last entry, so repositories with several PRs are fetched once.
+- **Resuming:** PRs already built with the same commits, tool, trace and render versions, level configs and tokenizer are skipped; failed ones are retried.
+- **No LLM:** it runs on a laptop.
+
+Each line holds:
+- every level's review input text, token counts and a compact list of included items;
+- input-side `stats` for selector features;
+- the PR text;
+- the file list used to clean reviewer paths;
+- versions and timings;
+- an `audit` field holding the checks that use the reference comments or the final PR's size. It is kept separate so those checks are never used as selector inputs.
+
+Reference comment text is never stored in this file. The full trace is not kept either, so the later item-level step (Section 9.3) will re-fetch and re-trace, which is deterministic.
+
+**Test on 3 PRs (Nov 8):**
+
+| PR | Build time | Input tokens, `L01` → `L10` | Notes |
+|---|---|---|---|
+| cline/cline#5177 (TypeScript) | 12 s | 912 → 29,045 | |
+| cline/cline#2347 (TypeScript) | 21 s | 2,488 → 24,544 | failed first; fixed (1 below) |
+| ollama/ollama#12185 (Go) | 26 s | 9,173 → 137,174 | 6 minutes before fix 2 |
+
+The two TypeScript PRs reused one clone, and both clones were deleted afterward. The 3-PR file is 0.6 MB compressed.
+
+**Problems found and fixed:**
+1. **Missing link types:** the tool rejects an inbound walk that names a link type the repository's graph lacks (cline#2347's snapshot has no `TESTS` links). The tracer now asks the graph which link types exist, follows only those, and records the ones it dropped as a warning.
+2. **Slow text search:** it took 320 s of ollama's 338 s trace. `git grep -w` with many patterns is slow on large vendored C/C++ trees. It is now one pass that splits each tracked text file into words and checks them against the changed names, with the same rules: whole words, one hit per line, binaries skipped, git's line numbering. It takes 4 s, with identical results: 142 names, 7,823 hits, and identical levels.
+
+The tracer now also records how long each step takes.
+
+**Next:** run `--all` on the laptop, then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
+
 ## 6. Preprocessing without generative LLMs
 
 The user's constraint means **no generative LLM in the preprocessing stage**, not “no machine learning.” Parsers, static analysis, embeddings, nearest-neighbor search, graph algorithms, and conventional classifiers are acceptable.
@@ -794,7 +831,7 @@ Options considered and not chosen:
 
 #### 8.5.8 Implemented: the outcome-table code and notebook (November 8, 2026)
 
-**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) `context.md` from the batch runner, it:
+**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr_tracer/context_levels.jsonl.gz`, Section 5.5.6), it:
 
 1. reviews it with the frozen reviewer (system: Codex rubric; user: request + `context.md`);
 2. parses the JSON findings;
@@ -822,7 +859,7 @@ The 27B model cannot run on the development laptop (Apple M4 Max, 36 GB).
 - **`L01`:** the 0.8B model repeated the rubric's example finding title until the 1,024-token output limit. It was recorded as `malformed` and `truncated`.
 - **`L02`:** valid JSON with one invented finding. It was parsed (path made repository-relative), judged, and gave recall 0.
 
-This confirms the plumbing and the strict handling of bad output, nothing about review quality.
+This confirms the plumbing and the strict handling of bad output, nothing about review quality. After the switch to the one-file dataset, the same smoke test on cline#5177 `L01`–`L02` also ran without errors: valid JSON, judged, recall 0.
 
 **Before the real run:**
 - **Decide the judge model.**
@@ -1016,9 +1053,10 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 
 - **Built:** the deterministic tracer, the ten nested context levels, the prompt-section renderer (PR text, diff, context) and the AACR batch runner with per-entry checks (Section 5.5).
 - **Measured:** one PR at all levels; two more at one level.
+- **Also built:** the one-file dataset builder, which deletes each clone after use (Section 5.5.6). It was tested on 3 PRs.
 - **Next:**
   - decide between content-defined and fixed-budget levels;
-  - pilot about two PRs per language;
+  - pilot about two PRs per language, then build the whole dataset with `scripts/build_context_dataset.py --all`;
   - run a reviewer on the levels.
 
 **Gate:** identical inputs reproduce candidate IDs and prompt hashes; no reference-driven retrieval; all prompts fit under explicit rules; reviewer/scorer behavior is credible; some context-sensitive findings exist. Measure coverage before assuming all necessary evidence is in C.
@@ -1085,7 +1123,7 @@ Recommended implementation checks:
 
 Choose new module names during implementation; paths in Section 7 are proposals.
 
-As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `src/tracer_context/dataset.py` and `scripts/build_context_dataset.py`, with tests in `tests/test_context_dataset.py` (Section 5.5.6). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
 
 ## 14. Open decisions that must stay visible
 
