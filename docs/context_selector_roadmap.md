@@ -2,6 +2,8 @@
 
 **Revised November 7, 2026. Status: research design, not an implemented or validated system.**
 
+**Update, November 8, 2026:** candidate gathering is now implemented with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the context levels and the batch runner, plus what was measured on three AACR entries. No reviewer, scorer or selector has been run or built; everything outside Section 5.5 remains a design.
+
 This revision records the discussion moving from ContextCRBench merge-status prediction to repository-aware **review generation**. Our intended product is a context-selection component: given a diff and a reproducibly gathered pool of repository evidence, choose a small subset for a frozen reviewer. The reviewer produces useful findings; the selector does not decide whether a PR should merge.
 
 The November 4 roadmap is retained at the end as a **retired historical plan**, including its reported measurements. Its task, labels, phase checklist, model defaults, success thresholds, and schedule are not the active specification. No experiments were rerun for this documentation revision.
@@ -13,7 +15,7 @@ The November 4 roadmap is retained at the end as a **retired historical plan**, 
 | Main task | Reduce context tokens while preserving meaningful review findings | Whether a learned selector improves over strong retrieval and fixed-budget baselines |
 | Starting dataset | Start with AACR-Bench, reconstructing repository snapshots | Usable release size, supported languages, reference validity, and split feasibility |
 | ContextCRBench | Preserve the midpoint pilot; consider a separate transfer evaluation | Whether its review references and available snapshots support the same task |
-| Context gathering | Adapt an existing published repository retrieval method; RepoHyper is the leading starting point | Exact implementation, language coverage, graph parameters, and portability |
+| Context gathering | **Implemented (Nov 8):** codebase-memory-mcp static code graph plus nested context levels (Section 5.5). RepoHyper was the earlier recommendation | Behavior on the other 8 AACR languages and on very large repositories; whether the levels separate review quality |
 | Selector | Train a compact model to select existing evidence chunks | Encoder/ranker, graph-aware model, or small generative selector; no final size chosen |
 | Reviewer | Freeze a capable open-weight reviewer during comparisons | Exact model ID, revision, quantization, context window, decoding, and quality floor |
 | Preprocessing | Avoid generative LLM calls for fetching, parsing, graph construction, and metadata extraction | Manual effort needed for reliable reference and adoption annotations |
@@ -151,6 +153,8 @@ If only packaged context fields are recoverable, report transfer in that **restr
 
 ## 5. Repository exploration: reuse RepoHyper, adapt the task
 
+> **Superseded for implementation on November 8, 2026.** Sections 5.1–5.4 are the November 7 recommendation, kept as history and for related work. The implemented tracer is codebase-memory-mcp (Section 5.5). RepoHyper's published pipeline is Python-oriented, while AACR spans ten languages. The change keeps a published, deterministic, LLM-free method. The generic candidate-pool rules in 5.3 still apply.
+
 ### 5.1 Recommendation and boundaries
 
 **Use RepoHyper's search–expand structure as the leading candidate-generation design.** It provides a published basis for going beyond local surrounding code. Our contribution would be studying review-quality-preserving selection and token cost on this candidate pool, not claiming to invent repository graphs.
@@ -218,6 +222,147 @@ Any learned expansion patterns or trainable graph ranker must be fit only on the
 | [RECOMP](https://arxiv.org/abs/2310.04408) | Select useful sentences or generate a shorter summary from retrieved passages | It includes extractive selection, not only whole-document summarization; not a repository-code exploration method |
 
 These papers establish working architectures in their original tasks, not proof that our adaptation works. Implement one strong retrieval route and a simple baseline before attempting to combine all of them. RepoHyper is the starting recommendation; RLCoder is a learning-objective influence, not a requirement to run expensive online reinforcement learning.
+
+### 5.5 Implemented: codebase-memory-mcp tracer and nested context levels (November 8, 2026)
+
+**Status:**
+- **Implemented and unit-tested** (64 tests pass).
+- **All ten levels** have been built for one AACR entry (vllm-project/vllm#17425, Python).
+- **The earlier single-level default config** has also been run on one Go entry (ollama/ollama#12185) and one TypeScript entry (cline/cline#5177).
+- **Not done:** the dataset has not been run. No reviewer has seen these inputs, so nothing here says whether any level preserves review quality.
+
+#### 5.5.1 Tool and why
+
+The tracer is [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) v0.12.1 (MIT; described in arXiv [2603.27277](https://arxiv.org/abs/2603.27277), a preprint). It builds a code graph with tree-sitter parsers for all ten AACR languages, without LLM calls. The release binary was checked against the published SHA-256. Settings that matter for repeatability:
+
+- **Fresh index each trace:** each PR is indexed into an empty cache. Re-indexing into an existing cache reuses the stored graph, so it is not a rebuild.
+- **Pinned worker count (4):** on our repository, one worker built a graph with one fewer link than 2, 4 or 8 workers.
+- **Repeatability:** with a fixed folder path and worker count, repeated fresh builds gave byte-identical link lists and outputs.
+- **Folder path:** changing it altered a few similarity links and the order of results within a hop; the walks we use returned the same sets.
+- **Two separate walks:** `detect_changes` with `direction: "both"` returns only the outbound set in v0.12.1, so the builder runs an inbound and an outbound walk.
+
+#### 5.5.2 Pipeline (code in `src/tracer_context/`, scripts in `scripts/`)
+
+1. **Checkout** (`aacr.py`):
+   - Fetch only `source_commit` and `target_commit` into one clone per repository.
+   - Deepen history until they share a merge base, falling back to `refs/pull/<n>/head` for force-pushed commits.
+   - Check out `target_commit` clean. The diff is `source...target`, from the merge base.
+2. **Trace, once per PR** (`cbm.py`):
+   - **Changed symbols:** found from the exact changed lines.
+   - **Inbound walk:** `CALLS, USAGE, TESTS, MENTIONS, DEFINES, REFERENCES_FILE`, depth 3.
+   - **Outbound walk:** the tool follows only `CALLS`, depth 3.
+   - **Ranges and links:** line ranges and the "called by" links come from graph queries.
+   - **From git:** the diff (`-U3`), the repository guide files, and whole-word `git grep` hits for changed symbol names.
+   - **Names:** the tool's path-derived project prefix is removed, so traces compare across machines.
+3. **Select** (`build.py`):
+   - **Kinds:** changed symbols, changed files, callees, callers, tests, text-search windows, guide files, and doc sections.
+   - **Noise dropped:** module/file nodes and built-ins.
+   - **Changed symbols:** keep the innermost changed symbol, folding struct fields and 1–2 line members into their changed container.
+   - **Per-kind limits:** a deepest hop and a maximum item count.
+4. **Rank** with configurable keys (hop, kind, link type, same file, size), always followed by path, line and name.
+5. **Pack** under a token budget:
+   - **Counting:** with the reviewer's tokenizer, `Qwen/Qwen3.8-27B` (tokenizer files only; the revision is recorded).
+   - **Range fixes:** decorators are added (the tool's Python ranges start below them), and Markdown sections are extended past their heading.
+   - **Long items:** windows around the changes, or the first lines.
+   - **No repeats:** a line is never shown twice.
+6. **Output per PR and level:**
+   - **`context.md`:** the PR title and description, the diff, then the repository context. The budget covers only the repository context.
+   - **`selection.json`:** every included and excluded item with its reason, plus token counts for each part.
+
+`scripts/run_tracer_batch.py` runs AACR entries one at a time, since the tool allows one active cache at a time. Entries are selected by ID, 0-based file position or language; the whole dataset needs `--all`. It traces each PR once and packs every level from that trace, resumes by reusing unchanged results, and records failures without stopping. It writes `data/aacr_tracer/entries/<id>/{status,trace,pr}.json`, `<level>/{context.md,selection.json}` and `summary.csv`. Reference comments are read only to count the per-entry checks below; their text never enters any output.
+
+The PR title and description come from the GitHub API and are the **current** versions. `lastEditedAt` records whether the description was edited after the reviewed commit. Title edits are not detectable this way, and an edited description is flagged, not reconstructed.
+
+#### 5.5.3 Context levels (`configs/levels/`, base `configs/tracer_levels_base.yaml`)
+
+Levels are nested. Each config inherits the previous one and names it as its parent, and the runner includes the parent's items first, so every line a level shows is also shown by the next. A whole changed file absorbs the pieces of it a smaller level showed. `status.json` records a per-level nesting check. Budgets cover repository context only, and are starting points to check on a pilot, not tuned values.
+
+| # | Level | Adds | Max hop | Context budget |
+|---|---|---|---|---|
+| 1 | `L01_min` | PR title and description + diff (like one ContextCRBench entry) | 0 | 0 |
+| 2 | `L02_function` | full changed functions/classes | 0 | 4k |
+| 3 | `L03_file` | full changed files (windows for files over 400 lines) | 0 | 16k |
+| 4 | `L04_callees1` | direct callees (≤40) | 1 | 20k |
+| 5 | `L05_callers1` | direct callers (≤40) | 1 | 24k |
+| 6 | `L06_tests1` | tests exercising the change (≤10) | 1 | 28k |
+| 7 | `L07_agent` | guide files (≤5) and text-search windows (≤30), an estimate of what Codex/Cursor/Claude Code read | 1 | 40k |
+| 8 | `L08_depth2` | callees and callers two hops away (≤100 each) | 2 | 64k |
+| 9 | `L09_depth2_docs` | doc sections (≤10) and tests (≤25) up to two hops | 2 | 80k |
+| 10 | `L10_all` | everything traced, three hops, no item limits | 3 | 128k |
+
+`L07_agent` is our estimate of agent behavior, not a measurement. Calibrate it by logging which files real agent reviews open on a few PRs. `L10_all` is an upper bound for what this pipeline can supply, not a human contributor's actual knowledge. Whether a 128k-token context plus the diff fits the reviewer's window and GPU memory has not been tested.
+
+#### 5.5.4 Measured on one PR: vllm-project/vllm#17425 (November 8, 2026)
+
+**The PR and its trace:**
+- **The PR:** 13 changed files and 149 diff lines, with 8 reference comments (1 human).
+- **The trace** (depth 3, 22 s on a laptop):
+  - 31 changed symbols;
+  - 888 callers (105 / 451 / 332 at hops 1 / 2 / 3);
+  - 134 callees (57 / 54 / 23);
+  - 15 guide files;
+  - 27 changed names searched;
+  - no tool-limit warnings.
+- **Packing all ten levels** took 2.7 s.
+- **Fixed parts:** the PR text is 61 tokens and the diff 4,932, so every level's input starts at 4,994 tokens.
+- **Nesting:** every level passed the check; no parent line is missing.
+
+| Level | Input tokens | Context / budget | Items included (by kind) |
+|---|---|---|---|
+| `L01_min` | 4,994 | 0 / 0 | — |
+| `L02_function` | 8,809 | 3,810 / 4,000 | 14 changed (6 more did not fit) |
+| `L03_file` | 20,515 | 15,516 / 16,000 | 11 files + 5 changed (2 files did not fit) |
+| `L04_callees1` | 24,997 | 19,998 / 20,000 | 13 files, 11 callees |
+| `L05_callers1` | 28,957 | 23,958 / 24,000 | 13 files, 24 callees, **0 callers** |
+| `L06_tests1` | 32,939 | 27,940 / 28,000 | + 30 callees, 1 caller, **0 tests** |
+| `L07_agent` | 44,986 | 39,987 / 40,000 | + 43 callees, 11 callers, 1 test, **0 guides, 0 search** |
+| `L08_depth2` | 68,997 | 63,998 / 64,000 | 50 callees, 37 callers, 11 tests, 2 guides, 7 search |
+| `L09_depth2_docs` | 84,949 | 79,950 / 80,000 | + 36 tests, 0 docs |
+| `L10_all` | 132,979 | 127,980 / 128,000 | 89 callees, 106 callers, 42 tests, 136 search; 162 traced items still did not fit |
+
+**Finding: with fixed budgets, the levels do not contain what they are named for.** Every level fills its budget. Items that did not fit a level rank ahead of the next level's new kind, so they take its extra budget first. As a result, `L05_callers1` adds no callers, `L06_tests1` no tests, and `L07_agent` no guide files or search hits, which first appear at `L08`. Two options:
+
+1. **Content-defined levels (recommended).** Each level includes everything its definition allows: item limits and line limits control size, the budget is only a safety cap (e.g. the reviewer window), and actual tokens are reported per PR.
+2. **Reserved shares.** Keep fixed budgets but reserve part of each level's increment for the kinds it adds.
+
+This is an open decision (Section 14). The run above used fixed budgets.
+
+**Other observations on this PR:**
+- **Reference comment evidence:**
+  - The human reference comment says the change passes unhashable arguments into `logger.warning_once`, which is wrapped in `lru_cache`.
+  - The `@lru_cache` decorators are in the input from `L02` onward; the tool's ranges omit decorators, and the builder adds them back.
+  - The definition of `_get_mm_num_tokens` (which returns a `Mapping`) appears from `L04` onward, because its file did not fit `L03`'s budget.
+  - Whether a reviewer finds the issue at any level has **not** been tested.
+- **The diff dominates the smaller levels:** it is 4,932 of `L01`'s 4,994 tokens.
+- **One guide file is large:** `README.md` alone is 3,709 tokens, which is why `L07` could not fit it.
+- **Text search dropped the most relevant name:** five names had more than 50 matches and were skipped as too common (`__init__`, `ModelConfig`, `enabled`, `load_weights`, `warning_once`). `warning_once`, the name an agent would most likely search here, had 56.
+- **PR text:** the description was never edited (`lastEditedAt` empty).
+
+#### 5.5.5 Per-entry checks so far, and known limits
+
+The runner's automatic checks on the three entries run so far:
+
+| Entry | Diff lines at `target_commit` | `change_line_count` | Reference comments in range / inside shown diff |
+|---|---|---|---|
+| vllm-project/vllm#17425 | 149 | 154 | 8 / 8 |
+| ollama/ollama#12185 | 197 | 64 | 12 / 12 |
+| cline/cline#5177 | 28 | 33 | 2 / 2 |
+
+`change_line_count` matches the PR's final version, while `target_commit` can be an earlier one. In ollama#12185, the reviewed commit is a 197-line version the author later force-pushed down to 64 lines. The comments' line numbers fit the reviewed version, so the builder diffs that version. Expect `diff_lines` to differ from `change_line_count` often; it is recorded, not "fixed".
+
+Known limits:
+
+- **Missing links:**
+  - The outbound walk follows only `CALLS` links (a tool limit).
+  - Calls on objects whose type the tool cannot resolve are missed: in vLLM, no `logger.warning_once(...)` call links to the logger implementation.
+  - The text search partly compensates, but skips names with more than 50 matches.
+- **Repeatability conditions:** `CBM_WORKERS` must stay pinned. The folder path changes the tool's similarity links (which the builder does not use) and its order within a hop (which the builder re-sorts).
+- **Untested:**
+  - The other languages: only Python, Go and TypeScript have run, and only Python at all levels.
+  - Very large repositories (elasticsearch, ClickHouse, FreeCAD).
+  - The force-push fallback against GitHub.
+- **Counts depend on the reviewer tokenizer:** the earlier Qwen2.5-Coder counts were about 5% lower on the same text.
+- **PR text is current, not historical:** edits after review are flagged but not undone.
 
 ## 6. Preprocessing without generative LLMs
 
@@ -507,6 +652,15 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 
 **Tasks:** adapt RepoHyper components; start with supported languages; compare lexical/local retrieval; measure candidate counts and token distributions; log unresolved edges and overflow; manually assess diff-only versus full-pool outputs.
 
+**Progress (Nov 8):** retrieval uses codebase-memory-mcp instead of RepoHyper.
+
+- **Built:** the deterministic tracer, the ten nested context levels, the prompt-section renderer (PR text, diff, context) and the AACR batch runner with per-entry checks (Section 5.5).
+- **Measured:** one PR at all levels; two more at one level.
+- **Next:**
+  - decide between content-defined and fixed-budget levels;
+  - pilot about two PRs per language;
+  - run a reviewer on the levels.
+
 **Gate:** identical inputs reproduce candidate IDs and prompt hashes; no reference-driven retrieval; all prompts fit under explicit rules; reviewer/scorer behavior is credible; some context-sensitive findings exist. Measure coverage before assuming all necessary evidence is in C.
 
 ### Phase C — bounded subset-outcome generation
@@ -561,7 +715,9 @@ Recommended implementation checks:
 - Resume interrupted outcome generation without duplicating completed calls or mixing protocol versions.
 - Verify all subsets/versions of a PR remain grouped and that no test labels affect learned retrieval or selection.
 
-Choose new module names during implementation; paths in Section 7 are proposals. This document does not claim that the new AACR pipeline, graph retriever, scoring system, or selector has been coded.
+Choose new module names during implementation; paths in Section 7 are proposals.
+
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The reviewer runs, scoring system and selector have not been coded.
 
 ## 14. Open decisions that must stay visible
 
@@ -569,7 +725,8 @@ Choose new module names during implementation; paths in Section 7 are proposals.
 |---|---|
 | Exact AACR release and usable size | Release hash, actual counts, reference provenance, and mismatch audit |
 | Python-only or broader language scope | Parse support and independent repository counts after filtering |
-| RepoHyper adaptation versus alternate backend | Portability, candidate coverage, runtime, and reproducibility pilot |
+| RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: behavior on the other languages and very large repositories |
+| Fixed-budget versus content-defined context levels | With fixed budgets, levels did not contain their named content on vllm#17425 (Section 5.5.4); compare both on a pilot |
 | Reviewer model/size/precision | Measured review quality, memory, latency, and window fit |
 | Review matcher/judge | Agreement with blinded human audit and treatment of unknown findings |
 | Severity and adoption use | Reliable annotations; otherwise remain auxiliary or omitted |
