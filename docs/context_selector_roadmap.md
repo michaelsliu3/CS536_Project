@@ -537,7 +537,12 @@ Proceed to selector training only if the reviewer recovers enough valid findings
 
 ### 8.5 Decisions of November 8, 2026: review generation, scoring and the outcome table
 
-**Status: decisions and plans only.** No review has been generated, no judge has run, and none of this is coded. Each subsection gives the decision, the options considered and not chosen (kept for reference), and what is still open. Facts about AACR-Bench below come from its public repository at commit `ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df` (`dataset/positive_samples.json`, `evaluation/judge.py`, `evaluation/evaluate.py`, `evaluation/reviewers/`, `docs/metrics.md`), read on November 8.
+**Status:**
+- **Built (Nov 8):** the outcome-table code and notebook (`src/review_outcomes/`, `notebooks/outcome_table.ipynb`; Section 8.5.8).
+- **Run so far:** only a pipeline smoke test with a 0.8B model on two levels of one PR.
+- **Not done:** no Qwen3.8-27B review and no real judge run. The judge model is still open.
+
+Each subsection gives the decision, the options considered and not chosen (kept for reference), and what is still open. Facts about AACR-Bench below come from its public repository at commit `ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df` (`dataset/positive_samples.json`, `evaluation/judge.py`, `evaluation/evaluate.py`, `evaluation/reviewers/`, `docs/metrics.md`), read on November 8.
 
 #### 8.5.1 What AACR-Bench provides: an answer key and a test harness
 
@@ -566,9 +571,9 @@ In our design, the Qwen reviewer is the system under test: it writes the comment
 **Decided: a one-call frozen reviewer.**
 
 - **Model:** `Qwen/Qwen3.8-27B` on the project's cloud GPU, one call per (PR, context level).
-- **Input:** a fixed system prompt plus that level's `context.md`.
-- **Decoding:** greedy.
-- **Output:** a JSON list of findings with `path`, `start_line`, `end_line`, `side` and `comment`. The `comment` field becomes the judge's `note`.
+- **Input:** a fixed system prompt (Codex's `/review` rubric, below), then a one-sentence request and that level's `context.md` as the user message. The prompt adds about 1.7k tokens to each `context.md`: 6,704 prompt tokens versus 4,994 for vllm#17425 `L01`, measured with the Qwen3.5 tokenizer.
+- **Decoding:** greedy. Qwen's thinking mode is off by default (`enable_thinking: false`). Whether to turn it on is open; a pilot can compare.
+- **Output:** the rubric's JSON. Each finding has a title, body, priority (P0–P3), confidence, and file path plus line range. Each finding becomes one generated comment for the judge (`note` = title + body).
 - **What is verified so far:** the Hugging Face repository exists (Apache-2.0) and its tokenizer is cached at revision `37561816e66b5b9153b1b64c10968c18c1e6f4a0`.
 - **What is not verified:** that the model, plus the largest level's input, fits the GPU's memory and context window.
 
@@ -581,19 +586,25 @@ Options considered and not chosen:
 
 **Determinism caveat:** greedy decoding on our GPU is not guaranteed to repeat exactly. vLLM's batch-invariant mode did not list the RTX PRO 6000 in the documentation checked on November 7. A pilot with repeated runs should measure run-to-run noise.
 
-**Decided: our own fixed review prompt.** It acts as the reviewer's "skill": one short system prompt covering what to look for (correctness, security, performance, maintainability), using only the diff and the context given, and the exact JSON output. It may borrow AACR's finding fields (summary, failure scenario, fix). Rules:
+**Decided (revised Nov 8): OpenAI Codex's built-in `/review` rubric, verbatim, as the system prompt.** This replaces the earlier plan for our own prompt (kept below for reference). The user asked for a single, widely used review prompt from an official source.
 
-- **Identical everywhere:** the same prompt for every PR and every level, versioned, with its hash stored with each outcome. The prompt never mentions levels or that context was trimmed.
-- **Fixed findings cap:** for example, "at most N findings, most important first". AACR's precision counts every generated comment, so the cap trades precision against recall and must not vary.
-- **Neutral missing-context rule:** for example, "if something you need is not shown, do not assume it", worded the same at every level.
-- **Freeze before scale:** tune the wording on a few development PRs at most, never on test PRs, then freeze. Changing it later means regenerating the table.
+- **Source:** `codex-rs/prompts/templates/review/rubric.md` from openai/codex at commit `4e4767ffa763ec0d0a19e04cf8ff0163a987297b` (Apache-2.0). It is stored unchanged in `configs/review_prompts/codex_review_rubric.md`, with SHA-256 `ec60e7f3…`, the license, and a provenance note. The code refuses to run if the file changes.
+- **Why it fits a one-call reviewer:**
+  - It is self-contained: what counts as a finding, how to write the comment, and a strict JSON output.
+  - It never asks the reviewer to run anything.
+  - AACR's own harness runs Codex's `/review`, so the rubric is the same one behind one of the benchmark's reference reviewers.
+- **Only adaptation:** the request sentence. Codex's normal request tells the reviewer to run `git diff`, so we use a one-sentence request adapted from Codex's commit-review wording, saying the PR text, diff and context follow inline.
+- **No findings cap:** the rubric says to list every finding the author would fix and to prefer none over doubtful ones. That replaces the fixed cap planned earlier. It still affects precision, and it is the same for every cell.
+- **Identical everywhere:** the same prompt for every PR and level, never mentioning levels. Its hash and version are stored with each outcome. A newer rubric would be a new prompt version and a new table.
 
 Options considered and not chosen:
 
 | Option | Why not |
 |---|---|
-| Copy an agent's built-in review skill (Claude Code `/code-review`, Codex `/review`) as the prompt | Those instructions assume the reviewer can open files and run git; a one-call reviewer would be told to take actions it cannot. They also change between tool versions |
-| Run AACR's harness with agents | Agents pick their own context; useful only as a comparison baseline |
+| Our own short prompt with a fixed findings cap (the earlier Nov 8 plan) | Replaced by an official, widely used prompt; would have been ours to justify and tune |
+| Cursor's built-in review | Its prompt is not published as far as we found, so it cannot be pinned or reproduced |
+| Claude Code's `/code-review` | Designed for an agent that works in the repository with tools; not a self-contained one-call prompt |
+| Run AACR's harness with agents (Claude Code, Codex) | Agents pick their own context; useful only as a comparison baseline |
 
 **Decided: Claude is an allowed fallback reviewer.** Switch only if Qwen fails criteria fixed before a small pilot (about 10–20 PRs at every level):
 
@@ -781,6 +792,43 @@ Options considered and not chosen:
    - a random level per PR;
    - the per-PR oracle (best level), which is an upper bound.
 
+#### 8.5.8 Implemented: the outcome-table code and notebook (November 8, 2026)
+
+**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) `context.md` from the batch runner, it:
+
+1. reviews it with the frozen reviewer (system: Codex rubric; user: request + `context.md`);
+2. parses the JSON findings;
+3. scores them with a port of AACR's judge;
+4. writes `data/aacr_tracer/outcomes/<run>/`:
+   - `reviews/` and `judgments/` per cell;
+   - `table.csv` per (PR, level);
+   - `coverage.csv` per reference and level;
+   - `manifest.json` with the prompt, dataset and code hashes.
+
+**Details:**
+- **Judge prompt:** byte-identical to AACR's, checked against their source. Unlike AACR, a failed judge call is recorded and retried instead of silently counting as no match.
+- **Strict parsing:** malformed and empty replies count as empty reviews and are reported. Replies cut off at the output limit are marked `truncated`.
+- **Resuming:** each cell carries a cache key over everything that changes its output, so re-running resumes and retries errors.
+
+**Profiles** (environment variable `OUTCOME_PROFILE`):
+- **`cloud`:** Qwen3.8-27B (revision `37561816…`) through any OpenAI-compatible server, such as `vllm serve` on the GPU machine, temperature 0, 8 parallel requests.
+- **`local-smoke`:** `Qwen/Qwen3.5-0.8B` (revision `2fc06364…`, the same tokenizer family) in-process on a laptop, for pipeline tests only.
+
+The 27B model cannot run on the development laptop (Apple M4 Max, 36 GB).
+
+**Judge setting:** the `cloud` profile's judge is a placeholder that stops the notebook until the judge model is chosen (Section 8.5.3). `keyword-test` is a pipeline-test stand-in, not a judge.
+
+**Smoke test (Nov 8; not a result):** `local-smoke` on vllm#17425 `L01_min` and `L02_function`. The notebook ran end to end in 25 s with no cell errors.
+- **`L01`:** the 0.8B model repeated the rubric's example finding title until the 1,024-token output limit. It was recorded as `malformed` and `truncated`.
+- **`L02`:** valid JSON with one invented finding. It was parsed (path made repository-relative), judged, and gave recall 0.
+
+This confirms the plumbing and the strict handling of bad output, nothing about review quality.
+
+**Before the real run:**
+- **Decide the judge model.**
+- **Serve the models on the cloud GPU** (each run needs the go-ahead). Hybrid-attention Qwen3.5-family models need a vLLM version that supports them; the 0.8B test fell back to slow reference kernels in transformers.
+- **Run the 10–20 PR pilot** (Section 8.5.2), checking JSON validity, truncation, run-to-run noise, and whether quality varies by level.
+
 ## 9. Selector objective and supervision
 
 Let D be the mandatory diff, C the fixed candidate pool, S a subset of C, R the frozen reviewer, H the audited references, and T the actual reviewer prompt-token cost. Conceptually, we want:
@@ -923,6 +971,8 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 
 **Decided (Nov 8):** for the level design, Phase C's outcomes are the offline (PR × level) table of Section 8.5.6: 196 × 10 reviews by the frozen reviewer, each scored by the judge, with per-reference coverage stored. Run a pilot of about 10–20 PRs first, both to check the reviewer against the criteria in Section 8.5.2 and to estimate GPU time. Each cloud run needs fresh authorization.
 
+**Progress (Nov 8):** the table builder and notebook exist and passed a 0.8B smoke test (Section 8.5.8). Waiting on the judge decision and a cloud GPU run.
+
 ### Phase D — learned selector and validation frontier
 
 **Deliver:** compact trained selector, configuration and checkpoints, three-seed results where feasible, matched-budget baselines, learning curves, and end-to-end validation predictions.
@@ -969,7 +1019,7 @@ Recommended implementation checks:
 
 Choose new module names during implementation; paths in Section 7 are proposals.
 
-As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The reviewer runs, scoring system and selector have not been coded.
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
 
 ## 14. Open decisions that must stay visible
 
@@ -981,7 +1031,7 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Fixed-budget versus content-defined context levels | With fixed budgets, levels did not contain their named content on vllm#17425 (Section 5.5.4); compare both on a pilot |
 | Reviewer model/size/precision | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call, greedy (Section 8.5.2). Still needed: memory and window fit, latency, run-to-run noise |
 | Switching the reviewer to Claude | Allowed only if Qwen fails pilot criteria fixed in advance (Section 8.5.2); a switch regenerates the whole table |
-| Review prompt wording and findings cap | Development PRs only, then frozen and versioned (Section 8.5.2) |
+| Review prompt | **Decided Nov 8 (revised):** OpenAI Codex's `/review` rubric, verbatim and pinned, with no findings cap (Section 8.5.2). Still open: whether Qwen's thinking mode is on |
 | Review matcher/judge | **Metric decided Nov 8:** AACR's file-level semantic coverage (Section 8.5.3). **Judge model still open** (local open model vs API model); needs agreement with a blinded human audit and a stated treatment of unknown findings |
 | Labeling rule for the selector | Best trade-off (λ) vs smallest level within a tolerance vs per-level regression (Section 8.5.7), chosen on validation PRs |
 | Severity and adoption use | Reliable annotations; otherwise remain auxiliary or omitted |
