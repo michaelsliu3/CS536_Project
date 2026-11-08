@@ -24,6 +24,31 @@ def load_config(path: Path) -> dict:
     return validate_config(_load_raw(path))
 
 
+def load_level_configs(paths) -> dict[str, dict]:
+    """Configs by level name, in the given order; a level's parent must come before it, and
+    all must share one `tracer` section (each PR is traced once and every level is packed
+    from that trace)."""
+    import json as _json
+
+    from src.tracer_context.cbm import tracer_settings
+
+    configs = {}
+    for path in paths:
+        cfg = load_config(Path(path))
+        name, parent = cfg["level"]["name"], cfg["level"]["parent"]
+        if name in configs:
+            raise SystemExit(f"two configs have level name {name!r}")
+        if parent and parent not in configs:
+            raise SystemExit(f"level {name!r} needs its parent {parent!r} earlier in the --config list")
+        configs[name] = cfg
+    tracers = {_json.dumps(tracer_settings(c["tracer"]), sort_keys=True) for c in configs.values()}
+    binaries = {c["tracer"]["binary"] for c in configs.values()}
+    if len(tracers) > 1 or len(binaries) > 1:
+        raise SystemExit("all configs must share the same `tracer` section: each PR is traced once "
+                         "and every config is packed from that trace (vary depth with selection.limits)")
+    return configs
+
+
 def tokenizer_label(name: str) -> str:
     """Name plus the cached Hugging Face snapshot revision, when there is one."""
     try:

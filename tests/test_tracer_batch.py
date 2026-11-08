@@ -8,6 +8,7 @@ from pathlib import Path
 from src.tracer_context.aacr import (
     BASE_BRANCH, entry_checks, entry_id, load_entries, parse_pr_url, prepare_checkout, select_entries,
 )
+from src.tracer_context.cbm import text_hits
 
 GIT_ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
@@ -114,6 +115,29 @@ class CheckoutTests(unittest.TestCase):
         self.record["target_commit"] = "0" * 40
         with self.assertRaisesRegex(Exception, "target_commit"):
             self.checkout()
+
+
+class TextHitsTests(unittest.TestCase):
+    def test_whole_words_lines_binaries_and_untracked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git(repo, "init", "-q")
+            (repo / "a.py").write_text("x = warn_once(1)\nwarn_once_all()\n# warn_once warn_once\r\n1warn_once\n",
+                                       encoding="utf-8")
+            (repo / "b.bin").write_bytes(b"\0warn_once\n")
+            (repo / "c.md").write_text("Call `warn_once` or Size.\n", encoding="utf-8")
+            git(repo, "add", "a.py", "b.bin", "c.md")
+            git(repo, "commit", "-q", "-m", "files")
+            (repo / "untracked.py").write_text("warn_once\n", encoding="utf-8")
+            seeds = [{"qn": "pkg.log.warn_once", "label": "Function"}, {"qn": "pkg.Size", "label": "Method"},
+                     {"qn": "pkg.mod", "label": "Module"}, {"qn": "pkg.unused_name", "label": "Function"}]
+            hits = text_hits(repo, seeds)
+        self.assertEqual(sorted(hits), ["Size", "unused_name", "warn_once"])  # modules are not searched
+        self.assertEqual(hits["warn_once"]["hits"], [["a.py", 1], ["a.py", 3], ["c.md", 1]])  # one hit per line
+        self.assertEqual(hits["warn_once"]["total"], 3)
+        self.assertEqual(hits["warn_once"]["seeds"], ["pkg.log.warn_once"])
+        self.assertEqual(hits["Size"]["total"], 1)
+        self.assertEqual(hits["unused_name"]["total"], 0)
 
 
 if __name__ == "__main__":

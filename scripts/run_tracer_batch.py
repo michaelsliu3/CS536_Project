@@ -37,7 +37,7 @@ from src.tracer_context.aacr import (  # noqa: E402
 )
 from src.tracer_context.build import RENDER_VERSION, build_context, config_sha256, nesting_check  # noqa: E402
 from src.tracer_context.cbm import TRACE_FORMAT, tracer_settings, trace  # noqa: E402
-from src.tracer_context.runtime import load_config, make_counter, write_json  # noqa: E402
+from src.tracer_context.runtime import load_level_configs, make_counter, write_json  # noqa: E402
 
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "codebase_memory_trial" / "aacr" / "positive_samples.json"
 DEFAULT_WORK = PROJECT_ROOT / "data" / "aacr_tracer"
@@ -56,23 +56,7 @@ def trace_key(settings: dict, tool_version: str, record: dict) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def load_configs(paths) -> dict[str, dict]:
-    """Configs by level name, in the given order; a level's parent must come before it."""
-    configs = {}
-    for path in paths:
-        cfg = load_config(Path(path))
-        name, parent = cfg["level"]["name"], cfg["level"]["parent"]
-        if name in configs:
-            raise SystemExit(f"two configs have level name {name!r}")
-        if parent and parent not in configs:
-            raise SystemExit(f"level {name!r} needs its parent {parent!r} earlier in the --config list")
-        configs[name] = cfg
-    tracers = {json.dumps(tracer_settings(c["tracer"]), sort_keys=True) for c in configs.values()}
-    binaries = {c["tracer"]["binary"] for c in configs.values()}
-    if len(tracers) > 1 or len(binaries) > 1:
-        raise SystemExit("all configs must share the same `tracer` section: each PR is traced once "
-                         "and every config is packed from that trace (vary depth with selection.limits)")
-    return configs
+load_configs = load_level_configs  # shared with scripts/build_context_dataset.py
 
 
 def run_entry(entry, configs, counters, args, binary, tool_version, dataset_sha) -> dict:

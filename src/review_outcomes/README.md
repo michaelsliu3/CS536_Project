@@ -7,7 +7,7 @@ Selector training and evaluation then only look up rows. Driver:
 
 | Stage | Module | Output under `data/aacr_tracer/outcomes/<run>/` |
 |---|---|---|
-| Find cells | `table.discover_cells` | one per `entries/<id>/<level>/context.md` from `scripts/run_tracer_batch.py` |
+| Find cells | `table.discover_cells` | one per (PR, level) in `data/aacr_tracer/context_levels.jsonl.gz`, from `scripts/build_context_dataset.py` |
 | Review | `prompts`, `backends`, `parse`, `table.run_reviews` | `reviews/<entry>/<level>.json`: raw reply, parsed findings, tokens, prompt hash, backend settings |
 | Judge | `judge`, `table.run_judgments` | `judgments/<entry>/<level>.json`: per generated comment, matched references and whether new; per reference, covered |
 | Table | `table.build_table`, `write_outputs` | `table.csv`/`table.jsonl` (per entry and level), `coverage.csv` (per reference and level), `manifest.json` |
@@ -24,7 +24,7 @@ Selector training and evaluation then only look up rows. Driver:
 - **Resuming:** each review and judgment carries a cache key over everything that changes its output: the input hash, prompt hash and version, model and settings, parser, references and judge. Re-running reuses matches, redoes changes, and retries errors.
 
 **Status:**
-- **Run so far:** only a pipeline smoke test with `Qwen/Qwen3.5-0.8B` on vllm#17425 `L01`–`L02`.
+- **Run so far:** only pipeline smoke tests with `Qwen/Qwen3.5-0.8B`, on vllm#17425 `L01`–`L02` and then on cline#5177 `L01`–`L02` read from the dataset file.
 - **Open:** the judge model is undecided (roadmap Section 8.5.3).
 
 Tests (Python only, no models):

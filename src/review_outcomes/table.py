@@ -1,4 +1,5 @@
-"""Build the offline (PR x level) outcome table from the batch runner's context levels.
+"""Build the offline (PR x level) outcome table from the context-level dataset file
+(`data/aacr_tracer/context_levels.jsonl.gz`, written by scripts/build_context_dataset.py).
 
 Layout under `out_dir` (one folder per run, e.g. data/aacr_tracer/outcomes/<run_name>/):
   manifest.json                         run settings, prompt and dataset hashes
@@ -56,36 +57,25 @@ def write_json(path: Path, data) -> None:
 class Cell:
     entry: str
     level: str
-    context_path: Path
+    text: str
     input_tokens: int | None
+    known_paths: tuple[str, ...] = ()  # files named in the trace, to make review paths repo-relative
 
 
-def discover_cells(entries_dir: Path, entries=None, levels=None) -> list[Cell]:
-    """Every (entry, level) with a context.md from a successful batch-runner entry."""
+def discover_cells(contexts_path: Path, entries=None, levels=None) -> list[Cell]:
+    """Every (entry, level) of the successfully built PRs in the context-level dataset file."""
+    from src.tracer_context.dataset import load_records
+
     cells = []
-    for entry_dir in sorted(p for p in Path(entries_dir).iterdir() if p.is_dir()):
-        if entries and entry_dir.name not in entries:
+    for entry_id, record in sorted(load_records(contexts_path).items(), key=lambda kv: (kv[1].get("index", 0), kv[0])):
+        if entries and entry_id not in entries:
             continue
-        if (read_json(entry_dir / "status.json") or {}).get("status") != "ok":
-            continue
-        for level_dir in sorted(p for p in entry_dir.iterdir() if (p / "context.md").is_file()):
-            if levels and level_dir.name not in levels:
+        for name, level in record["levels"].items():
+            if levels and name not in levels:
                 continue
-            selection = read_json(level_dir / "selection.json") or {}
-            cells.append(Cell(entry_dir.name, level_dir.name, level_dir / "context.md",
-                              selection.get("input_tokens")))
+            cells.append(Cell(entry_id, name, level["text"], level.get("input_tokens"),
+                              tuple(record.get("known_paths", ()))))
     return cells
-
-
-def known_paths(entry_dir: Path) -> set[str]:
-    """Repository files named in the trace (changed files, traced items, guides, grep hits),
-    used to turn the reviewer's paths into repository-relative ones."""
-    trace = read_json(Path(entry_dir) / "trace.json") or {}
-    paths = set(trace.get("changed_files", [])) | set(trace.get("guide_files", []))
-    paths |= {node.get("file") for node in trace.get("nodes", {}).values() if node.get("file")}
-    for hit in trace.get("text_hits", {}).values():
-        paths |= {path for path, _ in hit.get("hits", [])}
-    return paths
 
 
 def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubric: str, out_dir: Path,
@@ -93,10 +83,9 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
                 progress: Callable | None = None) -> list[dict]:
     """Review each cell once; reuse records whose cache key matches. Returns all records."""
     out_dir, prompt_hash = Path(out_dir), prompt_sha256(rubric)
-    paths_cache: dict[str, set[str]] = {}
 
     def one(cell: Cell) -> dict:
-        context = cell.context_path.read_text(encoding="utf-8")
+        context = cell.text
         key = _key({"input": sha256_text(context), "prompt": prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
                     "backend": reviewer.identity, "parser": PARSER_VERSION})
         path = out_dir / "reviews" / cell.entry / f"{cell.level}.json"
@@ -111,9 +100,7 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
         else:
             try:
                 reply = reviewer(review_messages(context, rubric))
-                if cell.entry not in paths_cache:
-                    paths_cache[cell.entry] = known_paths(cell.context_path.parent.parent)
-                parsed = parse_review(reply["text"], paths_cache[cell.entry])
+                parsed = parse_review(reply["text"], cell.known_paths)
                 record.update(status=parsed["status"], reply=reply, parsed=parsed,
                               truncated=reply.get("finish_reason") == "length")
             except Exception as error:  # noqa: BLE001 - recorded; retried on the next run

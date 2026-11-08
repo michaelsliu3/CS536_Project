@@ -11,6 +11,7 @@ from src.review_outcomes.prompts import (
 from src.review_outcomes.table import (
     build_table, discover_cells, run_judgments, run_reviews, summarize_by_level,
 )
+from src.tracer_context.dataset import append_record
 
 # The roadmap's Section 8.5.3 example: vllm#17425's reference layout, with short notes.
 REFS = [
@@ -128,26 +129,22 @@ class TableTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        entry = self.root / "entries" / "o__r__1"
-        for level, tokens in (("L01_min", 100), ("L02_function", 900)):
-            (entry / level).mkdir(parents=True)
-            (entry / level / "context.md").write_text(f"context for {level}", encoding="utf-8")
-            (entry / level / "selection.json").write_text(json.dumps({"input_tokens": tokens}), encoding="utf-8")
-        (entry / "status.json").write_text(json.dumps({"status": "ok"}), encoding="utf-8")
-        (entry / "trace.json").write_text(json.dumps({"changed_files": ["p.py"], "nodes": {}}), encoding="utf-8")
-        failed = self.root / "entries" / "o__r__2"
-        (failed / "L01_min").mkdir(parents=True)
-        (failed / "L01_min" / "context.md").write_text("x", encoding="utf-8")
-        (failed / "status.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+        self.contexts = self.root / "context_levels.jsonl.gz"
+        levels = {name: {"text": f"context for {name}", "input_tokens": tokens}
+                  for name, tokens in (("L01_min", 100), ("L02_function", 900))}
+        append_record(self.contexts, {"id": "o__r__1", "index": 0, "status": "ok", "levels": levels,
+                                      "known_paths": ["p.py"]})
+        append_record(self.contexts, {"id": "o__r__2", "index": 1, "status": "failed"})
         self.references = {"o__r__1": {"project_main_language": "Python", "comments": REFS}}
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def test_reviews_resume_and_table(self):
-        cells = discover_cells(self.root / "entries")
+        cells = discover_cells(self.contexts)  # the failed PR has no levels and is left out
         self.assertEqual([(c.entry, c.level, c.input_tokens) for c in cells],
                          [("o__r__1", "L01_min", 100), ("o__r__1", "L02_function", 900)])
+        self.assertEqual(discover_cells(self.contexts, levels=["L02_function"])[0].text, "context for L02_function")
         calls = []
 
         def reviewer(messages):

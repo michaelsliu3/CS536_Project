@@ -93,6 +93,47 @@ resumes. A failed entry is recorded with its stage and error, and the batch cont
 PR, while `target_commit` can be an earlier version. In ollama/ollama#12185 the reviewed
 commit has 197 changed lines and the final PR 64.
 
+The folder-per-PR runner above is for inspecting individual PRs in detail (full traces and
+selection reports). The dataset itself is built with the one-file builder below.
+
+## The dataset: one file for every PR and level (main path)
+
+`scripts/build_context_dataset.py` builds the context levels for many AACR-Bench entries into
+**one file**, `data/aacr_tracer/context_levels.jsonl.gz`. It uses no LLM and runs on a laptop.
+
+```bash
+.venv/bin/python scripts/build_context_dataset.py --list --languages Go     # plan and status
+.venv/bin/python scripts/build_context_dataset.py --entries cline__cline__5177,ollama__ollama__12185
+.venv/bin/python scripts/build_context_dataset.py --all                      # the whole dataset
+```
+
+- **Same steps per PR:** fetch the two commits, run the checks, fetch the PR text, trace once, then pack all ten levels (`configs/levels/*.yaml` by default).
+- **Clones are deleted:** entries are processed grouped by repository, and each clone is deleted after its repository's last selected entry, so a repository with several PRs is fetched once. Keep clones with `--keep-repos`.
+- **Resuming:** each PR is appended as one line as soon as it is done. Re-running skips PRs already built with the same commits, tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). After changing builder code without bumping `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`. A run cut off mid-write loses at most the PR in progress.
+
+Loading at train time:
+
+```python
+from src.tracer_context.dataset import load_records, level_rows
+records = load_records("data/aacr_tracer/context_levels.jsonl.gz")   # {entry id: record}, built PRs only
+rows = level_rows(records.values())    # one dict per (entry, level): tokens, item counts, text
+```
+
+Each line (format `aacr-context-levels/v1`, documented in `dataset.py`) is one PR:
+
+| Field | Contents |
+|---|---|
+| `id`, `index`, `url`, `repo`, `language`, `source_commit`, `target_commit`, `merge_base` | identity |
+| `status`, `failed_stage`, `error` | `ok`, or where and why it failed |
+| `levels` | per level: the review input text, input/PR/diff/context tokens, budget, item counts by kind, a compact list of included items (kind, hop, file, lines, tokens, name), and the nesting check |
+| `stats` | input-side counts for selector features: diff size and hunks, changed symbols by type, callers/callees/tests per hop, guide files, text-search names and hits, graph size, PR text length |
+| `pr` | the PR title and description, and whether the description was edited after the reviewed commit |
+| `known_paths` | files named in the trace, used to clean the reviewer's paths |
+| `build`, `seconds`, `warnings` | versions and config hashes, timings per step, tool warnings |
+| `audit` | checks that use the reference comments or the final PR's size. **For auditing only, never as selector inputs** |
+
+Reference comment text is never stored in this file; scoring reads it from the AACR file.
+
 ## Controlling the amount of context
 
 The standalone default is [`configs/tracer_context.yaml`](../../configs/tracer_context.yaml) (repository context only, 8k tokens); the levels are described above. A config can start with `inherit: <file>` to take another config's settings and override some. Unknown or missing keys are errors.
