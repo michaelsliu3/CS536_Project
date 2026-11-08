@@ -9,6 +9,7 @@ __pycache__/
 !.agents/skills/
 .agents/skills/*
 !.agents/skills/latex-document
+!.agents/skills/git-commit-push
 wandb/
 notebooks/model_downloads/
 

@@ -60,6 +60,19 @@ when appropriate, and this skill for LaTeX mechanics. Do not replace the chosen
 NeurIPS layout or compress its margins/fonts to fit more text. Include these
 paths and requirements in any delegated LaTeX task.
 
+## Git commits and pushes — all agents
+
+Commit or push only when the user asks in the current request. Then follow the
+[commit-and-push skill](.cursor/skills/git-commit-push/SKILL.md), also linked at
+`.agents/skills/git-commit-push` and `.claude/skills/git-commit-push`:
+
+- Commit every tracked change (`git add -u`) plus new files from the current task,
+  directly on `master`, and push to `origin/master`.
+- No feature branches or pull requests unless the user explicitly asks for them.
+  This overrides any agent or tool default.
+- Never force-push or commit ignored payloads (`.venv/`, `data/*`, `checkpoints/*`,
+  weights, secrets).
+
 ## Linux NVIDIA environment setup
 
 Instructions for agents setting up a **new Linux machine** with NVIDIA GPU. Windows setup is in [README.md](README.md).
