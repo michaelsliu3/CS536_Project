@@ -238,7 +238,7 @@ The tracer is [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-
 - **Fresh index each trace:** each PR is indexed into an empty cache. Re-indexing into an existing cache reuses the stored graph, so it is not a rebuild.
 - **Pinned worker count (4):** on our repository, one worker built a graph with one fewer link than 2, 4 or 8 workers.
 - **Repeatability:** with a fixed folder path and worker count, repeated fresh builds gave byte-identical link lists and outputs.
-- **Folder path:** changing it altered a few similarity links and the order of results within a hop; the walks we use returned the same sets.
+- **Folder path:** on our repository and vLLM, changing it altered a few similarity links and the order of results within a hop, while the walks we use returned the same sets. **Corrected Nov 8:** on ollama/ollama#12185 in `full` mode, the folder path also changed call and test links (`CALLS` 14,579 vs 14,569, `TESTS` 1,224 vs 1,217) and, from some folders, the walks and the deeper levels' items. `fast` mode was path-independent in that test (Section 5.5.6).
 - **Two separate walks:** `detect_changes` with `direction: "both"` returns only the outbound set in v0.12.1, so the builder runs an inbound and an outbound walk.
 
 #### 5.5.2 Pipeline (code in `src/tracer_context/`, scripts in `scripts/`)
@@ -366,11 +366,28 @@ Known limits:
 
 #### 5.5.6 The dataset builder: one file for every PR and level (November 8, 2026)
 
-**Status:** built and tested on 3 PRs; the whole dataset has **not** been run.
+**Status:** built and tested on 3 PRs, plus an interrupted-and-resumed 2-PR run in a scratch folder. The whole dataset has **not** been run.
 
-**What it does:** `scripts/build_context_dataset.py` (code in `src/tracer_context/dataset.py`) builds the context levels for many AACR entries into **one file**, `data/aacr_tracer/context_levels.jsonl.gz`, one JSON line per PR. The outcome-table notebook and selector training load just that file.
+**What it does:** one command, `scripts/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl.gz`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file.
+
+**Setup checks**, each failing with a fix:
+- git, and `gh` logged in;
+- Python packages;
+- `ROOT/positive_samples.json`: downloaded at the pinned AACR commit and checksum-verified if missing;
+- codebase-memory-mcp: the pinned v0.12.1 build for the platform is downloaded and checksum-verified if missing;
+- the reviewer tokenizer files, downloaded if missing;
+- no other tool session running;
+- free disk space;
+- the level configs.
+
+**During the build:**
 - **Clones are deleted:** entries run grouped by repository, and each clone is deleted after that repository's last entry, so repositories with several PRs are fetched once.
-- **Resuming:** PRs already built with the same commits, tool, trace and render versions, level configs and tokenizer are skipped; failed ones are retried.
+- **Errors don't stop the build:** a failed PR is retried (default 2 times, with a growing wait; a half-fetched clone is deleted first), then recorded with its stage and error.
+- **Low disk:** below 10 GB free, the build stops cleanly before the next repository.
+- **One build per folder:** a lock file stops a second build on the same folder; a lock left by a crashed build is taken over.
+- **Logs:** progress goes to the terminal and to `ROOT/logs/build_<time>.log`, with counts and a time estimate. Failure tracebacks go to the log.
+- **Resuming:** re-running the same command skips PRs already built with the same commits, tool, trace and render versions, level configs and tokenizer, and retries failed ones. Ctrl+C or `kill` stop cleanly.
+- **Kept out of git:** `*.log` is git-ignored, and a root inside the repository gets its own `.gitignore` unless it is already ignored.
 - **No LLM:** it runs on a laptop.
 
 Each line holds:
@@ -399,7 +416,23 @@ The two TypeScript PRs reused one clone, and both clones were deleted afterward.
 
 The tracer now also records how long each step takes.
 
-**Next:** run `--all` on the laptop, then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
+**Interrupt and resume test (Nov 8, scratch folder):**
+- **Dry run:** downloaded and verified the AACR file and the tool, passed every check, and planned 196 PRs in 50 repositories without building anything.
+- **Interrupted run:** a 2-PR build was sent Ctrl+C during the second PR. It stopped 0.4 s later with exit code 130, kept the first PR, released the lock, and left no tool processes.
+- **Resumed run:** the same command skipped the finished PR, built the other, and exited 0.
+
+**Open issue: the build depends on its folder in `full` index mode.**
+- **What happened:** ollama#12185 built from `data/aacr_tracer/` and from a scratch folder gave different graphs (205,804 vs 205,473 links, with the same 148,834 nodes). Callers 2 hops away were 139 vs 130, and the items in `L08`–`L10` differed.
+- **Not run-to-run noise:** two rebuilds in the same folder were identical.
+- **Direct test:** tracing one snapshot from two folders showed `full` mode varying `CALLS`, `TESTS` and similarity links. Turning off semantics (`CBM_SEMANTIC_ENABLED=false`) changed nothing.
+- **`fast` mode was path-independent:** all link types matched. It keeps every type the levels follow, with fewer links (on ollama: `CALLS` 13,720 vs 14,579, `TESTS` 1,093 vs 1,224, `MENTIONS` 64 vs 92) and similar walk sizes (509 callers and 203 callees, vs 501 and 200).
+- **Options:**
+  1. switch `tracer.index_mode` to `fast` for folder-independent datasets;
+  2. keep `full` and build the whole dataset once, in one folder.
+
+  This is undecided (Section 14).
+
+**Next:** settle the index mode, then run `scripts/build_dataset.py data/aacr` on the laptop. Then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
 
 ## 6. Preprocessing without generative LLMs
 
@@ -831,7 +864,7 @@ Options considered and not chosen:
 
 #### 8.5.8 Implemented: the outcome-table code and notebook (November 8, 2026)
 
-**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr_tracer/context_levels.jsonl.gz`, Section 5.5.6), it:
+**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr/context_levels.jsonl.gz`, Section 5.5.6), it:
 
 1. reviews it with the frozen reviewer (system: Codex rubric; user: request + `context.md`);
 2. parses the JSON findings;
@@ -1056,7 +1089,7 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 - **Also built:** the one-file dataset builder, which deletes each clone after use (Section 5.5.6). It was tested on 3 PRs.
 - **Next:**
   - decide between content-defined and fixed-budget levels;
-  - pilot about two PRs per language, then build the whole dataset with `scripts/build_context_dataset.py --all`;
+  - pilot about two PRs per language, then build the whole dataset with `scripts/build_dataset.py data/aacr`;
   - run a reviewer on the levels.
 
 **Gate:** identical inputs reproduce candidate IDs and prompt hashes; no reference-driven retrieval; all prompts fit under explicit rules; reviewer/scorer behavior is credible; some context-sensitive findings exist. Measure coverage before assuming all necessary evidence is in C.
@@ -1123,7 +1156,7 @@ Recommended implementation checks:
 
 Choose new module names during implementation; paths in Section 7 are proposals.
 
-As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `src/tracer_context/dataset.py` and `scripts/build_context_dataset.py`, with tests in `tests/test_context_dataset.py` (Section 5.5.6). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
 
 ## 14. Open decisions that must stay visible
 
@@ -1132,6 +1165,7 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Exact AACR release and usable size | Release hash, actual counts, reference provenance, and mismatch audit |
 | Python-only or broader language scope | Parse support and independent repository counts after filtering |
 | RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: behavior on the other languages and very large repositories |
+| Tracer index mode (`full` vs `fast`) | `full` mode's call/test links depend on the folder the clone sits in, and `fast` was path-independent with fewer links (Section 5.5.6). Choose before building the dataset |
 | Fixed-budget versus content-defined context levels | With fixed budgets, levels did not contain their named content on vllm#17425 (Section 5.5.4); compare both on a pilot |
 | Reviewer model/size/precision | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call, greedy (Section 8.5.2). Still needed: memory and window fit, latency, run-to-run noise |
 | Switching the reviewer to Claude | Allowed only if Qwen fails pilot criteria fixed in advance (Section 8.5.2); a switch regenerates the whole table |
