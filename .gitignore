@@ -18,6 +18,9 @@ notebooks/model_downloads/
 
 data/*
 !data/.gitkeep
+# One-command wrappers for the dataset scripts (the dataset itself stays ignored)
+!data/build_dataset.sh
+!data/clean_dataset.sh
 
 models/*
 !models/.gitkeep
