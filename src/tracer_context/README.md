@@ -35,8 +35,10 @@ if it is missing. Do not run the tool's `install` command: it edits AI client co
    on tool output order.
 4. **Pack**: render code from the checkout with fixed ranges (decorators/annotations
    added, Markdown sections extended to the next heading). Oversize items show windows
-   around changed lines or their first lines. Pass 1 fills the token budget in rank
-   order within each kind's share; pass 2 gives leftover budget to the next-ranked items.
+   around changed lines or their first lines. The room is the config's `token_budget`, or
+   what `max_input_tokens` (a cap on PR text + diff + context) leaves after the PR text and
+   diff; with both set, the smaller one. Pass 1 fills it in rank order within each kind's
+   share; pass 2 gives leftover room to the next-ranked items.
    No lines are shown twice.
 
 Outputs in `--out`: `trace.json`, `context.md` and `selection.json`.
@@ -44,7 +46,7 @@ Outputs in `--out`: `trace.json`, `context.md` and `selection.json`.
 - **`context.md`:** the review input. It has up to three sections: `## Pull request` (title and description, with HTML comments removed), `## Diff`, and `## Repository context` (the packed items, in rank order). The config's `input` section switches the first two on.
 - **`selection.json`:** the config and its hash, the tokenizer, and token counts for each section and each kind. It also lists every included item (with the line segments shown) and every excluded item with the reason.
 
-The token budget covers only the repository context.
+`token_budget` counts only the repository context; `max_input_tokens` counts the whole input.
 
 ## Nested context levels
 
@@ -58,7 +60,7 @@ Build levels with the batch runner, which packs parents first. The single-PR scr
 .venv/bin/python scripts/tracer/run_tracer_batch.py --entries vllm-project__vllm__17425 $(for f in configs/levels/L*.yaml; do printf -- '--config %s ' "$f"; done)
 ```
 
-On vllm#17425, the fixed budgets bound every level. Items left over from one level used up the next level's extra budget, so several levels lack their named kind; see the roadmap, Section 5.5.4. Treat the budgets as provisional.
+**The levels have no per-level token budgets** (decided Nov 8; roadmap Section 5.5.7). Each level shows everything its kinds and item limits allow, up to one cap on the whole input: `max_input_tokens: 256339` in the base config, which is Qwen3.8-27B's 262,144-token context minus 1,709 for the prompt and 4,096 for the review. Item limits (`max_items`) count the level's total, its parent's items included. Each level in the dataset records `capped` (items were left out for lack of room), `fits` and `same_as_parent` (identical text; the outcome table reviews it once). Fixed budgets had made levels lack their named kind on large PRs.
 
 ## Many PRs: the AACR-Bench batch runner
 
@@ -120,7 +122,7 @@ Everything lives in `ROOT`:
 | Path | What |
 |---|---|
 | `positive_samples.json` | AACR-Bench entries, downloaded at the pinned commit and checksum-verified if missing |
-| `context_levels.jsonl.gz` | the output: one JSON line per PR with all levels |
+| `context_levels.jsonl` | the output: one JSON line per PR with all levels |
 | `logs/build_<time>.log` | every run's log: terminal output plus debug lines and failure tracebacks |
 | `.work/` | temporary clones, tool caches and (if needed) the downloaded tool |
 | `.build.lock` | present while a build runs; a second build on the same folder refuses to start |
@@ -147,7 +149,7 @@ the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
 - **Starting over:** `scripts/dataset/clean_dataset.py ROOT` deletes what the build made: the records file, leftover rewrite files, and the clones and caches in `.work/`.
   - It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/` (`--runner-work` for another folder), but keeps that runner's saved results.
   - It keeps `positive_samples.json`, `logs/` and a downloaded tool, so the restart needs no downloads. `--logs` also deletes the logs.
-  - `--all` deletes everything the builders wrote: all of the above in `ROOT`, and in the runner's folder its saved results (`entries/`, `summary.csv`) plus outputs older defaults left there (`context_levels.jsonl.gz`, `outcomes/`). Other files are left alone.
+  - `--all` deletes everything the builders wrote: all of the above in `ROOT`, and in the runner's folder its saved results (`entries/`, `summary.csv`) plus outputs older defaults left there (`context_levels.jsonl`, `outcomes/`). Other files are left alone.
   - It lists each path with its size and asks first (`--yes` skips the question, `--dry-run` only lists).
   - It refuses while a build runs on `ROOT` or the inspection runner runs, and refuses a `ROOT` with no build files unless there are runner clones to delete.
 - **Exit codes:**
@@ -158,11 +160,13 @@ the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
   - 130: interrupted.
 - **Subsets for testing:** `--entries`, `--languages` and `--limit`.
 
+The file is plain JSON Lines; files from before November 8 were gzip-compressed (`.jsonl.gz`) and still load. A committed 2-PR sample is in `data/aacr_sample/` (see its README).
+
 Loading at train time:
 
 ```python
 from src.tracer_context.dataset import load_records, level_rows
-records = load_records("data/aacr/context_levels.jsonl.gz")   # {entry id: record}, built PRs only
+records = load_records("data/aacr/context_levels.jsonl")   # {entry id: record}, built PRs only
 rows = level_rows(records.values())    # one dict per (entry, level): tokens, item counts, text
 ```
 
@@ -172,7 +176,7 @@ Each line (format `aacr-context-levels/v1`, documented in `dataset.py`) is one P
 |---|---|
 | `id`, `index`, `url`, `repo`, `language`, `source_commit`, `target_commit`, `merge_base` | identity |
 | `status`, `failed_stage`, `error` | `ok`, or where and why it failed |
-| `levels` | per level: the review input text, input/PR/diff/context tokens, budget, item counts by kind, a compact list of included items (kind, hop, file, lines, tokens, name), and the nesting check |
+| `levels` | per level: the review input text, input/PR/diff/context tokens, the context's room, `capped`, `fits`, `same_as_parent`, item counts by kind, a compact list of included items (kind, hop, file, lines, tokens, name), and the nesting check |
 | `stats` | input-side counts for selector features: diff size and hunks, changed symbols by type, callers/callees/tests per hop, guide files, text-search names and hits, graph size, PR text length |
 | `pr` | the PR title and description, and whether the description was edited after the reviewed commit |
 | `known_paths` | files named in the trace, used to clean the reviewer's paths |
@@ -192,7 +196,7 @@ The standalone default is [`configs/tracer_context.yaml`](../../configs/tracer_c
 | `tracer` | walk depth and link types the tool follows | yes |
 | `selection` | dropped labels, test paths, per-kind `max_hop` / `max_items` | no |
 | `ranking` | sort keys and kind/link priorities | no |
-| `packing` | `token_budget`, per-kind `kind_shares`, line limits, oversize policy | no |
+| `packing` | `token_budget` (context; null = cap only), `max_input_tokens` (whole input; null = budget only), per-kind `kind_shares`, line limits, oversize policy | no |
 
 `--budget N` overrides the budget, and `--skip-trace` reuses `trace.json`. A budget sweep
 therefore costs one trace plus a few seconds per budget. `--skip-trace` refuses if the
@@ -230,7 +234,7 @@ existing cache reuses the stored graph and is not a real rebuild.
 - Calls on objects the tool cannot type are missed. For example, no `logger.warning_once(...)`
   call in vLLM links to the logger implementation.
 - One worker builds a slightly different graph than two or more, so `tracer.workers` is pinned.
-- The defaults (budget, shares, limits, ranking) are starting points, not tuned values.
+- The defaults (cap, budgets, shares, limits, ranking) are starting points, not tuned values.
   Tune them on validation PRs only.
 
 ## Tests

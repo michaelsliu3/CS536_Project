@@ -4,7 +4,7 @@
 
 ROOT is the dataset folder. Everything lives there:
   ROOT/positive_samples.json       AACR-Bench entries (downloaded at a pinned commit if missing)
-  ROOT/context_levels.jsonl.gz     the output: one JSON line per PR with all context levels
+  ROOT/context_levels.jsonl        the output: one JSON line per PR with all context levels
   ROOT/logs/build_<time>.log       full log of each run (terminal output plus details)
   ROOT/.work/                      temporary clones and caches, removed as the build goes
   ROOT/.build.lock                 present while a build runs

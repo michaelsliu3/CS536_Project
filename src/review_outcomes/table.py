@@ -1,5 +1,5 @@
 """Build the offline (PR x level) outcome table from the context-level dataset file
-(`<root>/context_levels.jsonl.gz`, e.g. data/aacr/, written by scripts/dataset/build_dataset.py).
+(`<root>/context_levels.jsonl`, e.g. data/aacr/, written by scripts/dataset/build_dataset.py).
 
 Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/):
   manifest.json                         run settings, prompt and dataset hashes
@@ -81,13 +81,17 @@ def discover_cells(contexts_path: Path, entries=None, levels=None) -> list[Cell]
 def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubric: str, out_dir: Path,
                 max_input_tokens: int | None = None, concurrency: int = 1, force: bool = False,
                 progress: Callable | None = None) -> list[dict]:
-    """Review each cell once; reuse records whose cache key matches. Returns all records."""
+    """Review each cell once; reuse records whose cache key matches. Cells with the same input
+    (a level identical to its parent) are reviewed once and the record is copied to the others
+    with `reused_from`. Returns all records, in cell order."""
     out_dir, prompt_hash = Path(out_dir), prompt_sha256(rubric)
 
+    def key_of(cell: Cell) -> str:
+        return _key({"input": sha256_text(cell.text), "prompt": prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
+                     "backend": reviewer.identity, "parser": PARSER_VERSION})
+
     def one(cell: Cell) -> dict:
-        context = cell.text
-        key = _key({"input": sha256_text(context), "prompt": prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
-                    "backend": reviewer.identity, "parser": PARSER_VERSION})
+        context, key = cell.text, key_of(cell)
         path = out_dir / "reviews" / cell.entry / f"{cell.level}.json"
         saved = read_json(path)
         if not force and saved and saved.get("key") == key and saved.get("status") not in ("error",):
@@ -108,12 +112,27 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
         write_json(path, record)
         return record
 
-    results = []
+    keys = [key_of(cell) for cell in cells]
+    first: dict[str, Cell] = {}
+    for cell, key in zip(cells, keys):
+        first.setdefault(key, cell)
+    done = {}
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        for record in pool.map(one, cells):
-            results.append(record)
+        for key, record in zip(first, pool.map(one, first.values())):
+            done[key] = record
             if progress:
                 progress(record)
+    results = []
+    for cell, key in zip(cells, keys):
+        record = done[key]
+        if (record["entry"], record["level"]) != (cell.entry, cell.level):  # same input: copy the review
+            source = record["level"] if record["entry"] == cell.entry else f"{record['entry']}/{record['level']}"
+            record = {**record, "entry": cell.entry, "level": cell.level, "input_tokens": cell.input_tokens,
+                      "reused_from": source}
+            write_json(out_dir / "reviews" / cell.entry / f"{cell.level}.json", record)
+            if progress:
+                progress(record)
+        results.append(record)
     return results
 
 
@@ -131,6 +150,7 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
     reply (too_long, error) are not scored. Judge errors are kept and retried next run.
     """
     out_dir, results = Path(out_dir), []
+    judged: dict[str, dict] = {}  # this run's judgments by key: identical reviews are judged once
     for review in reviews:
         if review.get("status") not in ("ok", "malformed", "empty_output"):
             continue
@@ -138,8 +158,17 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
         key = _key({"review": review["key"], "references": _key(comments),
                     "judge": getattr(judge, "identity", repr(judge)), "judge_prompt": JUDGE_PROMPT_VERSION})
         path = out_dir / "judgments" / review["entry"] / f"{review['level']}.json"
+        if key in judged:
+            record = {**judged[key], "entry": review["entry"], "level": review["level"],
+                      "reused_from": judged[key]["level"]}
+            write_json(path, record)
+            results.append(record)
+            if progress:
+                progress(record)
+            continue
         saved = read_json(path)
         if not force and saved and saved.get("key") == key and not saved.get("judge_errors"):
+            judged[key] = saved
             results.append(saved)
             if progress:
                 progress(saved)
@@ -151,6 +180,7 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
                   "judge": getattr(judge, "identity", repr(judge)), "judge_prompt_version": JUDGE_PROMPT_VERSION,
                   "seconds": round(time.monotonic() - started, 2), **score}
         write_json(path, record)
+        judged[key] = record
         results.append(record)
         if progress:
             progress(record)
@@ -175,7 +205,7 @@ def build_table(reviews: list[dict], judgments: list[dict], references: dict[str
                "input_tokens": review.get("input_tokens"), "review_status": review.get("status"),
                "truncated": review.get("truncated"), "findings": len(parsed.get("findings", [])),
                "invalid_findings": parsed.get("invalid_findings"), "output_tokens": reply.get("completion_tokens"),
-               "review_seconds": reply.get("seconds")}
+               "review_seconds": reply.get("seconds"), "reused_from": review.get("reused_from")}
         if judgment:
             covered = set(judgment["covered_indices"])
             human = _split(comments, covered, lambda c: not c.get("is_ai_comment"))

@@ -104,7 +104,7 @@ class IgnoreAndDownloadTests(Temp):
 
 class RunTests(Temp):
     def test_retries_delete_half_fetched_clone_then_succeed(self):
-        out, repos = self.root / "c.jsonl.gz", self.root / "repos"
+        out, repos = self.root / "c.jsonl", self.root / "repos"
         calls, waits = [], []
 
         def process(e):
@@ -122,19 +122,19 @@ class RunTests(Temp):
     def test_retries_exhausted_record_failure_with_backoff(self):
         waits = []
         counts = dataset.run([entry(0)], lambda e: record(e, "failed", "trace"), lambda e: "k",
-                             self.root / "c.jsonl.gz", self.root / "repos", retries=2, retry_wait=3,
+                             self.root / "c.jsonl", self.root / "repos", retries=2, retry_wait=3,
                              sleep=waits.append)
         self.assertEqual((dict(counts), waits), ({"failed": 1}, [3, 6]))
-        self.assertEqual(dataset.load_records(self.root / "c.jsonl.gz", status=None)["o__r__1"]["status"], "failed")
+        self.assertEqual(dataset.load_records(self.root / "c.jsonl", status=None)["o__r__1"]["status"], "failed")
 
     def test_interrupted_rewrite_keeps_the_file_and_leaves_no_partial_copy(self):
-        out = self.root / "c.jsonl.gz"
+        out = self.root / "c.jsonl"
         dataset.append_record(out, record(entry(0)))
         before = out.read_bytes()
         with mock.patch.object(dataset.json, "dumps", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
             dataset.rewrite(out, [record(entry(0))])
-        self.assertEqual((out.read_bytes(), sorted(p.name for p in self.root.iterdir())), (before, ["c.jsonl.gz"]))
+        self.assertEqual((out.read_bytes(), sorted(p.name for p in self.root.iterdir())), (before, ["c.jsonl"]))
 
     def test_commits_gone_from_github_are_not_retried(self):
         calls, waits = [], []
@@ -143,12 +143,12 @@ class RunTests(Temp):
             calls.append(e["index"])
             return {**record(e, "failed", "merge_base"), "retryable": False}
 
-        counts = dataset.run([entry(0)], process, lambda e: "k", self.root / "c.jsonl.gz", self.root / "repos",
+        counts = dataset.run([entry(0)], process, lambda e: "k", self.root / "c.jsonl", self.root / "repos",
                              retries=2, retry_wait=5, sleep=waits.append)
         self.assertEqual((calls, waits, dict(counts)), ([0], [], {"failed": 1}))
 
     def test_before_repo_can_stop_cleanly_and_progress_is_kept(self):
-        out = self.root / "c.jsonl.gz"
+        out = self.root / "c.jsonl"
         entries = [entry(0, "a/x"), entry(1, "b/y")]
 
         def before(name, group):
@@ -232,7 +232,7 @@ class CleanTests(Temp):
         names = lambda paths: [str(p.relative_to(self.runner)) for p in paths]  # noqa: E731
         self.assertEqual(names(pipeline.runner_targets(self.runner)), ["repos/o__r", "repos/p__q"])
         self.assertEqual(names(pipeline.runner_targets(self.runner, everything=True)),
-                         ["context_levels.jsonl.gz", "entries", "outcomes", "repos", "summary.csv"])
+                         ["context_levels.jsonl", "entries", "outcomes", "repos", "summary.csv"])
         other = self.root / "not-a-runner-folder"  # outcomes/ alone does not make it the runner's
         (other / "outcomes").mkdir(parents=True)
         self.assertEqual(pipeline.runner_targets(other, everything=True), [])
@@ -253,7 +253,7 @@ class CleanTests(Temp):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("inspection runner clones", done.stdout)
         self.assertEqual(self.runner_left(),
-                         ["context_levels.jsonl.gz", "entries", "entries/o__r__1", "entries/o__r__1/status.json",
+                         ["context_levels.jsonl", "entries", "entries/o__r__1", "entries/o__r__1/status.json",
                           "notes.txt", "outcomes", "outcomes/smoke", "outcomes/smoke/table.csv", "repos",
                           "repos/not_a_clone", "summary.csv"])
         nothing = self.clean("--yes", root=empty_root)
@@ -261,11 +261,11 @@ class CleanTests(Temp):
 
     def test_targets_by_scope(self):
         self.make_build()
-        built = [".work/repos", ".work/tmp", "context_levels.jsonl.gz", "context_levels.jsonl.gzabc123"]
+        built = [".work/repos", ".work/tmp", "context_levels.jsonl", "context_levels.jsonlabc123"]
         self.assertEqual(self.names(pipeline.clean_targets(self.root)), built)
         self.assertEqual(self.names(pipeline.clean_targets(self.root, logs=True)), built + ["logs/build_1.log"])
         self.assertEqual(self.names(pipeline.clean_targets(self.root, everything=True)),
-                         [".gitignore", ".work", "context_levels.jsonl.gz", "context_levels.jsonl.gzabc123",
+                         [".gitignore", ".work", "context_levels.jsonl", "context_levels.jsonlabc123",
                           "logs/build_1.log", "positive_samples.json"])
 
     def test_remove_keeps_files_that_are_not_the_builders(self):
@@ -284,7 +284,7 @@ class CleanTests(Temp):
         before = self.remaining()
         dry = self.clean("--dry-run")
         self.assertEqual(dry.returncode, 0, dry.stderr)
-        self.assertIn("context_levels.jsonl.gz", dry.stdout)
+        self.assertIn("context_levels.jsonl", dry.stdout)
         no_terminal = self.clean()  # cannot ask without a terminal: deletes nothing
         self.assertEqual((no_terminal.returncode, self.remaining()), (1, before))
         done = self.clean("--yes")

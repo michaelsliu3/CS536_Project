@@ -260,13 +260,13 @@ The tracer is [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-
    - **Changed symbols:** keep the innermost changed symbol, folding struct fields and 1–2 line members into their changed container.
    - **Per-kind limits:** a deepest hop and a maximum item count.
 4. **Rank** with configurable keys (hop, kind, link type, same file, size), always followed by path, line and name.
-5. **Pack** under a token budget:
+5. **Pack** up to one cap on the whole input (Section 5.5.7; per-level token budgets until Nov 8):
    - **Counting:** with the reviewer's tokenizer, `Qwen/Qwen3.8-27B` (tokenizer files only; the revision is recorded).
    - **Range fixes:** decorators are added (the tool's Python ranges start below them), and Markdown sections are extended past their heading.
    - **Long items:** windows around the changes, or the first lines.
    - **No repeats:** a line is never shown twice.
 6. **Output per PR and level:**
-   - **`context.md`:** the PR title and description, the diff, then the repository context. The budget covers only the repository context.
+   - **`context.md`:** the PR title and description, the diff, then the repository context. The cap covers all three; the context gets what the PR text and diff leave.
    - **`selection.json`:** every included and excluded item with its reason, plus token counts for each part.
 
 `scripts/tracer/run_tracer_batch.py` runs AACR entries one at a time, since the tool allows one active cache at a time. Entries are selected by ID, 0-based file position or language; the whole dataset needs `--all`. It traces each PR once and packs every level from that trace, resumes by reusing unchanged results, and records failures without stopping. It writes `data/aacr_tracer/entries/<id>/{status,trace,pr}.json`, `<level>/{context.md,selection.json}` and `summary.csv`. Reference comments are read only to count the per-entry checks below; their text never enters any output.
@@ -275,9 +275,11 @@ The PR title and description come from the GitHub API and are the **current** ve
 
 #### 5.5.3 Context levels (`configs/levels/`, base `configs/tracer_levels_base.yaml`)
 
-Levels are nested. Each config inherits the previous one and names it as its parent, and the runner includes the parent's items first, so every line a level shows is also shown by the next. A whole changed file absorbs the pieces of it a smaller level showed. `status.json` records a per-level nesting check. Budgets cover repository context only, and are starting points to check on a pilot, not tuned values.
+Levels are nested. Each config inherits the previous one and names it as its parent, and the runner includes the parent's items first, so every line a level shows is also shown by the next. A whole changed file absorbs the pieces of it a smaller level showed. `status.json` records a per-level nesting check.
 
-| # | Level | Adds | Max hop | Context budget |
+**Since Nov 8 (Section 5.5.7), levels have no per-level token budgets.** Each level shows everything its kinds and item limits allow, up to one cap on the whole input (PR text + diff + context): 256,339 tokens, so every level fits the reviewer. Item limits count the level's total, its parent's items included. The old budgets are listed for reference; the limits are starting points to check on a pilot, not tuned values.
+
+| # | Level | Adds | Max hop | Old context budget (until Nov 8) |
 |---|---|---|---|---|
 | 1 | `L01_min` | PR title and description + diff (like one ContextCRBench entry) | 0 | 0 |
 | 2 | `L02_function` | full changed functions/classes | 0 | 4k |
@@ -290,7 +292,7 @@ Levels are nested. Each config inherits the previous one and names it as its par
 | 9 | `L09_depth2_docs` | doc sections (≤10) and tests (≤25) up to two hops | 2 | 80k |
 | 10 | `L10_all` | everything traced, three hops, no item limits | 3 | 128k |
 
-`L07_agent` is our estimate of agent behavior, not a measurement. Calibrate it by logging which files real agent reviews open on a few PRs. `L10_all` is an upper bound for what this pipeline can supply, not a human contributor's actual knowledge. Whether a 128k-token context plus the diff fits the reviewer's window and GPU memory has not been tested.
+`L07_agent` is our estimate of agent behavior, not a measurement. Calibrate it by logging which files real agent reviews open on a few PRs. `L10_all` is an upper bound for what this pipeline can supply, not a human contributor's actual knowledge. Whether the GPU can serve inputs near the 256k cap has not been tested; check it in the reviewer pilot.
 
 #### 5.5.4 Measured on one PR: vllm-project/vllm#17425 (November 8, 2026)
 
@@ -325,7 +327,7 @@ Levels are nested. Each config inherits the previous one and names it as its par
 1. **Content-defined levels (recommended).** Each level includes everything its definition allows: item limits and line limits control size, the budget is only a safety cap (e.g. the reviewer window), and actual tokens are reported per PR.
 2. **Reserved shares.** Keep fixed budgets but reserve part of each level's increment for the kinds it adds.
 
-This is an open decision (Section 14). The run above used fixed budgets.
+**Decided Nov 8: option 1**, content-defined levels with one input cap (Section 5.5.7). The run above used fixed budgets.
 
 **Other observations on this PR:**
 - **Reference comment evidence:**
@@ -368,7 +370,12 @@ Known limits:
 
 **Status:** built and tested on 3 PRs, plus an interrupted-and-resumed 2-PR run in a scratch folder. The whole dataset has **not** been run.
 
-**What it does:** one command, `scripts/dataset/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl.gz`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file.
+**What it does:** one command, `scripts/dataset/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file.
+
+**File format (Nov 8):**
+- **Plain JSON Lines** (`context_levels.jsonl`), no longer gzip. Compression saved little: the 2-PR file is 9.1 MB plain against 1.7 MB compressed, and the whole dataset is estimated at about 0.3 GB plain. Plain text is readable with any JSON tool.
+- **Old `.gz` files are still read.**
+- **A committed sample:** `data/aacr_sample/` holds the 2-PR test build (FreeCAD#19411 and #21257, content-defined levels) for reading the format without building it.
 
 **Setup checks**, each failing with a fix:
 - git, and `gh` logged in;
@@ -449,6 +456,76 @@ The tracer now also records how long each step takes.
 - **Starting over:** `scripts/dataset/clean_dataset.py ROOT` deletes the built records, leftover rewrite files and the work folder's clones and caches. It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/`, but keeps that runner's saved results. It keeps the AACR file, logs and downloaded tool. `--logs` also deletes the logs. `--all` deletes everything the builders wrote, including the runner's saved results and the outputs older defaults left in its folder. It lists every path with its size and asks first. It refuses while a build or the inspection runner runs, and refuses a folder with no build files unless there are runner clones to delete.
 
 **Next:** settle the index mode, then run `scripts/dataset/build_dataset.py data/aacr` on the laptop. Then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
+
+#### 5.5.7 Level design: one input cap instead of per-level budgets (decided November 8, 2026)
+
+**The problem.** With per-level budgets, each level spent its extra budget in one fixed order (hop, then kind). On big PRs, items left over from earlier levels took every level's extra budget, so levels lacked the kind they are named for (as on vLLM, Section 5.5.4):
+- **FreeCAD#19411** (124 changed symbols in 35 files):
+  - `L02`'s 4k held 30 changed functions;
+  - `L03` added 30 more changed functions and no files;
+  - `L05`'s 4,012 extra tokens bought 5 changed functions, 2 callees and **no callers**, though the trace found 236 at 1 hop;
+  - callers first appeared at `L10` (at `L09` on #21257).
+- **Raising the budgets would not fix it.** #19411's changed files and functions alone take about 71k tokens, and PR sizes vary widely (median 151 changed lines, 90th percentile 687, largest 971).
+
+**Options considered:**
+1. **New kinds first:** keep the budgets, but let each level spend its extra budget on the kinds it adds before the leftovers.
+2. **Reserved shares:** a fixed share of each level's extra budget for the kinds it adds.
+3. **No per-level budgets, one cap on the whole input (chosen).** Each level shows everything its kinds and item limits allow, and every (PR, level) records its actual cost.
+
+**Measured, packing only** (same code, configs and clone folder as the build; nothing written to the dataset):
+
+| PR | Changed lines | All 10 levels, budgeted | All 10 levels, cap | Ratio | Levels missing their own kind: budgeted → cap |
+|---|---|---|---|---|---|
+| langflow#5388 (Python) | 22 | 60,453 | 60,453 | 1.0× | L04, L05 → same |
+| linera#4639 (Rust) | 40 | 65,178 | 65,178 | 1.0× | L04–L06, L08, L09 → same |
+| lvgl#8164 (C) | 67 | 99,442 | 99,442 | 1.0× | L05, L06, L09 → same |
+| elasticsearch#127697 (Java) | 106 | 394,812 | 454,550 | 1.2× | L07 → none |
+| three.js#30076 (JavaScript) | 151 | 391,634 | 577,371 | 1.5× | L04–L06 → none |
+| electron#46982 (C++) | 190 | 419,689 | 420,861 | 1.0× | L05, L06, L09 → L06, L09 |
+| gemini-cli#4163 (TypeScript) | 275 | 372,192 | 429,146 | 1.2× | L04–L06, L09 → L06, L09 |
+| waveterm#1793 (Go) | 522 | 494,115 | 538,039 | 1.1× | L04–L06, L09 → L06, L09 |
+| FreeCAD#19411 (C++) | 862 | 677,382 | 1,394,559 | 2.1× | most → none |
+| FreeCAD#21257 (C++) | 672 | 534,385 | 1,208,476 | 2.3× | most → none |
+
+- **The sample:** the eight typical PRs sit at about the 10th–80th percentiles of changed lines, one per language and repository. Together they cost **1.15×** the budgeted design. The FreeCAD rows were measured before the limit fix below.
+- **Small PRs are unchanged:** their content never reached the budgets.
+- **Kinds still missing are genuinely absent:** no callees or callers on the tiny PRs, and tests or docs, which the tool found in only 3 of the 10 PRs.
+- **The cap rarely binds:** only `L10` on elasticsearch and three.js, and `L09`/`L10` on both FreeCAD PRs. The median `L10` is about 85k tokens in both designs.
+- **Identical levels:** about 2 of 10 levels per typical PR are identical to their parent, often `L06` because there are no tests.
+- **Whole-table cost:** roughly 1.3–1.4× the budgeted design's input tokens, before reusing identical levels. This is extrapolated from 10 PRs, not measured.
+
+**A second problem found:** item limits applied only to each level's new candidates, so every level could add up to the limit again. `L05` on #19411 had 41 callees with a limit of 40. Without budgets, `L06_tests1` added 16 callees and 22 callers but no tests.
+
+**Decision.** Content-defined levels:
+- **No per-level budgets:** `L02` and up have `token_budget: null`.
+- **One cap on the whole input:** `max_input_tokens: 256339`. That is Qwen3.8-27B's 262,144-token context minus 1,709 tokens for the prompt (Codex rubric, review request and chat template) and 4,096 for the review.
+- **Item limits count the level's total,** its parent's items included.
+- **Cost:** the higher outcome-table cost is accepted. It only makes review-table generation and training take longer.
+
+**Changes:**
+- **`build.py`** (`RENDER_VERSION = 3`): the cap and the limit totals. Reports gain `max_input_tokens`, `capped` (items left out for lack of room) and `fits` (false only when the PR text and diff alone exceed the cap).
+- **Dataset records:** each level gains `capped`, `fits` and `same_as_parent`.
+- **Outcome table:**
+  - identical inputs are reviewed once and identical reviews judged once, with `reused_from` on the copies;
+  - the notebook's cloud input limit is now 256,339.
+- **Resume:** the new packing version makes resumed builds rebuild old records.
+
+**Rebuild check (Nov 8):** the two FreeCAD PRs were rebuilt through `build_dataset.py` with the new levels:
+
+| | #19411 | #21257 |
+|---|---|---|
+| Input tokens, `L01` → `L10` | 27,365 → 256,337 | 13,071 → 256,337 |
+| All 10 levels together | 1,199,625 (budgeted: 677,382) | 954,306 (budgeted: 534,385) |
+| Callers at `L05` | 32 (budgeted: 0) | 31 (budgeted: 0) |
+| Levels identical to their parent | `L06`, `L09` (no tests or docs) | `L06` |
+
+- **Every level** has its own kind wherever FreeCAD has it, stays within its item limits as level totals, fits the cap and passes the nesting check.
+- **Only `L10` is capped,** 2 tokens under it.
+- **The limit fix** lowered #19411's total from the 1,394,559 measured without it.
+
+**Still open:**
+- Tests are rarely found, so `L06` is often identical to `L05`.
+- Serving inputs near 256k on the cloud GPU is untested.
 
 ## 6. Preprocessing without generative LLMs
 
@@ -880,7 +957,7 @@ Options considered and not chosen:
 
 #### 8.5.8 Implemented: the outcome-table code and notebook (November 8, 2026)
 
-**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr/context_levels.jsonl.gz`, Section 5.5.6), it:
+**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr/context_levels.jsonl`, Section 5.5.6), it:
 
 1. reviews it with the frozen reviewer (system: Codex rubric; user: request + `context.md`);
 2. parses the JSON findings;
@@ -1104,7 +1181,7 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 - **Measured:** one PR at all levels; two more at one level.
 - **Also built:** the one-file dataset builder, which deletes each clone after use (Section 5.5.6). It was tested on 3 PRs.
 - **Next:**
-  - decide between content-defined and fixed-budget levels;
+  - ~~decide between content-defined and fixed-budget levels~~ (decided Nov 8: content-defined, one input cap; Section 5.5.7);
   - pilot about two PRs per language, then build the whole dataset with `scripts/dataset/build_dataset.py data/aacr`;
   - run a reviewer on the levels.
 
@@ -1182,7 +1259,7 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Python-only or broader language scope | Parse support and independent repository counts after filtering |
 | RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: behavior on the other languages and very large repositories |
 | Tracer index mode (`full` vs `fast`) | `full` mode's call/test links depend on the folder the clone sits in, and `fast` was path-independent with fewer links (Section 5.5.6). Choose before building the dataset |
-| Fixed-budget versus content-defined context levels | With fixed budgets, levels did not contain their named content on vllm#17425 (Section 5.5.4); compare both on a pilot |
+| Fixed-budget versus content-defined context levels | **Decided Nov 8:** content-defined levels with one input cap of 256,339 tokens and item limits as level totals, after measuring both on 10 PRs (Section 5.5.7). Higher outcome-table cost accepted |
 | Reviewer model/size/precision | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call, greedy (Section 8.5.2). Still needed: memory and window fit, latency, run-to-run noise |
 | Switching the reviewer to Claude | Allowed only if Qwen fails pilot criteria fixed in advance (Section 8.5.2); a switch regenerates the whole table |
 | Review prompt | **Decided Nov 8 (revised):** OpenAI Codex's `/review` rubric, verbatim and pinned, with no findings cap (Section 8.5.2). Still open: whether Qwen's thinking mode is on |

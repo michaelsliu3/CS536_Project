@@ -129,7 +129,7 @@ class TableTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        self.contexts = self.root / "context_levels.jsonl.gz"
+        self.contexts = self.root / "context_levels.jsonl"
         levels = {name: {"text": f"context for {name}", "input_tokens": tokens}
                   for name, tokens in (("L01_min", 100), ("L02_function", 900))}
         append_record(self.contexts, {"id": "o__r__1", "index": 0, "status": "ok", "levels": levels,
@@ -173,6 +173,36 @@ class TableTests(unittest.TestCase):
         self.assertEqual([s["level"] for s in summary], ["L01_min", "L02_function"])
         self.assertAlmostEqual(summary[0]["recall_pooled"], 0.125)
         self.assertEqual(summary[1]["statuses"], {"too_long": 1})
+
+    def test_identical_levels_are_reviewed_and_judged_once(self):
+        levels = {name: {"text": text, "input_tokens": 100}
+                  for name, text in (("L05_callers1", "same"), ("L06_tests1", "same"), ("L07_agent", "more"))}
+        contexts = self.root / "same.jsonl"
+        append_record(contexts, {"id": "o__r__1", "index": 0, "status": "ok", "levels": levels, "known_paths": []})
+        calls = []
+
+        def reviewer(messages):
+            calls.append(messages[1]["content"])
+            return {"text": codex_reply([finding("G1 dict passed to cached warning_once", "p.py", 249)]),
+                    "finish_reason": "stop", "prompt_tokens": 10, "completion_tokens": 5, "seconds": 0.1}
+        reviewer.identity = {"kind": "fake"}
+        out = self.root / "same_out"
+        reviews = run_reviews(discover_cells(contexts), reviewer, "RUBRIC", out, concurrency=2)
+        self.assertEqual(len(calls), 2)  # "same" once, "more" once
+        self.assertEqual([(r["level"], r.get("reused_from")) for r in reviews],
+                         [("L05_callers1", None), ("L06_tests1", "L05_callers1"), ("L07_agent", None)])
+        self.assertTrue((out / "reviews" / "o__r__1" / "L06_tests1.json").is_file())
+        judge_calls = []
+
+        def judge(prompt):
+            judge_calls.append(prompt)
+            return "[3]"
+        judge.identity = {"kind": "fixed"}
+        judgments = run_judgments(reviews, self.references, judge, out)
+        self.assertEqual(len(judge_calls), 2)  # one finding in each of the two different reviews
+        self.assertEqual([j.get("reused_from") for j in judgments], [None, "L05_callers1", None])
+        rows, _ = build_table(reviews, judgments, self.references)
+        self.assertEqual([r["reused_from"] for r in rows], [None, "L05_callers1", None])
 
 
 if __name__ == "__main__":

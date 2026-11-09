@@ -5,4 +5,3 @@ selection:
   limits:
     doc: {max_hop: 2, max_items: 10}
     test: {max_hop: 2, max_items: 25}
-packing: {token_budget: 80000}

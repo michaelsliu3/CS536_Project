@@ -30,7 +30,7 @@ CONFIG = {
     "ranking": {"rank_by": ["hop", "kind", "edge", "same_file", "size"],
                 "kind_order": ["changed", "file", "callee", "caller", "test", "search", "guide", "doc"],
                 "edge_order": ["CALLS", "USAGE", "TESTS", "MENTIONS"]},
-    "packing": {"token_budget": 10_000, "tokenizer": "approx",
+    "packing": {"token_budget": 10_000, "max_input_tokens": None, "tokenizer": "approx",
                 "kind_shares": {"changed": None, "callee": None, "caller": None, "test": None, "doc": None},
                 "redistribute_unused": True, "max_lines_per_item": {"default": 50},
                 "oversize": {"changed": "hunks", "default": "head"}, "hunk_context_lines": {"default": 1},
@@ -341,6 +341,59 @@ class InputSectionTests(RepoTestCase):
             build_context(data, self.repo, cfg, chars, "chars")
 
 
+class InputCapTests(RepoTestCase):
+    """max_input_tokens caps the whole input (PR text + diff + context); token_budget null = cap only."""
+
+    def setUp(self):
+        super().setUp()
+        self.data = trace()
+        self.data["diff"] = "diff --git a/app.py b/app.py\n@@ -8 +8 @@\n-    y = x\n+    y = helper(x)\n"
+        self.pr = {"title": "Use helper", "body": "reuse it", "edited_after_review": False}
+
+    def cfg(self, budget, cap):
+        cfg = config(token_budget=budget, max_input_tokens=cap)
+        cfg["input"].update(pr_text=True, diff=True)
+        return cfg
+
+    def test_cap_bounds_the_whole_input(self):
+        text_all, everything = build_context(self.data, self.repo, self.cfg(None, 10 ** 6), chars, "chars", pr=self.pr)
+        self.assertEqual((everything["capped"], everything["fits"]), (False, True))
+        cap = everything["input_tokens"] - 20  # too small for every item
+        text, capped = build_context(self.data, self.repo, self.cfg(None, cap), chars, "chars", pr=self.pr)
+        self.assertLessEqual(capped["input_tokens"], cap)
+        self.assertEqual(capped["input_tokens"], len(text))
+        self.assertEqual((capped["capped"], capped["fits"], capped["max_input_tokens"]), (True, True, cap))
+        self.assertLess(len(capped["included"]), len(everything["included"]))
+        prefix = text_all[:text_all.index(CONTEXT_HEADING)] + CONTEXT_HEADING + SEPARATOR
+        self.assertEqual(capped["token_budget"], cap - len(prefix))  # what the cap leaves after PR text and diff
+
+    def test_smaller_limit_wins_and_too_long_diffs_are_flagged(self):
+        _, both = build_context(self.data, self.repo, self.cfg(30, 10 ** 6), chars, "chars", pr=self.pr)
+        self.assertEqual(both["token_budget"], 30)
+        _, no_room = build_context(self.data, self.repo, self.cfg(None, 5), chars, "chars", pr=self.pr)
+        self.assertEqual((no_room["token_budget"], no_room["included"], no_room["fits"]), (0, [], False))
+
+    def test_budget_or_cap_must_be_set(self):
+        with self.assertRaisesRegex(ValueError, "set token_budget, max_input_tokens or both"):
+            validate_config(config(token_budget=None, max_input_tokens=None))
+        with self.assertRaisesRegex(ValueError, "max_input_tokens must be >= 1"):
+            validate_config(config(max_input_tokens=0))
+        self.assertIsNone(validate_config(config(token_budget=None, max_input_tokens=100))["packing"]["token_budget"])
+
+
+class PackLevelsTests(RepoTestCase):
+    def test_levels_identical_to_their_parent_are_marked(self):
+        from src.tracer_context.dataset import pack_levels
+        changed = {"max_hop": 0, "max_items": None}
+        configs = {"L1": level("L1", changed=changed),
+                   "L2": level("L2", parent="L1", changed=changed),  # switches on nothing new
+                   "L3": level("L3", parent="L2", changed=changed, callee={"max_hop": 1, "max_items": None})}
+        levels = pack_levels(trace(), self.repo, configs, {"approx": (chars, "chars")})
+        self.assertEqual([levels[n]["same_as_parent"] for n in configs], [False, True, False])
+        self.assertEqual({(lv["capped"], lv["fits"]) for lv in levels.values()}, {(False, True)})
+        self.assertEqual(levels["L3"]["included_by_kind"], {"changed": 1, "callee": 1})
+
+
 class NestingTests(RepoTestCase):
     def test_child_level_shows_every_parent_line(self):
         data = trace()
@@ -361,6 +414,21 @@ class NestingTests(RepoTestCase):
         self.assertTrue(nesting_check(first, second)["ok"])
         self.assertLessEqual(shown_lines(first), shown_lines(second))
         self.assertEqual(text.count("def changed(x):"), 1)
+
+    def test_item_limits_count_the_parents_items(self):
+        (self.repo / "other.py").write_text("def a():\n    return 1\n\ndef b():\n    return 2\n\n"
+                                            "def c():\n    return 3\n", encoding="utf-8")
+        data = trace()
+        for name, start in (("a", 1), ("b", 4), ("c", 7)):
+            data["callers"].append({"qn": f"other.{name}", "label": "Function", "file": "other.py", "hop": 1,
+                                    "via_qn": "app.changed", "via_edge": "CALLS"})
+            data["nodes"][f"other.{name}"] = {"label": "Function", "file": "other.py", "start": start, "end": start + 1}
+        callers = lambda report: sum(i["kind"] == "caller" for i in report["included"])  # noqa: E731
+        _, first = build_context(data, self.repo, level("L1", caller={"max_hop": 1, "max_items": 2}), chars, "chars")
+        self.assertEqual(callers(first), 2)
+        child = level("L2", parent="L1", caller={"max_hop": 1, "max_items": 3})
+        _, second = build_context(data, self.repo, child, chars, "chars", parent_report=first)
+        self.assertEqual(callers(second), 3)  # the level's total (4 callers exist), not 2 + 3
 
     def test_parent_items_come_first_and_must_fit(self):
         data = trace()

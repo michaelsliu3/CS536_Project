@@ -4,4 +4,3 @@ level: {name: L03_file, parent: L02_function}
 selection:
   limits:
     file: {max_hop: 0, max_items: null}
-packing: {token_budget: 16000}

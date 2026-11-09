@@ -4,4 +4,4 @@ level: {name: L02_function, parent: L01_min}
 selection:
   limits:
     changed: {max_hop: 0, max_items: null}
-packing: {token_budget: 4000}
+packing: {token_budget: null}   # no per-level budget from here on: only the input cap (base config)

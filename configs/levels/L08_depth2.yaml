@@ -5,4 +5,3 @@ selection:
   limits:
     callee: {max_hop: 2, max_items: 100}
     caller: {max_hop: 2, max_items: 100}
-packing: {token_budget: 64000}

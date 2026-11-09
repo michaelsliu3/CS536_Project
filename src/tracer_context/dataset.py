@@ -1,7 +1,8 @@
 """One-file dataset of context levels for every AACR-Bench entry.
 
-`<root>/context_levels.jsonl.gz` (e.g. data/aacr/, built by scripts/dataset/build_dataset.py) holds one JSON line per PR with every level's
-review input text, so training and the outcome table load a single file:
+`<root>/context_levels.jsonl` (e.g. data/aacr/, built by scripts/dataset/build_dataset.py) holds one
+JSON line per PR (plain JSON Lines) with every level's review input text, so training and the
+outcome table load a single file:
 
     from src.tracer_context.dataset import load_records, level_rows
     records = load_records(path)            # {entry id: record}, latest record per id
@@ -14,13 +15,16 @@ Record fields (format FORMAT):
   pr (title, body, edit times), stats (input-side counts usable as selector features),
   known_paths (files named in the trace, for review path normalization), warnings,
   seconds, and levels: {level name: {parent, text, input/pr/diff/context tokens,
-  token_budget, items, included_by_kind, included, nesting_ok, config_sha256}}.
+  token_budget (the context's room in this PR), max_input_tokens, capped, fits,
+  same_as_parent, items, included_by_kind, included, nesting_ok, config_sha256}}.
   `audit` holds per-entry checks that use the reference comments or the final PR's size:
   for auditing only, never as selector inputs. Reference comment text is never stored.
 
-Writing appends one gzip member per PR, so an interrupted run loses at most the PR in
+Writing appends one synced line per PR, so an interrupted run loses at most the PR in
 progress; a cut-off last line is detected and repaired on the next start, and the file is
-rewritten in dataset order (latest record per id) at the end of each run.
+rewritten in dataset order (latest record per id) at the end of each run. Files written
+before November 8 were gzip-compressed (`context_levels.jsonl.gz`); `read_records` still
+reads them.
 """
 from __future__ import annotations
 
@@ -49,32 +53,49 @@ FORMAT = "aacr-context-levels/v1"
 
 # ---------- file I/O ----------
 
+def _line(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+
+
 def append_record(path: Path, record: dict) -> None:
-    """Append one record as its own gzip member (gzip readers concatenate members)."""
+    """Append one record as one line, written and synced in one go."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = (json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-    with open(path, "ab") as handle:
-        handle.write(gzip.compress(line))
+    with open(path, "ab+") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell():  # never glue a record onto a last line that lacks its newline
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                handle.write(b"\n")
+        handle.write(_line(record).encode("utf-8"))
         handle.flush()
         os.fsync(handle.fileno())
 
 
 def read_records(path: Path) -> tuple[list[dict], bool]:
-    """(records in file order, whether the file ended in a cut-off record)."""
+    """(records in file order, whether the file ended in a cut-off record). Reads plain JSON
+    Lines; a `.gz` path is read as gzip (the format used before November 8)."""
     records, truncated = [], False
-    if not Path(path).exists():
+    path = Path(path)
+    if not path.exists():
         return records, truncated
-    try:
-        with gzip.open(path, "rt", encoding="utf-8") as handle:
-            for line in handle:
-                try:
+    if path.suffix == ".gz":
+        try:
+            with gzip.open(path, "rt", encoding="utf-8") as handle:
+                for line in handle:
                     records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    truncated = True
-                    break
-    except (EOFError, gzip.BadGzipFile, zlib.error, OSError):
-        truncated = True
+        except (EOFError, gzip.BadGzipFile, zlib.error, OSError, json.JSONDecodeError):
+            truncated = True
+        return records, truncated
+    with open(path, "rb") as handle:
+        for raw in handle:  # streamed line by line: the file can be large
+            if not raw.strip():
+                continue
+            try:
+                records.append(json.loads(raw))
+            except ValueError:  # a line cut off by an interrupted write
+                truncated = True
+                break
     return records, truncated
 
 
@@ -97,10 +118,15 @@ def rewrite(path: Path, records: Iterable[dict]) -> None:
     ordered = sorted(latest_by_id(records).values(), key=lambda r: (r.get("index", 0), r["id"]))
     fd, tmp = tempfile.mkstemp(prefix=path.name, dir=path.parent)
     os.close(fd)
+    umask = os.umask(0)
+    os.umask(umask)
+    os.chmod(tmp, 0o666 & ~umask)  # mkstemp makes the file private; give it normal permissions
     try:
-        with gzip.open(tmp, "wt", encoding="utf-8") as handle:
+        with open(tmp, "w", encoding="utf-8") as handle:
             for record in ordered:
-                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+                handle.write(_line(record))
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, path)
     except BaseException:  # e.g. Ctrl+C mid-rewrite: the old file stays, the partial copy goes
         Path(tmp).unlink(missing_ok=True)
@@ -166,10 +192,30 @@ def trace_paths(trace_data: dict) -> list[str]:
     return sorted(paths)
 
 
-def _compact_level(report: dict, text: str, parent: str | None, nesting: dict | None) -> dict:
+def pack_levels(data: dict, repo: Path, configs: dict, counters: dict, pr: dict | None = None) -> dict:
+    """Pack every level from one trace, parents first (checked when loading configs), as the
+    compact per-level dicts stored in a record; marks levels identical to their parent."""
+    reports, levels = {}, {}
+    for level_name, cfg in configs.items():
+        count_tokens, tokenizer = counters[cfg["packing"]["tokenizer"]]
+        parent = cfg["level"]["parent"]
+        text, report = build_context(data, repo, cfg, count_tokens, tokenizer, pr=pr, parent_report=reports.get(parent))
+        reports[level_name] = report
+        nesting = nesting_check(reports[parent], report) if parent else None
+        same = parent is not None and text == levels[parent]["text"]
+        levels[level_name] = _compact_level(report, text, parent, nesting, same)
+    return levels
+
+
+def _compact_level(report: dict, text: str, parent: str | None, nesting: dict | None,
+                   same_as_parent: bool = False) -> dict:
     return {
         "parent": parent, "text": text, "config_sha256": report["config_sha256"],
-        "token_budget": report["token_budget"], "input_tokens": report["input_tokens"],
+        "token_budget": report["token_budget"], "max_input_tokens": report.get("max_input_tokens"),
+        "input_tokens": report["input_tokens"],
+        # capped: items were left out for lack of room; fits: within max_input_tokens;
+        # same_as_parent: identical text, so the same review (the outcome table reviews it once)
+        "capped": report.get("capped", False), "fits": report.get("fits", True), "same_as_parent": same_as_parent,
         "pr_tokens": report["pr_tokens"], "diff_tokens": report["diff_tokens"],
         "context_tokens": report["context_tokens"], "items": len(report["included"]),
         "included_by_kind": report["counts"]["included_by_kind"],
@@ -223,20 +269,14 @@ def process_entry(entry: dict, configs: dict, counters: dict, *, binary: Path, t
         out["seconds"]["trace_steps"] = data.get("timings", {})
 
         stage, started = "pack", time.monotonic()
-        reports, levels = {}, {}
-        for level_name, cfg in configs.items():  # parents first (checked when loading configs)
-            count_tokens, tokenizer = counters[cfg["packing"]["tokenizer"]]
-            parent = cfg["level"]["parent"]
-            text, report = build_context(data, repo, cfg, count_tokens, tokenizer, pr=pr,
-                                         parent_report=reports.get(parent))
-            reports[level_name] = report
-            nesting = nesting_check(reports[parent], report) if parent else None
-            levels[level_name] = _compact_level(report, text, parent, nesting)
+        levels = pack_levels(data, repo, configs, counters, pr)
         out["seconds"]["pack"] = round(time.monotonic() - started, 1)
 
         warnings = list(data.get("warnings", []))
         if any(level["nesting_ok"] is False for level in levels.values()):
             warnings.append("a level is missing lines its parent shows")
+        if any(not level["fits"] for level in levels.values()):
+            warnings.append("the PR text and diff alone exceed max_input_tokens")
         out.update(status="ok", levels=levels, stats=entry_stats(data, pr), audit=audit, pr=pr,
                    known_paths=trace_paths(data), warnings=warnings, graph=data.get("index", {}))
     except KeyboardInterrupt:

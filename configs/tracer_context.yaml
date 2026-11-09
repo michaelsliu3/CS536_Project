@@ -65,6 +65,7 @@ ranking:
 
 packing:
   token_budget: 8000            # tokens of repository context (the PR text and diff are extra)
+  max_input_tokens: null        # optional cap on PR text + diff + context (null = budget only)
   tokenizer: Qwen/Qwen3.8-27B   # loaded offline only; "approx" = UTF-8 bytes / 4
   # Most of the budget each kind may use in the first pass (null = no cap). Shares scale
   # with token_budget. The diff is already in the prompt, so changed code gets a cap.

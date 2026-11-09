@@ -1,6 +1,7 @@
 # L10 all: everything the tracer finds, up to three hops, with no item limits; the upper bound
-# for "a frequent contributor's context" that this pipeline can supply. The budget must also
-# fit the reviewer's context window and GPU memory (untested).
+# for "a frequent contributor's context" that this pipeline can supply. It is the level most
+# often cut by the input cap (max_input_tokens); whether the GPU can serve inputs that long is
+# to be checked in the reviewer pilot.
 inherit: L09_depth2_docs.yaml
 level: {name: L10_all, parent: L09_depth2_docs}
 selection:
@@ -13,4 +14,3 @@ selection:
     search:  {max_hop: 1, max_items: null}
     guide:   {max_hop: 1, max_items: null}
     doc:     {max_hop: 3, max_items: null}
-packing: {token_budget: 128000}

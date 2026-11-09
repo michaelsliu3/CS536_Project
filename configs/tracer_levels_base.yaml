@@ -3,7 +3,9 @@
 # adds. Each level names its parent; the batch runner includes the parent's items first, so a
 # level shows every line its parent shows. All levels share this `tracer` section: each PR is
 # traced once, deep enough for the largest level, and levels choose depth via selection.limits.
-# Budgets and limits are starting points to be checked on a pilot, not tuned values.
+# Levels have no per-level token budgets: each one shows everything its kinds and item limits
+# allow (max_items counts the level's total, its parent's items included), up to one cap on
+# the whole input. Limits are starting points to be checked on a pilot, not tuned values.
 version: 1
 
 level: {name: base, parent: null}
@@ -67,7 +69,11 @@ ranking:
   edge_order: [CALLS, USAGE, TESTS, MENTIONS, REFERENCES_FILE, DEFINES]
 
 packing:
-  token_budget: 0               # tokens of repository context (the PR text and diff are extra)
+  token_budget: 0               # L01 has no repository context; L02 and up set null (no per-level budget)
+  # Cap on each level's whole input (PR text + diff + context), so every level fits the reviewer:
+  # Qwen3.8-27B's 262,144-token context, minus 1,709 for the prompt (Codex rubric, review request,
+  # chat template) and 4,096 for the review it writes. Levels reaching it are marked `capped`.
+  max_input_tokens: 256339
   tokenizer: Qwen/Qwen3.8-27B
   kind_shares: {}               # no per-kind caps; nesting and limits decide the mix
   redistribute_unused: true

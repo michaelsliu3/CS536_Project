@@ -1,4 +1,6 @@
 import gzip
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,7 +26,7 @@ def record(e, status="ok", key="k1", text="ctx"):
 class FileTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.path = Path(self._tmp.name) / "out" / "context_levels.jsonl.gz"
+        self.path = Path(self._tmp.name) / "out" / "context_levels.jsonl"
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -39,17 +41,37 @@ class FileTests(unittest.TestCase):
         self.assertEqual(load_records(self.path)[a["id"]]["levels"]["L01_min"]["text"], "new")
         rewrite(self.path, records)
         self.assertEqual([r["id"] for r in read_records(self.path)[0]], [b["id"], a["id"]])  # index order, deduped
+        umask = os.umask(0)
+        os.umask(umask)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o666 & ~umask)  # not left private by mkstemp
 
     def test_cut_off_tail_is_detected_and_status_filter(self):
         append_record(self.path, record(entry(0)))
         append_record(self.path, record(entry(1), status="failed"))
-        with open(self.path, "ab") as handle:  # a member cut off mid-write
-            handle.write(gzip.compress(b'{"id": "x", "levels": {"L01')[:-6])
+        with open(self.path, "ab") as handle:  # a line cut off mid-write
+            handle.write(b'{"id": "x", "levels": {"L01')
         records, truncated = read_records(self.path)
         self.assertTrue(truncated)
         self.assertEqual(len(records), 2)
         self.assertEqual(list(load_records(self.path)), ["o__r__1"])  # ok records only by default
         self.assertEqual(len(load_records(self.path, status=None)), 2)
+
+    def test_plain_text_one_line_per_record_and_no_gluing(self):
+        append_record(self.path, record(entry(0)))
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual((len(lines), json.loads(lines[0])["id"]), (1, "o__r__1"))  # readable as JSON Lines
+        with open(self.path, "ab") as handle:  # a complete last record that lost its newline
+            handle.write(json.dumps(record(entry(1))).encode("utf-8"))
+        append_record(self.path, record(entry(2)))
+        self.assertEqual([r["id"] for r in read_records(self.path)[0]], ["o__r__1", "o__r__2", "o__r__3"])
+
+    def test_old_gzip_files_are_still_read(self):
+        old = self.path.with_name("context_levels.jsonl.gz")
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.write_bytes(gzip.compress((json.dumps(record(entry(0))) + "\n").encode("utf-8"))
+                        + gzip.compress((json.dumps(record(entry(1))) + "\n").encode("utf-8")))
+        self.assertEqual([r["id"] for r in read_records(old)[0]], ["o__r__1", "o__r__2"])
+        self.assertEqual(read_records(old)[1], False)
 
     def test_level_rows(self):
         rows = level_rows([record(entry(0))])
@@ -63,7 +85,7 @@ class RunTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         root = Path(self._tmp.name)
-        self.out, self.repos = root / "context_levels.jsonl.gz", root / "repos"
+        self.out, self.repos = root / "context_levels.jsonl", root / "repos"
 
     def tearDown(self):
         self._tmp.cleanup()

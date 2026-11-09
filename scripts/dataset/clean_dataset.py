@@ -3,7 +3,7 @@
     .venv/bin/python scripts/dataset/clean_dataset.py ROOT [--logs | --all] [--yes | --dry-run]
 
 By default it deletes:
-  - the built records (ROOT/context_levels.jsonl.gz) and the clones and tool caches in ROOT/.work;
+  - the built records (ROOT/context_levels.jsonl) and the clones and tool caches in ROOT/.work;
   - the repositories the inspection runner (scripts/tracer/run_tracer_batch.py) cloned into
     data/aacr_tracer/repos (another folder with --runner-work). Its saved results stay.
 It keeps ROOT/positive_samples.json, ROOT/logs and a downloaded tool, so the restart needs no

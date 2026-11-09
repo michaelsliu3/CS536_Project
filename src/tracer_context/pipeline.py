@@ -41,7 +41,7 @@ TOKENIZER_FILES = ["tokenizer.json", "tokenizer_config.json", "vocab.json", "mer
                    "config.json"]
 
 # What the builder writes in its root folder.
-OUTPUT_FILE = "context_levels.jsonl.gz"
+OUTPUT_FILE = "context_levels.jsonl"
 LOCK_FILE = ".build.lock"
 WORK_DIR = ".work"   # repos/ (clones), tmp/ (tool caches), tools/ (a downloaded tool)
 LOG_DIR = "logs"     # build_<time>.log

@@ -1,13 +1,15 @@
-"""Turn a codebase-memory-mcp trace into a ranked, token-budgeted review input.
+"""Turn a codebase-memory-mcp trace into a ranked, size-limited review input.
 
 Pure functions over the trace dict written by ``src.tracer_context.cbm.trace`` and the
 files of the checked-out PR head. No model or tool calls happen here; token counting
 is supplied by the caller.
 
 The output has up to three sections: the PR title and description, the diff, and the
-repository context (code items ranked and packed into the token budget). A config can
-name a parent level; the parent's chosen items are then included first, so every line a
-smaller level shows is also shown by the larger one.
+repository context (code items ranked and packed into the room left). That room is the
+level's `token_budget`, or what `max_input_tokens` (a cap on the whole input) leaves after
+the PR text and diff; with both set, the smaller one. A config can name a parent level;
+the parent's chosen items are then included first, so every line a smaller level shows is
+also shown by the larger one, and its item limits count the parent's items too.
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ from typing import Callable
 KINDS = ("changed", "file", "callee", "caller", "test", "search", "guide", "doc")
 RANK_KEYS = ("hop", "kind", "edge", "same_file", "size")
 OVERSIZE_POLICIES = ("hunks", "head", "skip")
-RENDER_VERSION = 2
+RENDER_VERSION = 3  # 3: input cap (max_input_tokens), item limits are level totals
 SEPARATOR = "\n\n"  # between items in the context text
 CONTEXT_HEADING = "## Repository context"
 WHOLE_FILE = 10 ** 9  # end line meaning "to the end of the file"
@@ -59,7 +61,8 @@ SCHEMA = {
     },
     "ranking": {"rank_by": list, "kind_order": list, "edge_order": list},
     "packing": {
-        "token_budget": int,
+        "token_budget": _OPT_INT,       # repository-context tokens for this level; null = only the input cap
+        "max_input_tokens": _OPT_INT,   # cap on PR text + diff + context; null = only the level budget
         "tokenizer": str,
         "kind_shares": dict,
         "redistribute_unused": bool,
@@ -163,8 +166,13 @@ def validate_config(cfg: dict) -> dict:
             raise ValueError(f"config.packing.kind_shares.{kind} must be between 0 and 1, or null")
     if sum(s for s in shares.values() if s is not None) > 1 + 1e-9:
         raise ValueError("config.packing.kind_shares must add up to at most 1")
-    if packing["token_budget"] < 0:
-        raise ValueError("config.packing.token_budget must be >= 0")
+    budget, input_cap = packing["token_budget"], packing["max_input_tokens"]
+    if budget is None and input_cap is None:
+        raise ValueError("config.packing: set token_budget, max_input_tokens or both (null in both means no limit)")
+    if budget is not None and budget < 0:
+        raise ValueError("config.packing.token_budget must be >= 0 or null")
+    if input_cap is not None and input_cap < 1:
+        raise ValueError("config.packing.max_input_tokens must be >= 1 or null")
     return cfg
 
 
@@ -597,8 +605,11 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
     items, excluded = collect_items(trace, selection)
     forced = list(parent_report["included"]) if parent_report else []
     forced_qns = {f["qn"] for f in forced}
-    ranked, limited = apply_limits([it for it in items if it.qn not in forced_qns],
-                                   selection["limits"], ranking, changed_files)
+    # max_items is the level's total for a kind, its parent's items included.
+    have = Counter(f["kind"] for f in forced)
+    limits = {kind: {**limit, "max_items": None if limit["max_items"] is None else max(0, limit["max_items"] - have[kind])}
+              for kind, limit in selection["limits"].items()}
+    ranked, limited = apply_limits([it for it in items if it.qn not in forced_qns], limits, ranking, changed_files)
     excluded += limited
 
     repo_root = repo.resolve()
@@ -645,7 +656,17 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         return {"item": item, "lines": lines, "start": start, "end": end, "segments": segments,
                 "block": block, "tokens": tokens}
 
+    # The PR text and diff come first; the repository context gets the level's token_budget,
+    # or what max_input_tokens leaves after them (the smaller one when both are set).
+    pr_section = render_pr(pr, inputs["strip_html_comments"]) if inputs["pr_text"] else ""
+    diff_section = render_diff(trace["diff"]) if inputs["diff"] else ""
+    fixed = [s for s in (pr_section, diff_section) if s]
+    input_cap = packing["max_input_tokens"]
+    context_prefix = SEPARATOR.join(fixed + [f"{CONTEXT_HEADING}{SEPARATOR}"])  # the full text is this + context
     budget = packing["token_budget"]
+    if input_cap is not None:
+        room = max(0, input_cap - count_tokens(context_prefix))
+        budget = room if budget is None else min(budget, room)
     shares = packing["kind_shares"]
     caps = {kind: None if shares.get(kind) is None else int(budget * shares[kind]) for kind in KINDS}
     chosen = []  # in the order items were added
@@ -731,13 +752,22 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         text = join(chosen)
         total = count_tokens(text) if chosen else 0
 
-    sections = []
-    pr_section = render_pr(pr, inputs["strip_html_comments"]) if inputs["pr_text"] else ""
-    diff_section = render_diff(trace["diff"]) if inputs["diff"] else ""
-    sections += [s for s in (pr_section, diff_section) if s]
-    if text:
-        sections.append(f"{CONTEXT_HEADING}{SEPARATOR}{text}")
-    full = "\n\n".join(sections)
+    def assemble(context_text):
+        return SEPARATOR.join(fixed + ([f"{CONTEXT_HEADING}{SEPARATOR}{context_text}"] if context_text else []))
+
+    full = assemble(text)
+    input_tokens = count_tokens(full) if full else 0
+    while input_cap is not None and input_tokens > input_cap:  # merges where the context meets the diff
+        removable = [p for p in chosen if not p["forced"]]
+        if not removable:
+            break
+        dropped = removable[-1]
+        chosen = [c for c in chosen if c is not dropped]
+        excluded.append(_excluded(dropped["item"], "budget", tokens=dropped["tokens"]))
+        text = join(chosen)
+        total = count_tokens(text) if chosen else 0
+        full = assemble(text)
+        input_tokens = count_tokens(full) if full else 0
 
     included = []
     for position, prep in enumerate(sorted(chosen, key=lambda p: rank_key(p["item"], ranking, changed_files)), 1):
@@ -759,8 +789,11 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         "parent_config_sha256": parent_report["config_sha256"] if parent_report else None,
         "config": cfg,
         "tokenizer": tokenizer_name,
-        "token_budget": budget,
-        "input_tokens": count_tokens(full) if full else 0,
+        "token_budget": budget,  # the repository context's room in this PR (level budget and input cap)
+        "max_input_tokens": input_cap,
+        "input_tokens": input_tokens,
+        "capped": bool(reasons.get("budget")),  # items were left out for lack of room
+        "fits": input_cap is None or input_tokens <= input_cap,  # false only if PR text + diff alone exceed it
         "pr_tokens": count_tokens(pr_section) if pr_section else 0,
         "diff_tokens": count_tokens(diff_section) if diff_section else 0,
         "context_tokens": total,
