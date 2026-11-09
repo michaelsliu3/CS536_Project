@@ -7,7 +7,7 @@ from pathlib import Path
 
 from src.tracer_context.dataset import (
     append_record, build_key, entry_stats, group_by_repo, latest_by_id, level_rows, load_records,
-    read_records, rewrite, run, trace_paths,
+    read_records, rewrite, run, trace_paths, write_json,
 )
 
 
@@ -64,6 +64,17 @@ class FileTests(unittest.TestCase):
             handle.write(json.dumps(record(entry(1))).encode("utf-8"))
         append_record(self.path, record(entry(2)))
         self.assertEqual([r["id"] for r in read_records(self.path)[0]], ["o__r__1", "o__r__2", "o__r__3"])
+
+    def test_json_document_copy_round_trips(self):
+        out = self.path.with_name("sample.json")
+        write_json(out, [record(entry(1)), record(entry(0)), record(entry(1), text="newer")])
+        document = json.loads(out.read_text(encoding="utf-8"))  # one valid JSON document
+        self.assertEqual(list(document), ["o__r__1", "o__r__2"])  # keyed by id, dataset order, latest kept
+        self.assertEqual(load_records(out)["o__r__2"]["levels"]["L01_min"]["text"], "newer")
+        self.assertIn("\n  ", out.read_text(encoding="utf-8"))  # pretty-printed
+        as_list = self.path.with_name("list.json")
+        as_list.write_text(json.dumps([record(entry(0))]), encoding="utf-8")
+        self.assertEqual(list(load_records(as_list)), ["o__r__1"])
 
     def test_old_gzip_files_are_still_read(self):
         old = self.path.with_name("context_levels.jsonl.gz")

@@ -375,7 +375,7 @@ Known limits:
 **File format (Nov 8):**
 - **Plain JSON Lines** (`context_levels.jsonl`), no longer gzip. Compression saved little: the 2-PR file is 9.1 MB plain against 1.7 MB compressed, and the whole dataset is estimated at about 0.3 GB plain. Plain text is readable with any JSON tool.
 - **Old `.gz` files are still read.**
-- **A committed sample:** `data/aacr_sample/` holds the 2-PR test build (FreeCAD#19411 and #21257, content-defined levels) for reading the format without building it.
+- **A committed sample:** `data/aacr_sample/context_levels.json` holds the 2-PR test build (FreeCAD#19411 and #21257, content-defined levels) as one pretty-printed JSON document (`write_json`), for reading the format without building it.
 
 **Setup checks**, each failing with a fix:
 - git, and `gh` logged in;

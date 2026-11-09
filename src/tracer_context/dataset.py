@@ -24,7 +24,8 @@ Writing appends one synced line per PR, so an interrupted run loses at most the 
 progress; a cut-off last line is detected and repaired on the next start, and the file is
 rewritten in dataset order (latest record per id) at the end of each run. Files written
 before November 8 were gzip-compressed (`context_levels.jsonl.gz`); `read_records` still
-reads them.
+reads them. `write_json` writes a readable copy as one pretty-printed JSON document
+(`.json`, e.g. the committed sample in data/aacr_sample/), which `read_records` also reads.
 """
 from __future__ import annotations
 
@@ -74,11 +75,15 @@ def append_record(path: Path, record: dict) -> None:
 
 def read_records(path: Path) -> tuple[list[dict], bool]:
     """(records in file order, whether the file ended in a cut-off record). Reads plain JSON
-    Lines; a `.gz` path is read as gzip (the format used before November 8)."""
+    Lines; a `.json` path as one JSON document ({id: record} from `write_json`, or a list); a
+    `.gz` path as gzip (the format used before November 8)."""
     records, truncated = [], False
     path = Path(path)
     if not path.exists():
         return records, truncated
+    if path.suffix == ".json":
+        document = json.loads(path.read_text(encoding="utf-8"))
+        return (list(document.values()) if isinstance(document, dict) else list(document)), truncated
     if path.suffix == ".gz":
         try:
             with gzip.open(path, "rt", encoding="utf-8") as handle:
@@ -112,10 +117,14 @@ def load_records(path: Path, status: str | None = "ok") -> dict[str, dict]:
     return {k: v for k, v in latest_by_id(records).items() if status is None or v.get("status") == status}
 
 
-def rewrite(path: Path, records: Iterable[dict]) -> None:
-    """Atomically replace the file with the latest record per id, in dataset order."""
+def _in_dataset_order(records: Iterable[dict]) -> list[dict]:
+    return sorted(latest_by_id(records).values(), key=lambda r: (r.get("index", 0), r["id"]))
+
+
+def _replace_atomically(path: Path, write: Callable) -> None:
+    """Write to a temporary file next to `path`, then swap it in."""
     path = Path(path)
-    ordered = sorted(latest_by_id(records).values(), key=lambda r: (r.get("index", 0), r["id"]))
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=path.name, dir=path.parent)
     os.close(fd)
     umask = os.umask(0)
@@ -123,14 +132,28 @@ def rewrite(path: Path, records: Iterable[dict]) -> None:
     os.chmod(tmp, 0o666 & ~umask)  # mkstemp makes the file private; give it normal permissions
     try:
         with open(tmp, "w", encoding="utf-8") as handle:
-            for record in ordered:
-                handle.write(_line(record))
+            write(handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
     except BaseException:  # e.g. Ctrl+C mid-rewrite: the old file stays, the partial copy goes
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def rewrite(path: Path, records: Iterable[dict]) -> None:
+    """Atomically replace the JSON Lines file with the latest record per id, in dataset order."""
+    ordered = _in_dataset_order(records)
+    _replace_atomically(path, lambda handle: handle.writelines(_line(r) for r in ordered))
+
+
+def write_json(path: Path, records: Iterable[dict]) -> None:
+    """Write the latest record per id as one pretty-printed JSON document, {id: record} in
+    dataset order, e.g. a readable copy of a few PRs. `load_records` reads it back."""
+    ordered = _in_dataset_order(records)
+    document = {r["id"]: r for r in ordered}
+    _replace_atomically(path, lambda handle: handle.write(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"))
 
 
 def level_rows(records: Iterable[dict], include_text: bool = True) -> list[dict]:

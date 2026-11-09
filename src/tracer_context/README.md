@@ -160,7 +160,7 @@ the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
   - 130: interrupted.
 - **Subsets for testing:** `--entries`, `--languages` and `--limit`.
 
-The file is plain JSON Lines; files from before November 8 were gzip-compressed (`.jsonl.gz`) and still load. A committed 2-PR sample is in `data/aacr_sample/` (see its README).
+The file is plain JSON Lines; files from before November 8 were gzip-compressed (`.jsonl.gz`) and still load. A committed 2-PR sample is in `data/aacr_sample/context_levels.json`, one pretty-printed JSON document written by `write_json` (see its README); `load_records` reads it too.
 
 Loading at train time:
 
