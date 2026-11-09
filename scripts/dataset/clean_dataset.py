@@ -9,7 +9,9 @@ By default it deletes:
 It keeps ROOT/positive_samples.json, ROOT/logs and a downloaded tool, so the restart needs no
 downloads.
   --logs     also delete the build logs (ROOT/logs/build_*.log)
-  --all      delete everything the builder wrote in ROOT, including the AACR file and the tool
+  --all      delete everything the builders wrote: in ROOT, including the AACR file and the
+             tool, and in the runner's folder, including its saved results (entries/,
+             summary.csv) and outputs older defaults left there
   --dry-run  only list what would be deleted
   --yes      do not ask before deleting
 
@@ -24,7 +26,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
-import shutil
 import sys
 from pathlib import Path
 
@@ -47,7 +48,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", type=Path, help="Dataset folder given to build_dataset.py, e.g. data/aacr")
     parser.add_argument("--runner-work", type=Path, default=PROJECT_ROOT / pipeline.RUNNER_WORK,
-                        help="The inspection runner's --work folder whose repos/ clones are deleted "
+                        help="The inspection runner's --work folder: its repos/ clones are deleted, and with "
+                             "--all everything it wrote "
                              f"(default {pipeline.RUNNER_WORK})")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--logs", action="store_true", help="Also delete the build logs")
@@ -76,27 +78,30 @@ def main() -> int:
             try:
                 pipeline.clean_targets(root, logs=args.logs, everything=args.all)  # refuses a folder that is not a build
             except pipeline.SetupError:
-                if not pipeline.runner_clones(runner_work):
+                if not pipeline.runner_targets(runner_work, everything=args.all):
                     raise
-                log.info(f"{root} has no dataset build files; only the runner's clones are deleted")
+                log.info(f"{root} has no dataset build files; only the inspection runner's files are deleted")
                 is_build = False
         # No build may start or run on ROOT while cleaning it.
         with pipeline.BuildLock(root, log) if is_build else contextlib.nullcontext():
             targets = pipeline.clean_targets(root, logs=args.logs, everything=args.all) if is_build else []
-            clones = pipeline.runner_clones(runner_work)
-            if clones and not args.dry_run:
+            runner = pipeline.runner_targets(runner_work, everything=args.all)
+            if runner and not args.dry_run:
                 pipeline.require_runner_idle()
-            if not targets and not clones:
-                log.info("nothing to delete (kept: the AACR file, logs and downloaded tool; see --logs and --all)")
+            if not targets and not runner:
+                log.info("nothing to delete (kept: the AACR file, logs, downloaded tool and the runner's results; "
+                         "see --logs and --all)")
                 return 0
             sizes = [pipeline.path_size(path) for path in targets]
-            clone_sizes = [pipeline.path_size(path) for path in clones]
+            runner_sizes = [pipeline.path_size(path) for path in runner]
             verb = "would delete" if args.dry_run else "to delete"
             if targets:
                 show(f"{verb} in", root, targets, sizes)
-            if clones:
-                show(f"{verb}: inspection runner clones in", runner_work / "repos", clones, clone_sizes)
-            total = sum(sizes) + sum(clone_sizes)
+            if runner and args.all:
+                show(f"{verb}: inspection runner output in", runner_work, runner, runner_sizes)
+            elif runner:
+                show(f"{verb}: inspection runner clones in", runner_work / "repos", runner, runner_sizes)
+            total = sum(sizes) + sum(runner_sizes)
             print(f"  {human(total):>9}  total")
             if args.dry_run:
                 return 0
@@ -109,14 +114,15 @@ def main() -> int:
                     return 1
             if targets:
                 pipeline.remove_paths(root, targets)
-            for clone in clones:
-                shutil.rmtree(clone)
-            with contextlib.suppress(OSError):
-                (runner_work / "repos").rmdir()  # only when empty
+            for path in runner:
+                pipeline.delete_path(path)
+            for folder in [runner_work / "repos"] + ([runner_work] if args.all else []):
+                with contextlib.suppress(OSError):
+                    folder.rmdir()  # only when empty
         if args.all and is_build:
             with contextlib.suppress(OSError):
                 root.rmdir()  # empty once the lock is gone
-        log.info(f"deleted {len(targets) + len(clones)} paths ({human(total)})"
+        log.info(f"deleted {len(targets) + len(runner)} paths ({human(total)})"
                  + (f"; the next build_dataset.py run on {root} starts from scratch" if targets else ""))
         return 0
     except pipeline.SetupError as error:

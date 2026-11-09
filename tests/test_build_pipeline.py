@@ -210,15 +210,41 @@ class CleanTests(Temp):
         return self.root.parent / f"{self.root.name}-runner"
 
     def make_runner(self):
-        for clone in ("repos/o__r/.git", "repos/p__q/.git", "repos/not_a_clone", "entries/o__r__1"):
-            (self.runner / clone).mkdir(parents=True)
+        for folder in ("repos/o__r/.git", "repos/p__q/.git", "repos/not_a_clone", "entries/o__r__1", "outcomes/smoke"):
+            (self.runner / folder).mkdir(parents=True)
         (self.runner / "entries/o__r__1/status.json").write_text("{}")
+        (self.runner / "summary.csv").write_text("id\n")
+        (self.runner / pipeline.OUTPUT_FILE).write_text("old test file")  # left by an older default
+        (self.runner / "outcomes/smoke/table.csv").write_text("x\n")
+        (self.runner / "notes.txt").write_text("not the runner's")
         self.addCleanup(shutil.rmtree, self.runner, True)
+
+    def runner_left(self):
+        return sorted(str(p.relative_to(self.runner)) for p in self.runner.rglob("*"))
 
     def test_runner_clones_lists_only_git_folders(self):
         self.make_runner()
         self.assertEqual([p.name for p in pipeline.runner_clones(self.runner)], ["o__r", "p__q"])
         self.assertEqual(pipeline.runner_clones(self.root / "missing"), [])
+
+    def test_runner_targets_by_scope(self):
+        self.make_runner()
+        names = lambda paths: [str(p.relative_to(self.runner)) for p in paths]  # noqa: E731
+        self.assertEqual(names(pipeline.runner_targets(self.runner)), ["repos/o__r", "repos/p__q"])
+        self.assertEqual(names(pipeline.runner_targets(self.runner, everything=True)),
+                         ["context_levels.jsonl.gz", "entries", "outcomes", "repos", "summary.csv"])
+        other = self.root / "not-a-runner-folder"  # outcomes/ alone does not make it the runner's
+        (other / "outcomes").mkdir(parents=True)
+        self.assertEqual(pipeline.runner_targets(other, everything=True), [])
+
+    def test_script_all_deletes_the_runner_output_too(self):
+        self.make_build()
+        self.make_runner()
+        done = self.clean("--yes", "--all")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("inspection runner output", done.stdout)
+        self.assertEqual(self.runner_left(), ["notes.txt"])  # only what is not the runner's
+        self.assertEqual(self.remaining(), ["keep.txt", "logs", "logs/notes.txt"])
 
     def test_script_deletes_runner_clones_and_keeps_its_results(self):
         self.make_runner()
@@ -226,8 +252,10 @@ class CleanTests(Temp):
         done = self.clean("--yes", root=empty_root)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("inspection runner clones", done.stdout)
-        self.assertEqual(sorted(str(p.relative_to(self.runner)) for p in self.runner.rglob("*")),
-                         ["entries", "entries/o__r__1", "entries/o__r__1/status.json", "repos", "repos/not_a_clone"])
+        self.assertEqual(self.runner_left(),
+                         ["context_levels.jsonl.gz", "entries", "entries/o__r__1", "entries/o__r__1/status.json",
+                          "notes.txt", "outcomes", "outcomes/smoke", "outcomes/smoke/table.csv", "repos",
+                          "repos/not_a_clone", "summary.csv"])
         nothing = self.clean("--yes", root=empty_root)
         self.assertEqual((nothing.returncode, "nothing to delete" in nothing.stderr), (0, True))
 

@@ -48,6 +48,9 @@ LOG_DIR = "logs"     # build_<time>.log
 _GITIGNORE_TEXT = "# Dataset build output (scripts/dataset/build_dataset.py): keep out of git.\n*\n"
 # The inspection runner's default work folder (scripts/tracer/run_tracer_batch.py --work), under the project root.
 RUNNER_WORK = Path("data") / "aacr_tracer"
+RUNNER_FILES = ("entries", "repos", "summary.csv")  # what the runner writes there
+# Left there by older defaults: the dataset builder's test file and the outcome table's output.
+RUNNER_LEFTOVERS = (OUTPUT_FILE, "outcomes")
 
 
 class SetupError(RuntimeError):
@@ -373,6 +376,30 @@ def runner_clones(work: Path) -> list[Path]:
     return sorted(p for p in repos.iterdir() if p.is_dir() and not p.is_symlink() and (p / ".git").exists())
 
 
+def runner_targets(work: Path, everything: bool = False) -> list[Path]:
+    """What scripts/dataset/clean_dataset.py deletes in the inspection runner's work folder: its
+    clones, or with `everything` all it wrote (results, summary, clones) plus what older
+    defaults left there. Only those names, and only in a folder holding runner output."""
+    work = Path(work)
+    if not everything:
+        return runner_clones(work)
+    if not work.is_dir() or not any((work / name).exists() for name in RUNNER_FILES):
+        return []
+    names = [*RUNNER_FILES, *RUNNER_LEFTOVERS]
+    found = [work / name for name in names if (work / name).exists() or (work / name).is_symlink()]
+    found += work.glob(f"{OUTPUT_FILE}?*")  # an interrupted rewrite's partial copy
+    return sorted(set(found))
+
+
+def delete_path(path: Path) -> None:
+    """A folder recursively; a file or symlink itself (a symlinked folder is never followed)."""
+    path = Path(path)
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
 def path_size(path: Path) -> int:
     """Bytes under path, without following symlinks."""
     path = Path(path)
@@ -393,10 +420,7 @@ def remove_paths(root: Path, paths: list[Path]) -> None:
     under root that this left empty, and root itself if it ends up empty."""
     root = Path(root)
     for path in paths:
-        if path.is_symlink() or path.is_file():
-            path.unlink(missing_ok=True)
-        elif path.is_dir():
-            shutil.rmtree(path)
+        delete_path(path)
     for folder in (root / WORK_DIR, root / LOG_DIR, root):
         try:
             folder.rmdir()  # only succeeds when empty

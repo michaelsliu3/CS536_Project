@@ -146,7 +146,8 @@ the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
 - **Resuming:** re-running the same command skips PRs already built with the same commits, fetch method (`FETCH_VERSION`), tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). Ctrl+C, `kill -INT` or `kill -TERM` stop cleanly with exit code 130, and a crash loses at most the PR in progress. After changing builder code without bumping `FETCH_VERSION`, `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`.
 - **Starting over:** `scripts/dataset/clean_dataset.py ROOT` deletes what the build made: the records file, leftover rewrite files, and the clones and caches in `.work/`.
   - It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/` (`--runner-work` for another folder), but keeps that runner's saved results.
-  - It keeps `positive_samples.json`, `logs/` and a downloaded tool, so the restart needs no downloads. `--logs` also deletes the logs; `--all` deletes everything the builder wrote in `ROOT`.
+  - It keeps `positive_samples.json`, `logs/` and a downloaded tool, so the restart needs no downloads. `--logs` also deletes the logs.
+  - `--all` deletes everything the builders wrote: all of the above in `ROOT`, and in the runner's folder its saved results (`entries/`, `summary.csv`) plus outputs older defaults left there (`context_levels.jsonl.gz`, `outcomes/`). Other files are left alone.
   - It lists each path with its size and asks first (`--yes` skips the question, `--dry-run` only lists).
   - It refuses while a build runs on `ROOT` or the inspection runner runs, and refuses a `ROOT` with no build files unless there are runner clones to delete.
 - **Exit codes:**
