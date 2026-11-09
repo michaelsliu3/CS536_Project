@@ -2,7 +2,11 @@
 
 **Revised November 7, 2026. Status: research design, not an implemented or validated system.**
 
-**Update, November 8, 2026:** candidate gathering is now implemented with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the context levels and the batch runner, plus what was measured on three AACR entries. Section 8.5 records the decisions on the output side, each with the options not chosen: the reviewer, its fixed prompt, the scoring metric, which references count, score granularity, and the offline outcome table. No reviewer, scorer or selector has been run or built; everything outside Section 5.5 remains a design.
+**Update, November 8, 2026:**
+- **Candidate gathering is implemented** with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the content-defined context levels, the one-command dataset build and what was measured on sample PRs.
+- **Section 8.5 records the output-side decisions,** each with the options not chosen: the reviewer, its fixed prompt, the scoring metric, which references count, score granularity, and the offline outcome table.
+- **The outcome-table code is built** but has only been smoke-tested with a 0.8B model. No Qwen3.8-27B review, real judge run or selector exists yet.
+- **Diagrams:** Section 2 opens with flow diagrams of the current architecture.
 
 This revision records the discussion moving from ContextCRBench merge-status prediction to repository-aware **review generation**. Our intended product is a context-selection component: given a diff and a reproducibly gathered pool of repository evidence, choose a small subset for a frozen reviewer. The reviewer produces useful findings; the selector does not decide whether a PR should merge.
 
@@ -56,6 +60,98 @@ flowchart LR
 The diff is mandatory input. Selection concerns additional evidence: related functions, callers/callees, imported definitions, classes, tests, configuration, PR descriptions, and linked issue information when available. A selector may choose no extra evidence. It selects text already present in the candidate pool rather than inventing a summary or rewriting code.
 
 For a real application, this could sit before a larger remote reviewer. A smaller local selector may make that remote call cheaper. The research experiment should first use a reproducible frozen reviewer so that differences can be attributed to context rather than changing model behavior. Supporting a commercial reviewer later is a deployment possibility, not required for the initial experiment.
+
+### Architecture at a glance (as of November 8, 2026)
+
+Small overview diagrams of the design as built and planned. The first selector picks one of ten nested context levels per PR. Details are in the sections named in each caption.
+
+**1. The whole pipeline.** Each AACR-Bench PR becomes ten review inputs. Each input is reviewed and scored once, offline, and a selector learns which level to use (Sections 5.5, 8.5, 9.3).
+
+```mermaid
+flowchart LR
+    A["AACR-Bench PR"] --> B["Dataset build: 10 context levels"]
+    B --> C["Frozen reviewer: one call per level"]
+    C --> D["AACR judge: score vs reference comments"]
+    D --> E["Outcome table: score and tokens per (PR, level)"]
+    E --> F["Selector: pick one level per PR"]
+```
+
+**2. Building one PR** (built; `scripts/dataset/build_dataset.py`, Sections 5.5.6–5.5.7). No LLM is used.
+
+```mermaid
+flowchart LR
+    A["Merge base from GitHub"] --> B["Fetch and check out the reviewed commit"]
+    B --> C["Trace with codebase-memory-mcp"]
+    C --> D["Pack the 10 levels"]
+    D --> E["One line in context_levels.jsonl"]
+```
+
+**3. What one level contains** (built, Section 5.5.7). There is no per-level budget: a level holds everything its kinds and item limits allow, up to one 256,339-token cap on the whole input.
+
+```mermaid
+flowchart LR
+    A["Previous level's text"] --> B["Add this level's kind of context"]
+    B --> C["Stop at the item limits or the input cap"]
+    C --> D["Level text: PR text + diff + context"]
+```
+
+**4. The ten levels** (Section 5.5.3). Each level includes everything in the one before it.
+
+```mermaid
+flowchart LR
+    L1["L01: PR text + diff"] --> L2["L02: + changed functions"]
+    L2 --> L3["L03: + changed files"]
+    L3 --> L4["L04: + callees"]
+    L4 --> L5["L05: + callers"]
+```
+
+```mermaid
+flowchart LR
+    L6["L06: + tests"] --> L7["L07: + guide files, text search"]
+    L7 --> L8["L08: callers and callees, 2 hops"]
+    L8 --> L9["L09: + docs, more tests"]
+    L9 --> L10["L10: everything, 3 hops"]
+```
+
+**5. The outcome table** (code ready, not yet run at scale; Section 8.5). It covers all 196 × 10 cells, and a level identical to its parent is reviewed only once.
+
+```mermaid
+flowchart LR
+    A["Level text"] --> B["Qwen3.8-27B with the Codex /review rubric"]
+    B --> C["JSON findings"]
+    C --> D["AACR judge vs 1,506 references"]
+    D --> E["Recall, precision, tokens"]
+```
+
+**6. Training and evaluating the selector** (planned, Section 9.3). It uses input-side features only, and evaluation is a lookup in the outcome table.
+
+```mermaid
+flowchart LR
+    A["Input-side features per PR"] --> B["Classical model, repository-grouped CV"]
+    B --> C["Chosen level"]
+    C --> D["Look up its score and tokens"]
+    D --> E["Compare with fixed level, random, oracle"]
+```
+
+**7. Next step: item-level selection** (planned, Section 9.3). It chooses individual traced items instead of a whole level, so it needs live reviews.
+
+```mermaid
+flowchart LR
+    A["Traced items for a PR"] --> B["Selector picks items"]
+    B --> C["Reviewer runs on the selection"]
+    C --> D["AACR judge scores it"]
+```
+
+**8. Where the code lives.**
+
+```mermaid
+flowchart LR
+    A["data/build_dataset.sh"] --> B["src/tracer_context/"]
+    B --> C["data/aacr/context_levels.jsonl"]
+    C --> D["notebooks/outcome_table.ipynb"]
+    D --> E["src/review_outcomes/"]
+    E --> F["outcomes: table.csv"]
+```
 
 ### Three different meanings of context
 
