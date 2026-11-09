@@ -14,7 +14,7 @@ input:
   strip_html_comments: true
 
 tracer:
-  binary: data/codebase_memory_trial/bin/codebase-memory-mcp
+  binary: data/tools/codebase-memory-mcp-0.12.1/codebase-memory-mcp
   workers: 4                    # pinned: 1 worker builds a slightly different graph than 2+
   index_mode: full
   callers:

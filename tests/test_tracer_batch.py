@@ -4,9 +4,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from src.tracer_context.aacr import (
-    BASE_BRANCH, entry_checks, entry_id, load_entries, parse_pr_url, prepare_checkout, select_entries,
+    BASE_BRANCH, CommitGoneError, FetchError, entry_checks, entry_id, github_merge_base, load_entries,
+    parse_pr_url, prepare_checkout, select_entries,
 )
 from src.tracer_context.cbm import text_hits
 
@@ -87,16 +89,22 @@ class CheckoutTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def checkout(self):
-        return prepare_checkout(self.repos, self.record, depth=1, max_depth=64, remote_url=f"file://{self.origin}")
+    def checkout(self, merge_base=None):
+        merge_base = merge_base or git(self.origin, "merge-base", self.source, self.target)  # what GitHub reports
+        return prepare_checkout(self.repos, self.record, merge_base, depth=1, max_depth=64,
+                                remote_url=f"file://{self.origin}")
 
-    def test_fetches_both_commits_and_deepens_to_the_merge_base(self):
+    def test_uses_the_merge_base_and_deepens_the_target_to_reach_it(self):
         info = self.checkout()
         repo = Path(info["repo"])
         self.assertEqual(info["merge_base"], self.fork_point)
         self.assertTrue(any(step.startswith("deepen") for step in info["fetch_log"]))
         self.assertEqual(git(repo, "rev-parse", "HEAD"), self.target)
-        self.assertEqual(git(repo, "rev-parse", BASE_BRANCH), self.source)
+        self.assertEqual(git(repo, "rev-parse", BASE_BRANCH), self.fork_point)
+        self.assertEqual(git(repo, "merge-base", BASE_BRANCH, "HEAD"), self.fork_point)  # what the tracer computes
+        source_fetched = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{self.source}^{{commit}}"],
+                                        capture_output=True).returncode == 0
+        self.assertFalse(source_fetched)  # main's newer history is never needed
         checks = entry_checks(repo, self.record, info["merge_base"])
         self.assertEqual(checks, {"diff_files": 1, "diff_lines": 2, "change_line_count": 2, "diff_lines_match": True,
                                   "comment_lines": {"ok": 3, "missing_file": 1, "out_of_range": 1,
@@ -112,9 +120,72 @@ class CheckoutTests(unittest.TestCase):
         self.assertFalse((repo / "stray.txt").exists())
 
     def test_missing_commit_is_reported(self):
+        merge_base = git(self.origin, "merge-base", self.source, self.target)
         self.record["target_commit"] = "0" * 40
-        with self.assertRaisesRegex(Exception, "target_commit"):
-            self.checkout()
+        with self.assertRaisesRegex(FetchError, "target_commit"):
+            self.checkout(merge_base)
+
+    def test_merge_base_the_target_cannot_reach_is_an_error(self):
+        with self.assertRaisesRegex(FetchError, "not an ancestor"):
+            self.checkout(merge_base=self.source)  # main's tip is not in the PR's history
+        with self.assertRaisesRegex(FetchError, "not a commit id"):
+            self.checkout(merge_base="main")
+
+    def test_stale_common_ancestor_of_a_shallow_clone_is_not_used(self):
+        """FreeCAD#20612: main merged a branch that forked before the PR did. A shallow clone with
+        both tips then finds that older fork as their merge base, and the diff gains main's commits."""
+        origin = Path(self._tmp.name) / "origin2"
+        origin.mkdir()
+        git(origin, "init", "-q", "-b", "main")
+        git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+        old = commit(origin, "a.py", "a\n", "A")
+        git(origin, "checkout", "-q", "-b", "side")
+        commit(origin, "side.txt", "s\n", "side")
+        git(origin, "checkout", "-q", "main")
+        fork = commit(origin, "f.txt", "f\n", "F, where the PR forks")
+        for i in range(5):
+            commit(origin, "main.txt", f"{i}\n", f"main {i}")
+        git(origin, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+        source = git(origin, "rev-parse", "HEAD")
+        git(origin, "checkout", "-q", "-b", "pr", fork)
+        commit(origin, "pr.txt", "1\n", "pr 1")
+        target = commit(origin, "pr.txt", "1\n2\n", "pr 2")
+        record = {"githubPrUrl": "https://github.com/o/r2/pull/1", "source_commit": source, "target_commit": target,
+                  "change_line_count": 2, "comments": []}
+        remote = f"file://{origin}"
+
+        stale = Path(self._tmp.name) / "stale"  # the old way: both tips 4 commits deep, then git merge-base
+        stale.mkdir()
+        git(stale, "init", "-q")
+        git(stale, "fetch", "-q", "--depth=4", remote, source, target)
+        self.assertEqual(git(stale, "merge-base", source, target), old)
+
+        info = prepare_checkout(self.repos, record, git(origin, "merge-base", source, target), depth=4,
+                                max_depth=64, remote_url=remote)
+        self.assertEqual(info["merge_base"], fork)
+        checks = entry_checks(Path(info["repo"]), record, info["merge_base"])
+        self.assertEqual((checks["diff_files"], checks["diff_lines"]), (1, 2))  # only pr.txt
+
+
+class GithubMergeBaseTests(unittest.TestCase):
+    def call(self, returncode, stdout, stderr=""):
+        done = subprocess.CompletedProcess([], returncode, stdout, stderr)
+        with mock.patch("src.tracer_context.aacr.subprocess.run", return_value=done) as run:
+            return github_merge_base("https://github.com/o/r/pull/7", "a" * 40, "b" * 40), run
+
+    def test_reads_the_compare_api(self):
+        sha, run = self.call(0, "c" * 40 + "\n")
+        self.assertEqual(sha, "c" * 40)
+        self.assertIn(f"repos/o/r/compare/{'a' * 40}...{'b' * 40}?per_page=1", run.call_args.args[0])
+
+    def test_failures_are_fetch_errors(self):
+        with self.assertRaisesRegex(CommitGoneError, "force-pushed away"):
+            self.call(1, "", "gh: Not Found (HTTP 404)")
+        with self.assertRaisesRegex(FetchError, "failed: gh: Bad Gateway") as caught:
+            self.call(1, "", "gh: Bad Gateway (HTTP 502)")
+        self.assertNotIsInstance(caught.exception, CommitGoneError)  # may work on a retry
+        with self.assertRaisesRegex(FetchError, "no merge base"):
+            self.call(0, "null\n")
 
 
 class TextHitsTests(unittest.TestCase):

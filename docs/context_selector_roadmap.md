@@ -244,9 +244,9 @@ The tracer is [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-
 #### 5.5.2 Pipeline (code in `src/tracer_context/`, scripts in `scripts/`)
 
 1. **Checkout** (`aacr.py`):
-   - Fetch only `source_commit` and `target_commit` into one clone per repository.
-   - Deepen history until they share a merge base, falling back to `refs/pull/<n>/head` for force-pushed commits.
-   - Check out `target_commit` clean. The diff is `source...target`, from the merge base.
+   - Ask GitHub's compare API for the merge base of `source...target`. Computing it locally was wrong in shallow clones (Section 5.5.6, fixed Nov 8).
+   - Fetch `target_commit` (falling back to `refs/pull/<n>/head` for force-pushed commits) and the merge base into one clone per repository. Deepen the target's history until it reaches the merge base. `source_commit` itself is not needed.
+   - Check out `target_commit` clean, with branch `aacr-base` at the merge base. The diff is `source...target`, from the merge base.
 2. **Trace, once per PR** (`cbm.py`):
    - **Changed symbols:** found from the exact changed lines.
    - **Inbound walk:** `CALLS, USAGE, TESTS, MENTIONS, DEFINES, REFERENCES_FILE`, depth 3.
@@ -386,7 +386,7 @@ Known limits:
 - **Low disk:** below 10 GB free, the build stops cleanly before the next repository.
 - **One build per folder:** a lock file stops a second build on the same folder; a lock left by a crashed build is taken over.
 - **Logs:** progress goes to the terminal and to `ROOT/logs/build_<time>.log`, with counts and a time estimate. Failure tracebacks go to the log.
-- **Resuming:** re-running the same command skips PRs already built with the same commits, tool, trace and render versions, level configs and tokenizer, and retries failed ones. Ctrl+C or `kill` stop cleanly.
+- **Resuming:** re-running the same command skips PRs already built with the same commits, fetch method, tool, trace and render versions, level configs and tokenizer, and retries failed ones. Ctrl+C or `kill` stop cleanly. `scripts/clean_dataset.py ROOT` starts over instead.
 - **Kept out of git:** `*.log` is git-ignored, and a root inside the repository gets its own `.gitignore` unless it is already ignored.
 - **No LLM:** it runs on a laptop.
 
@@ -431,6 +431,22 @@ The tracer now also records how long each step takes.
   2. keep `full` and build the whole dataset once, in one folder.
 
   This is undecided (Section 14).
+
+**Wrong merge bases in the first FreeCAD test, fixed (Nov 8):**
+- **Found:** a test build of the first FreeCAD PRs gave 2 of 4 PRs the wrong merge base:
+
+  | PR | GitHub's diff | Our diff |
+  |---|---|---|
+  | FreeCAD#19411 | 35 files, 878 lines | 52 files, 1,686 lines |
+  | FreeCAD#20612 | 4 files, 73 lines | 195 files, 7,104 lines |
+
+  On #20612, `L01` alone was 141,090 tokens and `L10` 269,093, above Qwen3.8-27B's 262,144-token context. The tool also hit its limit on impacted symbols.
+- **Cause:** the checkout fetched 50 commits of each tip and ran `git merge-base` locally. When the real merge base was further back (366 and 436 commits behind `main`), git found an older common ancestor through a merge on `main`. The diff then included unrelated `main` commits. A unit test reproduces this.
+- **Fix:** the merge base now comes from GitHub's compare API, which uses the same `source...target` convention as AACR. The target's history is deepened until it reaches that commit, and `aacr-base` points at it, so the tracer's own merge base is the same commit. On both PRs the diff now matches GitHub exactly.
+- **Rebuilds:** the fetch method is part of the resume key (`FETCH_VERSION = 2`), so a resumed build rebuilds PRs made the old way.
+- **Across all 196 PRs:** 57 are more than 50 commits behind their base, so the old code could have gone wrong on any of them.
+- **11 reviewed commits are gone from GitHub.** Their reviewed version was force-pushed away. Neither the API nor `git fetch` can get them: ComfyUI#7952, #9560; node#56185; uv#11088; ClickHouse#85266, #74070; keycloak#41672, #37465, #35645, #36457, #37504. AACR's own evaluation fetches commits the same way. These are recorded as failed once, without retries (`retryable: false`). That leaves **185 buildable PRs**.
+- **Starting over:** `scripts/clean_dataset.py ROOT` deletes the built records, leftover rewrite files and the work folder's clones and caches. It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/`, but keeps that runner's saved results. It keeps the AACR file, logs and downloaded tool. `--logs` and `--all` delete more. It lists every path with its size and asks first. It refuses while a build or the inspection runner runs, and refuses a folder with no build files unless there are runner clones to delete.
 
 **Next:** settle the index mode, then run `scripts/build_dataset.py data/aacr` on the laptop. Then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
 
@@ -869,7 +885,7 @@ Options considered and not chosen:
 1. reviews it with the frozen reviewer (system: Codex rubric; user: request + `context.md`);
 2. parses the JSON findings;
 3. scores them with a port of AACR's judge;
-4. writes `data/aacr_tracer/outcomes/<run>/`:
+4. writes `data/aacr/outcomes/<run>/`:
    - `reviews/` and `judgments/` per cell;
    - `table.csv` per (PR, level);
    - `coverage.csv` per reference and level;

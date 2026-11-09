@@ -40,6 +40,15 @@ TOOL_ASSETS = {
 TOKENIZER_FILES = ["tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "chat_template.jinja",
                    "config.json"]
 
+# What the builder writes in its root folder.
+OUTPUT_FILE = "context_levels.jsonl.gz"
+LOCK_FILE = ".build.lock"
+WORK_DIR = ".work"   # repos/ (clones), tmp/ (tool caches), tools/ (a downloaded tool)
+LOG_DIR = "logs"     # build_<time>.log
+_GITIGNORE_TEXT = "# Dataset build output (scripts/build_dataset.py): keep out of git.\n*\n"
+# The inspection runner's default work folder (scripts/run_tracer_batch.py --work), under the project root.
+RUNNER_WORK = Path("data") / "aacr_tracer"
+
 
 class SetupError(RuntimeError):
     """A prerequisite is missing; the message says how to fix it."""
@@ -286,6 +295,15 @@ def require_tool_idle() -> None:
                          + "\n  ".join(running[:5]))
 
 
+def require_runner_idle() -> None:
+    """The inspection runner's clones must not be deleted while it uses them."""
+    result = subprocess.run(["pgrep", "-fl", "run_tracer_batch.py"], capture_output=True, text=True)
+    running = [line for line in result.stdout.splitlines() if line.strip()]
+    if running:
+        raise SetupError("scripts/run_tracer_batch.py is running; stop it before deleting its clones:\n  "
+                         + "\n  ".join(running[:5]))
+
+
 def free_gb(path: Path) -> float:
     return shutil.disk_usage(path).free / 1e9
 
@@ -303,12 +321,87 @@ def ensure_ignored(root: Path, project_root: Path, logger: logging.Logger) -> No
     root, project_root = Path(root).resolve(), Path(project_root).resolve()
     if not root.is_relative_to(project_root):
         return
-    probe = root / "context_levels.jsonl.gz"
+    probe = root / OUTPUT_FILE
     ignored = subprocess.run(["git", "-C", str(project_root), "check-ignore", "-q", str(probe)]).returncode == 0
     if not ignored:
-        (root / ".gitignore").write_text("# Dataset build output (scripts/build_dataset.py): keep out of git.\n*\n",
-                                         encoding="utf-8")
+        (root / ".gitignore").write_text(_GITIGNORE_TEXT, encoding="utf-8")
         logger.info(f"{root} was not ignored by git; wrote {root / '.gitignore'}")
+
+
+# ---------- cleaning a build (scripts/clean_dataset.py) ----------
+
+def clean_targets(root: Path, logs: bool = False, everything: bool = False) -> list[Path]:
+    """The paths scripts/clean_dataset.py deletes so the next build starts over.
+
+    Default: the built records (OUTPUT_FILE and leftover rewrite files) and the work folder's
+    clones and tool caches; the AACR file, the logs and a downloaded tool stay, so a restart
+    needs no downloads. `logs` adds the build logs. `everything` adds all else the builder
+    wrote: the AACR file, the downloaded tool, the logs and its .gitignore. Only the builder's
+    own file names are listed. A folder with no build files raises SetupError, so a mistyped
+    root deletes nothing."""
+    root = Path(root)
+    work, log_dir = root / WORK_DIR, root / LOG_DIR
+    build_logs = sorted(log_dir.glob("build_*.log")) if log_dir.is_dir() else []
+    outputs = sorted(root.glob(f"{OUTPUT_FILE}*"))
+    markers = outputs + build_logs + [p for p in (work, root / LOCK_FILE) if p.exists() or p.is_symlink()]
+    if everything:
+        markers += [p for p in (root / AACR_FILE,) if p.exists()]
+    if not root.is_dir() or not markers:
+        raise SetupError(f"{root} has no dataset build files ({OUTPUT_FILE}, {WORK_DIR}/, {LOG_DIR}/build_*.log); "
+                         "nothing deleted")
+    targets = list(outputs)
+    if everything:
+        targets += [work] if work.exists() or work.is_symlink() else []
+    else:
+        targets += [p for p in (work / "repos", work / "tmp") if p.exists() or p.is_symlink()]
+    if logs or everything:
+        targets += build_logs
+    if everything:
+        targets += [p for p in (root / AACR_FILE,) if p.exists() or p.is_symlink()]
+        ignore = root / ".gitignore"
+        if ignore.is_file() and ignore.read_text(encoding="utf-8", errors="replace") == _GITIGNORE_TEXT:
+            targets.append(ignore)  # only the one the builder wrote
+    return targets
+
+
+def runner_clones(work: Path) -> list[Path]:
+    """Repository clones the inspection runner downloaded into <work>/repos: folders holding
+    .git, never followed through a symlink. Its saved results in <work>/entries are not listed."""
+    repos = Path(work) / "repos"
+    if not repos.is_dir():
+        return []
+    return sorted(p for p in repos.iterdir() if p.is_dir() and not p.is_symlink() and (p / ".git").exists())
+
+
+def path_size(path: Path) -> int:
+    """Bytes under path, without following symlinks."""
+    path = Path(path)
+    if path.is_symlink() or not path.is_dir():
+        return path.lstat().st_size if path.exists() or path.is_symlink() else 0
+    total = 0
+    for folder, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(folder, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def remove_paths(root: Path, paths: list[Path]) -> None:
+    """Delete the paths (folders recursively, symlinks themselves), then the builder's folders
+    under root that this left empty, and root itself if it ends up empty."""
+    root = Path(root)
+    for path in paths:
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path)
+    for folder in (root / WORK_DIR, root / LOG_DIR, root):
+        try:
+            folder.rmdir()  # only succeeds when empty
+        except OSError:
+            pass
 
 
 def wait_seconds(seconds: float) -> None:  # separate so tests can replace it

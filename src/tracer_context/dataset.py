@@ -8,7 +8,8 @@ review input text, so training and the outcome table load a single file:
     rows = level_rows(records.values())     # one row per (entry, level), with the text
 
 Record fields (format FORMAT):
-  id, index, url, repo, language, source_commit, target_commit, merge_base, status
+  id, index, url, repo, language, source_commit, target_commit, merge_base (GitHub's merge base
+  for source...target, where the diff starts), fetch_log, status
   ("ok"/"failed"), failed_stage, error, build (versions, config hashes, the resume key),
   pr (title, body, edit times), stats (input-side counts usable as selector features),
   known_paths (files named in the trace, for review path normalization), warnings,
@@ -37,7 +38,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from src.tracer_context.aacr import (
-    BASE_BRANCH, commit_time, edited_after, entry_checks, fetch_pr_text, parse_pr_url, prepare_checkout,
+    BASE_BRANCH, FETCH_VERSION, CommitGoneError, commit_time, edited_after, entry_checks, fetch_pr_text,
+    github_merge_base, parse_pr_url, prepare_checkout,
 )
 from src.tracer_context.build import RENDER_VERSION, build_context, config_sha256, nesting_check
 from src.tracer_context.cbm import TRACE_FORMAT, trace, tracer_settings
@@ -95,10 +97,14 @@ def rewrite(path: Path, records: Iterable[dict]) -> None:
     ordered = sorted(latest_by_id(records).values(), key=lambda r: (r.get("index", 0), r["id"]))
     fd, tmp = tempfile.mkstemp(prefix=path.name, dir=path.parent)
     os.close(fd)
-    with gzip.open(tmp, "wt", encoding="utf-8") as handle:
-        for record in ordered:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
-    os.replace(tmp, path)
+    try:
+        with gzip.open(tmp, "wt", encoding="utf-8") as handle:
+            for record in ordered:
+                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        os.replace(tmp, path)
+    except BaseException:  # e.g. Ctrl+C mid-rewrite: the old file stays, the partial copy goes
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def level_rows(records: Iterable[dict], include_text: bool = True) -> list[dict]:
@@ -118,12 +124,12 @@ def level_rows(records: Iterable[dict], include_text: bool = True) -> list[dict]
 # ---------- building one record ----------
 
 def build_key(configs: dict, tool_version: str, tokenizers: dict, record: dict) -> str:
-    """Everything that changes a PR's contexts: inputs, tool, trace and render versions,
-    every level config and tokenizer. (After changing builder code without bumping
-    RENDER_VERSION or TRACE_FORMAT, rebuild with --force.)"""
+    """Everything that changes a PR's contexts: inputs, how the checkout finds the merge base,
+    tool, trace and render versions, every level config and tokenizer. (After changing builder
+    code without bumping FETCH_VERSION, RENDER_VERSION or TRACE_FORMAT, rebuild with --force.)"""
     first = next(iter(configs.values()))
     key = {"source": record["source_commit"], "target": record["target_commit"], "url": record["githubPrUrl"],
-           "tool": tool_version, "trace_format": TRACE_FORMAT, "render": RENDER_VERSION,
+           "fetch": FETCH_VERSION, "tool": tool_version, "trace_format": TRACE_FORMAT, "render": RENDER_VERSION,
            "tracer": tracer_settings(first["tracer"]),
            "levels": [[name, config_sha256(cfg)] for name, cfg in configs.items()],
            "tokenizers": sorted(tokenizers.values()), "format": FORMAT}
@@ -184,13 +190,15 @@ def process_entry(entry: dict, configs: dict, counters: dict, *, binary: Path, t
            "repo": f"{owner}/{name}", "language": record["project_main_language"],
            "source_commit": record["source_commit"], "target_commit": record["target_commit"],
            "status": "running", "seconds": {},
-           "build": {"key": key, "format": FORMAT, "tool_version": tool_version, "trace_format": TRACE_FORMAT,
-                     "render_version": RENDER_VERSION,
+           "build": {"key": key, "format": FORMAT, "fetch_version": FETCH_VERSION, "tool_version": tool_version,
+                     "trace_format": TRACE_FORMAT, "render_version": RENDER_VERSION,
                      "tokenizers": sorted({label for _, label in counters.values()}),
                      "levels": {n: config_sha256(c) for n, c in configs.items()}, **(extra_build or {})}}
-    stage, started = "checkout", time.monotonic()
+    stage, started = "merge_base", time.monotonic()
     try:
-        checkout = prepare_checkout(repos_dir, record, depth=fetch_depth, max_depth=max_depth)
+        merge_base = github_merge_base(record["githubPrUrl"], record["source_commit"], record["target_commit"])
+        stage = "checkout"
+        checkout = prepare_checkout(repos_dir, record, merge_base, depth=fetch_depth, max_depth=max_depth)
         repo = Path(checkout["repo"])
         out.update(merge_base=checkout["merge_base"], fetch_log=checkout["fetch_log"])
         out["seconds"]["checkout"] = round(time.monotonic() - started, 1)
@@ -235,7 +243,7 @@ def process_entry(entry: dict, configs: dict, counters: dict, *, binary: Path, t
         raise
     except Exception as error:  # noqa: BLE001 - recorded; the run continues with the next entry
         out.update(status="failed", failed_stage=stage, error=f"{type(error).__name__}: {error}"[:2000],
-                   traceback=traceback.format_exc()[-4000:])
+                   traceback=traceback.format_exc()[-4000:], retryable=not isinstance(error, CommitGoneError))
     return out
 
 
@@ -273,6 +281,7 @@ def run(entries: list[dict], process: Callable[[dict], dict], key_of: Callable[[
     - Resumes: entries whose latest record is ok with the current build key are skipped.
     - Retries: a failed entry is retried up to `retries` times after `retry_wait` seconds
       (doubling); a failure while fetching first deletes the clone, which may be half-written.
+      A record with `retryable: false` (its commits are gone from GitHub) is not retried.
     - `before_repo(name, group)` runs before each repository with work to do; it may raise
       StopBuild to stop cleanly. The output file is tidied up however the run ends.
     """
@@ -299,7 +308,7 @@ def run(entries: list[dict], process: Callable[[dict], dict], key_of: Callable[[
                     started = time.monotonic()
                     record = process(entry)
                     for attempt in range(1, retries + 1):
-                        if record["status"] == "ok":
+                        if record["status"] == "ok" or record.get("retryable") is False:
                             break
                         if on_retry:
                             on_retry(record, attempt)

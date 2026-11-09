@@ -32,15 +32,16 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.tracer_context.aacr import (  # noqa: E402
-    BASE_BRANCH, commit_time, edited_after, entry_checks, fetch_pr_text, file_sha256, load_entries,
-    prepare_checkout, select_entries,
+    BASE_BRANCH, FETCH_VERSION, commit_time, edited_after, entry_checks, fetch_pr_text, file_sha256,
+    github_merge_base, load_entries, prepare_checkout, select_entries,
 )
 from src.tracer_context.build import RENDER_VERSION, build_context, config_sha256, nesting_check  # noqa: E402
 from src.tracer_context.cbm import TRACE_FORMAT, tracer_settings, trace  # noqa: E402
+from src.tracer_context.pipeline import RUNNER_WORK  # noqa: E402
 from src.tracer_context.runtime import load_level_configs, make_counter, write_json  # noqa: E402
 
-DEFAULT_DATASET = PROJECT_ROOT / "data" / "codebase_memory_trial" / "aacr" / "positive_samples.json"
-DEFAULT_WORK = PROJECT_ROOT / "data" / "aacr_tracer"
+DEFAULT_DATASET = PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
+DEFAULT_WORK = PROJECT_ROOT / RUNNER_WORK  # scripts/clean_dataset.py also deletes its repos/
 
 
 def read_json(path: Path):
@@ -51,8 +52,8 @@ def read_json(path: Path):
 
 
 def trace_key(settings: dict, tool_version: str, record: dict) -> str:
-    key = {"tracer": settings, "tool": tool_version, "format": TRACE_FORMAT, "source": record["source_commit"],
-           "target": record["target_commit"]}
+    key = {"tracer": settings, "tool": tool_version, "format": TRACE_FORMAT, "fetch": FETCH_VERSION,
+           "source": record["source_commit"], "target": record["target_commit"]}
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -70,10 +71,13 @@ def run_entry(entry, configs, counters, args, binary, tool_version, dataset_sha)
               "language": record["project_main_language"], "source_commit": record["source_commit"],
               "target_commit": record["target_commit"], "dataset_sha256": dataset_sha,
               "tool_version": tool_version, "trace_key": key, "status": "running", "seconds": {}}
-    stage = "checkout"
+    stage = "merge_base"
     try:
         started = time.monotonic()
-        checkout = prepare_checkout(args.work / "repos", record, depth=args.fetch_depth, max_depth=args.max_depth)
+        merge_base = github_merge_base(record["githubPrUrl"], record["source_commit"], record["target_commit"])
+        stage = "checkout"
+        checkout = prepare_checkout(args.work / "repos", record, merge_base, depth=args.fetch_depth,
+                                    max_depth=args.max_depth)
         repo = Path(checkout["repo"])
         status.update(merge_base=checkout["merge_base"], fetch_log=checkout["fetch_log"])
         status["seconds"]["checkout"] = round(time.monotonic() - started, 1)

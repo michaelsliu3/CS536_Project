@@ -15,15 +15,17 @@ What a run does:
      the dataset file, the codebase-memory-mcp tool (pinned build downloaded and verified if
      missing), the reviewer tokenizer (tokenizer files downloaded if missing), no other tool
      session running, free disk space, and the level configs.
-  2. For each PR, grouped by repository: fetch the two commits, run the checks, fetch the PR
+  2. For each PR, grouped by repository: get the PR diff's merge base from GitHub, fetch the
+     reviewed commit and enough history to reach it, run the checks, fetch the PR
      title/description, trace once, pack all levels, append one line, and delete the
      repository's clone after its last PR. A failed PR is retried (--retries) and then
      recorded with its stage and error; the build continues.
   3. A summary of built, skipped and failed PRs.
 
 Re-running the same command continues where it stopped: PRs already built with the same
-inputs, tool, configs and tokenizer are skipped, and failed ones are retried. Stop with
-Ctrl+C (or `kill -INT <pid>`); the file is left consistent.
+inputs, fetch method, tool, configs and tokenizer are skipped, and failed ones are retried.
+Stop with Ctrl+C (or `kill -INT <pid>`); the file is left consistent. To start over instead,
+run scripts/clean_dataset.py ROOT.
 
 Exit codes: 0 all PRs built; 2 finished with some failed PRs; 1 setup failed or the build
 crashed; 3 stopped for low disk space; 130 interrupted.
@@ -47,7 +49,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.tracer_context import dataset, pipeline  # noqa: E402
 from src.tracer_context.aacr import file_sha256, load_entries, select_entries  # noqa: E402
 
-OUTPUT_NAME = "context_levels.jsonl.gz"
+OUTPUT_NAME = pipeline.OUTPUT_FILE
 
 
 def parse_args():

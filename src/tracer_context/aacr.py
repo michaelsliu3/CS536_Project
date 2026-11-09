@@ -15,12 +15,22 @@ from pathlib import Path
 
 from src.tracer_context.build import parse_hunks
 
-BASE_BRANCH = "aacr-base"  # local branch at source_commit, passed to the tracer as --base
+BASE_BRANCH = "aacr-base"  # local branch at the PR's merge base, passed to the tracer as --base
+# How checkouts find the merge base; part of the dataset's resume key.
+# 1: git merge-base in the shallow clone (could pick an older common ancestor: wrong diffs).
+# 2: GitHub's merge base for source...target, with the target's history deepened to reach it.
+FETCH_VERSION = 2
 _PR_URL = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)/?$")
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class FetchError(RuntimeError):
     pass
+
+
+class CommitGoneError(FetchError):
+    """GitHub no longer has the PR's commits (e.g. the reviewed version was force-pushed away
+    and garbage-collected): retrying cannot help."""
 
 
 def parse_pr_url(url: str) -> tuple[str, str, int]:
@@ -77,17 +87,41 @@ def _has_commit(repo: Path, sha: str) -> bool:
     return _git(repo, "cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
 
 
-def _merge_base(repo: Path, a: str, b: str) -> str | None:
-    result = _git(repo, "merge-base", a, b, check=False)
-    return result.stdout.strip() or None
+def _is_ancestor(repo: Path, ancestor: str, commit: str) -> bool:
+    return _git(repo, "merge-base", "--is-ancestor", ancestor, commit, check=False).returncode == 0
 
 
-def prepare_checkout(repos_dir: Path, record: dict, depth: int = 50, max_depth: int = 3200,
+def github_merge_base(url: str, source: str, target: str) -> str:
+    """The merge base of `source...target` (the PR diff's start) from GitHub's compare API.
+
+    Not computed locally: in a shallow clone shared by several PRs, `git merge-base` can find an
+    older common ancestor when the real one lies beyond the fetched history. The diff then
+    includes unrelated base-branch commits (FreeCAD#20612: 195 files instead of 4)."""
+    owner, name, _ = parse_pr_url(url)
+    result = subprocess.run(["gh", "api", f"repos/{owner}/{name}/compare/{source}...{target}?per_page=1",
+                             "--jq", ".merge_base_commit.sha"], capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        error = result.stderr.strip()[:500]
+        if "HTTP 404" in error:
+            raise CommitGoneError(f"GitHub has no {source[:12]}...{target[:12]} in {owner}/{name} ({error}): the "
+                                  "reviewed commit was probably force-pushed away; it cannot be fetched")
+        raise FetchError(f"GitHub compare {source[:12]}...{target[:12]} failed: {error}")
+    sha = result.stdout.strip()
+    if not _SHA.match(sha):
+        raise FetchError(f"GitHub compare {source[:12]}...{target[:12]} gave no merge base: {sha[:200]!r}")
+    return sha
+
+
+def prepare_checkout(repos_dir: Path, record: dict, merge_base: str, depth: int = 50, max_depth: int = 3200,
                      remote_url: str | None = None) -> dict:
     """Check out `target_commit` (detached, clean) in a per-repository clone under `repos_dir`,
-    with branch `aacr-base` at `source_commit` and enough history for their merge base."""
+    with branch `aacr-base` at `merge_base` (from `github_merge_base`) and enough of the
+    target's history to reach it, so `aacr-base...HEAD` is exactly the PR diff.
+    `source_commit` itself is not needed and not fetched."""
     owner, name, number = parse_pr_url(record["githubPrUrl"])
-    source, target = record["source_commit"], record["target_commit"]
+    target = record["target_commit"]
+    if not _SHA.match(merge_base or ""):
+        raise FetchError(f"not a commit id: merge base {merge_base!r}")
     repo = Path(repos_dir) / f"{owner}__{name}"
     log = []
     if not (repo / ".git").exists():
@@ -96,15 +130,12 @@ def prepare_checkout(repos_dir: Path, record: dict, depth: int = 50, max_depth: 
         _git(repo, "remote", "add", "origin", remote_url or f"https://github.com/{owner}/{name}.git")
         log.append("init")
 
-    missing = [sha for sha in (source, target) if not _has_commit(repo, sha)]
-    if missing:
-        if _git(repo, "fetch", "-q", f"--depth={depth}", "origin", *missing, check=False).returncode != 0:
-            for sha in missing:  # fetch separately to find which one is unavailable
-                _git(repo, "fetch", "-q", f"--depth={depth}", "origin", sha, check=False)
-        log.append(f"fetch depth {depth}")
+    pr_ref = f"refs/remotes/origin/pr/{number}"
+    if not _has_commit(repo, target):
+        _git(repo, "fetch", "-q", f"--depth={depth}", "origin", target, check=False)
+        log.append(f"fetch target depth {depth}")
     if not _has_commit(repo, target):
         # A force-pushed PR can leave the reviewed commit reachable only from the PR ref.
-        pr_ref = f"refs/remotes/origin/pr/{number}"
         fetch_depth = depth
         while not _has_commit(repo, target) and fetch_depth <= max_depth:
             if _git(repo, "fetch", "-q", f"--depth={fetch_depth}", "origin",
@@ -112,19 +143,25 @@ def prepare_checkout(repos_dir: Path, record: dict, depth: int = 50, max_depth: 
                 break
             log.append(f"fetch pull/{number}/head depth {fetch_depth}")
             fetch_depth *= 4
-    for label, sha in (("source_commit", source), ("target_commit", target)):
-        if not _has_commit(repo, sha):
-            raise FetchError(f"{label} {sha} is not available from {owner}/{name}")
+    if not _has_commit(repo, target):
+        raise FetchError(f"target_commit {target} is not available from {owner}/{name}")
+    if not _has_commit(repo, merge_base):
+        _git(repo, "fetch", "-q", "--depth=1", "origin", merge_base, check=False)
+        log.append(f"fetch merge base {merge_base[:12]}")
+        if not _has_commit(repo, merge_base):
+            raise FetchError(f"merge base {merge_base} is not available from {owner}/{name}")
 
-    merge_base, step = _merge_base(repo, source, target), depth
-    while merge_base is None:
+    step = depth
+    while not _is_ancestor(repo, merge_base, target):  # the target's history must reach the merge base
         if step > max_depth:
-            raise FetchError(f"no merge base within about {max_depth} commits of history")
-        _git(repo, "fetch", "-q", f"--deepen={step}", "origin", source, target)
+            raise FetchError(f"merge base {merge_base[:12]} is not an ancestor of {target[:12]} "
+                             f"within about {max_depth} commits")
+        if _git(repo, "fetch", "-q", f"--deepen={step}", "origin", target, check=False).returncode != 0:
+            _git(repo, "fetch", "-q", f"--deepen={step}", "origin", f"+refs/pull/{number}/head:{pr_ref}")
         log.append(f"deepen {step}")
-        merge_base, step = _merge_base(repo, source, target), step * 2
+        step *= 2
 
-    _git(repo, "branch", "-f", BASE_BRANCH, source)
+    _git(repo, "branch", "-f", BASE_BRANCH, merge_base)
     _git(repo, "checkout", "-q", "-f", "--detach", target)
     _git(repo, "clean", "-q", "-ffdx")
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()

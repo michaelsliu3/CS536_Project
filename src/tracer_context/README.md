@@ -6,12 +6,18 @@ It prepares inputs only; it does not run a reviewer model.
 
 ```bash
 .venv/bin/python scripts/build_tracer_context.py \
-  --repo data/codebase_memory_trial/aacr/vllm-17425 --base base \
-  --out data/codebase_memory_trial/context/vllm-17425
+  --repo path/to/checkout --base <base branch or commit> --out path/to/output
 ```
 
 The checkout must have the PR head checked out with a clean worktree. `--base` is the
-PR's base branch or commit; the tool diffs from the merge base (`base...HEAD`).
+PR's base branch or commit; the tool diffs from the merge base (`base...HEAD`). For AACR
+entries, the batch runner below prepares such checkouts in `data/aacr_tracer/repos/`, with
+branch `aacr-base` at the merge base.
+
+The tool binary is `data/tools/codebase-memory-mcp-0.12.1/codebase-memory-mcp` (the
+macOS arm64 release build, v0.12.1, MIT), set by `tracer.binary` in the configs.
+`scripts/build_dataset.py` downloads and checksum-verifies the pinned build for your platform
+if it is missing. Do not run the tool's `install` command: it edits AI client configs.
 
 ## Pipeline
 
@@ -67,10 +73,12 @@ time (the tool allows one active cache at a time):
 Select entries with `--entries` (IDs `owner__repo__number`, or 0-based positions in the
 file), `--languages` or `--limit`. The whole dataset needs `--all`. For each entry it:
 
-1. Fetches only the PR's base and reviewed commits into one clone per repository
-   (`data/aacr_tracer/repos/`), deepening history until they share an ancestor. It falls
-   back to GitHub's `pull/<n>/head` ref for force-pushed commits, then checks out the
-   reviewed commit clean.
+1. Asks GitHub's compare API for the merge base of `source...target`. In a shallow clone,
+   `git merge-base` can find an older common ancestor and inflate the diff (roadmap
+   Section 5.5.6). It then fetches the reviewed commit and the merge base into one clone per
+   repository (`data/aacr_tracer/repos/`), deepening the reviewed commit's history until it
+   reaches the merge base. It falls back to GitHub's `pull/<n>/head` ref for force-pushed
+   commits, then checks out the reviewed commit clean, with `aacr-base` at the merge base.
 2. Records checks (`status.json` → `checks`):
    - diff size versus `change_line_count`;
    - whether the reference comments' lines exist in the reviewed files;
@@ -104,6 +112,7 @@ selection reports). The dataset itself is built with `scripts/build_dataset.py` 
 ```bash
 .venv/bin/python scripts/build_dataset.py data/aacr --dry-run      # setup checks and plan only
 .venv/bin/python scripts/build_dataset.py data/aacr                # build (or continue) everything
+.venv/bin/python scripts/clean_dataset.py data/aacr                # delete the build to start over (asks first)
 ```
 
 Everything lives in `ROOT`:
@@ -130,10 +139,16 @@ the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
   - the level configs.
 
   `--offline` forbids every download. `--dry-run` stops after the checks and the plan.
-- **Per PR, grouped by repository:** fetch the two commits, run the checks, fetch the PR text, trace once, pack all ten levels (`configs/levels/*.yaml` by default), and append one line. Each clone is deleted after its repository's last PR.
+- **Per PR, grouped by repository:** get the merge base from GitHub, fetch the reviewed commit and enough history to reach it, run the checks, fetch the PR text, trace once, pack all ten levels (`configs/levels/*.yaml` by default), and append one line. Each clone is deleted after its repository's last PR.
 - **Errors don't stop the build:** a failed PR is retried (`--retries`, default 2, with a growing wait; a half-fetched clone is deleted first), then recorded with its stage and error, and the build moves on. Below `--min-free-gb` (default 10) of free disk, the build stops cleanly before the next repository.
+- **Commits gone from GitHub:** 11 of the 196 reviewed commits were force-pushed away and can no longer be fetched (listed in the roadmap, Section 5.5.6). They are recorded as failed at the `merge_base` stage, without retries.
 - **Progress:** each PR is logged to the terminal and the `.log` file, with counts and an estimate of the time left. A summary at the end lists the failed PRs.
-- **Resuming:** re-running the same command skips PRs already built with the same commits, tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). Ctrl+C, `kill -INT` or `kill -TERM` stop cleanly with exit code 130, and a crash loses at most the PR in progress. After changing builder code without bumping `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`.
+- **Resuming:** re-running the same command skips PRs already built with the same commits, fetch method (`FETCH_VERSION`), tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). Ctrl+C, `kill -INT` or `kill -TERM` stop cleanly with exit code 130, and a crash loses at most the PR in progress. After changing builder code without bumping `FETCH_VERSION`, `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`.
+- **Starting over:** `scripts/clean_dataset.py ROOT` deletes what the build made: the records file, leftover rewrite files, and the clones and caches in `.work/`.
+  - It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/` (`--runner-work` for another folder), but keeps that runner's saved results.
+  - It keeps `positive_samples.json`, `logs/` and a downloaded tool, so the restart needs no downloads. `--logs` also deletes the logs; `--all` deletes everything the builder wrote in `ROOT`.
+  - It lists each path with its size and asks first (`--yes` skips the question, `--dry-run` only lists).
+  - It refuses while a build runs on `ROOT` or the inspection runner runs, and refuses a `ROOT` with no build files unless there are runner clones to delete.
 - **Exit codes:**
   - 0: all built;
   - 2: finished with failed PRs;
@@ -193,6 +208,19 @@ needs a one-time download of its tokenizer files (about 44 MB, no weights):
 
 Other tokenizers give different counts: Qwen2.5-Coder's counted about 5% fewer tokens on
 vLLM code, so do not report them as reviewer tokens.
+
+## Seeing the graph in the tool's UI
+
+Build one PR with `--keep-index` to keep the tool's graph database in `--out/index_cache`,
+then serve it:
+
+```bash
+CBM_CACHE_DIR="$PWD/path/to/output/index_cache" data/tools/codebase-memory-mcp-0.12.1/codebase-memory-mcp --ui=true
+```
+
+Open http://127.0.0.1:9749, and stop it with Ctrl+C before tracing again: the tool allows one
+active cache folder at a time. Each trace indexes into an empty cache; re-indexing into an
+existing cache reuses the stored graph and is not a real rebuild.
 
 ## Known limits
 

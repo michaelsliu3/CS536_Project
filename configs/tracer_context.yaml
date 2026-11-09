@@ -14,7 +14,7 @@ input:                  # sections before the repository context
   strip_html_comments: true
 
 tracer:
-  binary: data/codebase_memory_trial/bin/codebase-memory-mcp   # relative to the project root
+  binary: data/tools/codebase-memory-mcp-0.12.1/codebase-memory-mcp   # relative to the project root
   workers: 4            # pinned: 1 worker builds a slightly different graph than 2+
   index_mode: full      # full | moderate | fast
   callers:              # inbound walk: who uses the changed code
