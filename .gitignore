@@ -21,6 +21,8 @@ data/*
 # One-command wrappers for the dataset scripts (the dataset itself stays ignored)
 !data/build_dataset.sh
 !data/clean_dataset.sh
+# A small committed sample of the dataset (2 PRs); the full build in data/aacr stays ignored
+!data/aacr_sample/
 
 models/*
 !models/.gitkeep
