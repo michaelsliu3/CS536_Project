@@ -71,9 +71,11 @@ ranking:
 packing:
   token_budget: 0               # L01 has no repository context; L02 and up set null (no per-level budget)
   # Cap on each level's whole input (PR text + diff + context), so every level fits the reviewer:
-  # Qwen3.8-27B's 262,144-token context, minus 1,709 for the prompt (Codex rubric, review request,
-  # chat template) and 4,096 for the review it writes. Levels reaching it are marked `capped`.
-  max_input_tokens: 256339
+  # Qwen3.8-27B's 262,144-token context, minus 1,710 for the prompt (Codex rubric, review request,
+  # chat template; measured on the 2-PR sample) and 4,096 for the review it writes, is 256,338.
+  # Rounded down to 256,000 so tokenization where the prompt and context meet cannot push a cell
+  # over the window. Levels reaching it are marked `capped`.
+  max_input_tokens: 256000
   tokenizer: Qwen/Qwen3.8-27B
   kind_shares: {}               # no per-kind caps; nesting and limits decide the mix
   redistribute_unused: true

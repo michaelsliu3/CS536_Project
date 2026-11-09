@@ -89,7 +89,7 @@ flowchart LR
     D --> E["One line in context_levels.jsonl"]
 ```
 
-**3. What one level contains** (built, Section 5.5.7). There is no per-level budget: a level holds everything its kinds and item limits allow, up to one 256,339-token cap on the whole input.
+**3. What one level contains** (built, Section 5.5.7). There is no per-level budget: a level holds everything its kinds and item limits allow, up to one 256,000-token cap on the whole input.
 
 ```mermaid
 flowchart LR
@@ -377,7 +377,7 @@ The PR title and description come from the GitHub API and are the **current** ve
 
 Levels are nested. Each config inherits the previous one and names it as its parent, and the runner includes the parent's items first, so every line a level shows is also shown by the next. A whole changed file absorbs the pieces of it a smaller level showed. `status.json` records a per-level nesting check.
 
-**Since Nov 8 (Section 5.5.7), levels have no per-level token budgets.** Each level shows everything its kinds and item limits allow, up to one cap on the whole input (PR text + diff + context): 256,339 tokens, so every level fits the reviewer. Item limits count the level's total, its parent's items included. The old budgets are listed for reference; the limits are starting points to check on a pilot, not tuned values.
+**Since Nov 8 (Section 5.5.7), levels have no per-level token budgets.** Each level shows everything its kinds and item limits allow, up to one cap on the whole input (PR text + diff + context): 256,000 tokens, so every level fits the reviewer. Item limits count the level's total, its parent's items included. The old budgets are listed for reference; the limits are starting points to check on a pilot, not tuned values.
 
 | # | Level | Adds | Max hop | Old context budget (until Nov 8) |
 |---|---|---|---|---|
@@ -598,7 +598,7 @@ The tracer now also records how long each step takes.
 
 **Decision.** Content-defined levels:
 - **No per-level budgets:** `L02` and up have `token_budget: null`.
-- **One cap on the whole input:** `max_input_tokens: 256339`. That is Qwen3.8-27B's 262,144-token context minus 1,709 tokens for the prompt (Codex rubric, review request and chat template) and 4,096 for the review.
+- **One cap on the whole input:** `max_input_tokens: 256000` (256,339 until the margin fix below). Qwen3.8-27B's 262,144-token context minus 1,710 tokens for the prompt (Codex rubric, review request and chat template) and 4,096 for the review is 256,338; the cap is rounded down to leave room for tokenization where the prompt and context meet.
 - **Item limits count the level's total,** its parent's items included.
 - **Cost:** the higher outcome-table cost is accepted. It only makes review-table generation and training take longer.
 
@@ -607,7 +607,7 @@ The tracer now also records how long each step takes.
 - **Dataset records:** each level gains `capped`, `fits` and `same_as_parent`.
 - **Outcome table:**
   - identical inputs are reviewed once and identical reviews judged once, with `reused_from` on the copies;
-  - the notebook's cloud input limit is now 256,339.
+  - the notebook's cloud input limit matches the cap (now 256,000).
 - **Resume:** the new packing version makes resumed builds rebuild old records.
 
 **Rebuild check (Nov 8):** the two FreeCAD PRs were rebuilt through `build_dataset.py` with the new levels:
@@ -622,6 +622,8 @@ The tracer now also records how long each step takes.
 - **Every level** has its own kind wherever FreeCAD has it, stays within its item limits as level totals, fits the cap and passes the nesting check.
 - **Only `L10` is capped,** 2 tokens under it.
 - **The limit fix** lowered #19411's total from the 1,394,559 measured without it.
+
+**Margin fix (Nov 9):** re-counting the sample's full review prompts with the reviewer's tokenizer showed the prompt adds 1,710 tokens, not the 1,709 assumed. Both `L10` cells, at 256,337 tokens, came to 262,143 of 262,144 with the 4,096 reserved for the review. A level landing exactly on the old cap would have been one token over, and the server would reject it on every retry. The cap is now 256,000, which leaves 338 tokens of slack. The committed 2-PR sample was built with the old cap; rebuilding it gives levels up to 256,000.
 
 **Still open:**
 - Tests are rarely found, so `L06` is often identical to `L05`.
@@ -1071,7 +1073,7 @@ Options considered and not chosen:
 **Details:**
 - **Judge prompt:** byte-identical to AACR's, checked against their source. Unlike AACR, a failed judge call is recorded and retried instead of silently counting as no match.
 - **Strict parsing:** malformed and empty replies count as empty reviews and are reported. Replies cut off at the output limit are marked `truncated`.
-- **Resuming:** each cell carries a cache key over everything that changes its output, so re-running resumes and retries errors.
+- **Resuming:** each cell carries a cache key over everything that changes its output, so re-running resumes and retries errors. Cells skipped as too long are re-checked against the current input limit. The server address is left out of the key (Nov 9), so moving the server keeps the saved cells.
 
 **Profiles** (environment variable `OUTCOME_PROFILE`):
 - **`cloud`:** Qwen3.8-27B (revision `37561816…`) through any OpenAI-compatible server, such as `vllm serve` on the GPU machine, temperature 0, 8 parallel requests.
@@ -1360,7 +1362,7 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Python-only or broader language scope | Parse support and independent repository counts after filtering |
 | RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: PHP and C# (the other eight languages have been traced, Section 5.5.7) and a full build on the very large repositories |
 | Tracer index mode (`full` vs `fast`) | `full` mode's call/test links depend on the folder the clone sits in, and `fast` was path-independent with fewer links (Section 5.5.6). Choose before building the dataset |
-| Fixed-budget versus content-defined context levels | **Decided Nov 8:** content-defined levels with one input cap of 256,339 tokens and item limits as level totals, after measuring both on 10 PRs (Section 5.5.7). Higher outcome-table cost accepted |
+| Fixed-budget versus content-defined context levels | **Decided Nov 8:** content-defined levels with one input cap of 256,000 tokens and item limits as level totals, after measuring both on 10 PRs (Section 5.5.7). Higher outcome-table cost accepted |
 | Reviewer model/size/precision | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call, greedy (Section 8.5.2). Still needed: memory and window fit, latency, run-to-run noise |
 | Switching the reviewer to Claude | Allowed only if Qwen fails pilot criteria fixed in advance (Section 8.5.2); a switch regenerates the whole table |
 | Review prompt | **Decided Nov 8 (revised):** OpenAI Codex's `/review` rubric, verbatim and pinned, with no findings cap (Section 8.5.2). Still open: whether Qwen's thinking mode is on |

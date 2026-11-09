@@ -11,7 +11,7 @@ Lines (`context_levels.jsonl`, one PR per line), and is not committed.
   all ten levels each. Their input tokens run `L01` → `L10`: 27,365 → 256,337 and 13,071 →
   256,337.
 - **Built:** November 8, 2026, with the content-defined levels (no per-level budgets, one
-  256,339-token input cap; roadmap Section 5.5.7). That means render version 3, fetch
+  256,339-token input cap; roadmap Section 5.5.7). The cap is now 256,000 (the Nov 9 margin fix), so rebuild the sample to match the current configs. That means render version 3, fetch
   version 2, codebase-memory-mcp 0.12.1 in `full` index mode, and the `Qwen/Qwen3.8-27B`
   tokenizer. Each record's `build` field has the exact versions and config hashes.
 - **Contents:**

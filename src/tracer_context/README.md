@@ -60,7 +60,7 @@ Build levels with the batch runner, which packs parents first. The single-PR scr
 .venv/bin/python scripts/tracer/run_tracer_batch.py --entries vllm-project__vllm__17425 $(for f in configs/levels/L*.yaml; do printf -- '--config %s ' "$f"; done)
 ```
 
-**The levels have no per-level token budgets** (decided Nov 8; roadmap Section 5.5.7). Each level shows everything its kinds and item limits allow, up to one cap on the whole input: `max_input_tokens: 256339` in the base config, which is Qwen3.8-27B's 262,144-token context minus 1,709 for the prompt and 4,096 for the review. Item limits (`max_items`) count the level's total, its parent's items included. Each level in the dataset records `capped` (items were left out for lack of room), `fits` and `same_as_parent` (identical text; the outcome table reviews it once). Fixed budgets had made levels lack their named kind on large PRs.
+**The levels have no per-level token budgets** (decided Nov 8; roadmap Section 5.5.7). Each level shows everything its kinds and item limits allow, up to one cap on the whole input: `max_input_tokens: 256000` in the base config. Qwen3.8-27B's 262,144-token context minus 1,710 for the prompt and 4,096 for the review is 256,338, rounded down so tokenization where the prompt and context meet cannot push a cell over the window. Item limits (`max_items`) count the level's total, its parent's items included. Each level in the dataset records `capped` (items were left out for lack of room), `fits` and `same_as_parent` (identical text; the outcome table reviews it once). Fixed budgets had made levels lack their named kind on large PRs.
 
 ## Many PRs: the AACR-Bench batch runner
 

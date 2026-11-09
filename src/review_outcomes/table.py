@@ -94,7 +94,9 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
         context, key = cell.text, key_of(cell)
         path = out_dir / "reviews" / cell.entry / f"{cell.level}.json"
         saved = read_json(path)
-        if not force and saved and saved.get("key") == key and saved.get("status") not in ("error",):
+        # Errors are retried; too_long is re-checked against this run's limit (no model call),
+        # so raising max_input_tokens later reviews the cells that now fit.
+        if not force and saved and saved.get("key") == key and saved.get("status") not in ("error", "too_long"):
             return saved
         record = {"key": key, "entry": cell.entry, "level": cell.level, "input_sha256": sha256_text(context),
                   "input_tokens": cell.input_tokens, "prompt_sha256": prompt_hash,

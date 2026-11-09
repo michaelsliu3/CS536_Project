@@ -22,10 +22,12 @@ import urllib.request
 class OpenAIChat:
     def __init__(self, base_url: str, model: str, api_key: str | None = None, max_tokens: int = 4096,
                  enable_thinking: bool | None = False, timeout: float = 3600, model_revision: str | None = None):
-        self.url = base_url.rstrip("/") + "/chat/completions"
+        self.base_url, self.url = base_url, base_url.rstrip("/") + "/chat/completions"
         self.model, self.api_key, self.max_tokens, self.timeout = model, api_key, max_tokens, timeout
         self.enable_thinking = enable_thinking
-        self.identity = {"kind": "openai-chat", "base_url": base_url, "model": model, "model_revision": model_revision,
+        # No base_url: where the model is served does not change its output, so moving the server to
+        # another port or machine keeps the saved cells (the notebook's manifest records the URL).
+        self.identity = {"kind": "openai-chat", "model": model, "model_revision": model_revision,
                          "temperature": 0, "max_tokens": max_tokens, "enable_thinking": enable_thinking}
 
     def __call__(self, messages: list[dict]) -> dict:

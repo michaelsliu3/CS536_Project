@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.review_outcomes.backends import OpenAIChat
 from src.review_outcomes.judge import parse_judge_answer, score_review
 from src.review_outcomes.parse import normalize_path, parse_review
 from src.review_outcomes.prompts import (
@@ -178,6 +179,31 @@ class TableTests(unittest.TestCase):
         self.assertEqual([s["level"] for s in summary], ["L01_min", "L02_function"])
         self.assertAlmostEqual(summary[0]["recall_pooled"], 0.125)
         self.assertEqual(summary[1]["statuses"], {"too_long": 1})
+
+    def test_too_long_cells_are_reviewed_once_the_limit_allows(self):
+        cells, calls = discover_cells(self.contexts), []
+
+        def reviewer(messages):
+            calls.append(messages[1]["content"])
+            return {"text": codex_reply([]), "finish_reason": "stop", "prompt_tokens": 10,
+                    "completion_tokens": 5, "seconds": 0.1}
+        reviewer.identity = {"kind": "fake"}
+        out = self.root / "limit_out"
+        first = run_reviews(cells, reviewer, "RUBRIC", out, max_input_tokens=500)
+        self.assertEqual(([r["status"] for r in first], len(calls)), (["ok", "too_long"], 1))
+        again = run_reviews(cells, reviewer, "RUBRIC", out, max_input_tokens=500)
+        self.assertEqual(([r["status"] for r in again], len(calls)), (["ok", "too_long"], 1))  # still too long
+        raised = run_reviews(cells, reviewer, "RUBRIC", out, max_input_tokens=1000)
+        self.assertEqual(([r["status"] for r in raised], len(calls)), (["ok", "ok"], 2))  # only L02 is new
+
+    def test_server_address_is_not_part_of_the_cache_key(self):
+        a = OpenAIChat("http://localhost:8000/v1", "Qwen/Qwen3.8-27B", model_revision="r1")
+        b = OpenAIChat("http://10.0.0.5:9000/v1/", "Qwen/Qwen3.8-27B", model_revision="r1")
+        self.assertEqual(a.identity, b.identity)
+        self.assertNotIn("base_url", a.identity)
+        self.assertEqual(b.url, "http://10.0.0.5:9000/v1/chat/completions")
+        self.assertNotEqual(a.identity, OpenAIChat("http://localhost:8000/v1", "Qwen/Qwen3.8-27B",
+                                                   model_revision="r2").identity)
 
     def test_identical_levels_are_reviewed_and_judged_once(self):
         levels = {name: {"text": text, "input_tokens": 100}

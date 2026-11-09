@@ -16,7 +16,7 @@ diagrams of the architecture.
    [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) v0.12.1,
    builds ten nested context levels. They run from the PR text and diff
    (`L01_min`) to everything traced within three hops (`L10_all`). Each level
-   shows everything its kinds and item limits allow, up to one cap of 256,339
+   shows everything its kinds and item limits allow, up to one cap of 256,000
    input tokens. The result is one file, `data/aacr/context_levels.jsonl`, with one
    line per PR.
 2. **Outcome table.** The frozen reviewer, `Qwen/Qwen3.8-27B` with OpenAI Codex's

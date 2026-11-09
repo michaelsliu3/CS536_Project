@@ -21,7 +21,7 @@ Selector training and evaluation then only look up rows. Driver:
   - `KeywordOverlapJudge`, a stand-in for pipeline tests only.
 
   All decode greedily.
-- **Resuming:** each review and judgment carries a cache key over everything that changes its output: the input hash, prompt hash and version, model and settings, parser, references and judge. Re-running reuses matches, redoes changes, and retries errors.
+- **Resuming:** each review and judgment carries a cache key over everything that changes its output: the input hash, prompt hash and version, model and settings, parser, references and judge. Re-running reuses matches, redoes changes, and retries errors. Cells skipped as too long are re-checked against the current `max_input_tokens`, so raising it reviews the cells that now fit. The server address is not part of the key, so moving the server keeps the saved cells; the manifest records it.
 - **Identical levels are reviewed once:** a level whose input is identical to another's (the dataset marks `same_as_parent`) gets a copy of that review and its judgment, with `reused_from`, instead of another reviewer and judge call. Greedy decoding would give the same review anyway.
 
 **Status:**
