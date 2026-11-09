@@ -86,7 +86,7 @@ Project skill and course docs: `.cursor/skills/cs536-project/SKILL.md` and `docs
 Create `.venv` at the repo root with **CUDA 13.0 PyTorch** and dependencies for:
 
 - `notebooks/qwen3b_qlora_contextcrbench.ipynb` (QLoRA / LoRA smoke tests)
-- `scripts/check_device.py`, `scripts/test_qwen.py`
+- `scripts/setup/check_device.py`, `scripts/setup/test_qwen.py`
 
 Do **not** commit `.venv/`, large weights, or `data/contextcrbench/` payloads. Do **not** run full training or download ContextCRBench unless the user asks.
 
@@ -147,7 +147,7 @@ After changing torch or venv packages, **restart the notebook kernel** before tr
 ## Verification (required before reporting success)
 
 ```bash
-python scripts/check_device.py
+python scripts/setup/check_device.py
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no gpu')"
 python -c "import transformers, peft, bitsandbytes, datasets; print('imports ok')"
 ```
@@ -169,7 +169,7 @@ Logs like `cursor-server-…` downloading over `ssh_tunnel` are **Cursor install
 
 ## Optional (user must request)
 
-- Run `python scripts/test_qwen.py` (loads 7B; long download).
+- Run `python scripts/setup/test_qwen.py` (loads 7B; long download).
 - Execute notebook training cells or ContextCRBench download.
 
 Report back: Python version, torch/CUDA check output, GPU name, and any install fixes applied.

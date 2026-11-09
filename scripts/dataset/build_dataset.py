@@ -1,6 +1,6 @@
 """Build the context-level dataset for AACR-Bench in one command (no LLM; runs on a laptop).
 
-    .venv/bin/python scripts/build_dataset.py ROOT [options]
+    .venv/bin/python scripts/dataset/build_dataset.py ROOT [options]
 
 ROOT is the dataset folder. Everything lives there:
   ROOT/positive_samples.json       AACR-Bench entries (downloaded at a pinned commit if missing)
@@ -25,7 +25,7 @@ What a run does:
 Re-running the same command continues where it stopped: PRs already built with the same
 inputs, fetch method, tool, configs and tokenizer are skipped, and failed ones are retried.
 Stop with Ctrl+C (or `kill -INT <pid>`); the file is left consistent. To start over instead,
-run scripts/clean_dataset.py ROOT.
+run scripts/dataset/clean_dataset.py ROOT.
 
 Exit codes: 0 all PRs built; 2 finished with some failed PRs; 1 setup failed or the build
 crashed; 3 stopped for low disk space; 130 interrupted.
@@ -42,7 +42,7 @@ import sys
 import time
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

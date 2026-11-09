@@ -27,7 +27,7 @@ import time
 import traceback
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -41,7 +41,7 @@ from src.tracer_context.pipeline import RUNNER_WORK  # noqa: E402
 from src.tracer_context.runtime import load_level_configs, make_counter, write_json  # noqa: E402
 
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
-DEFAULT_WORK = PROJECT_ROOT / RUNNER_WORK  # scripts/clean_dataset.py also deletes its repos/
+DEFAULT_WORK = PROJECT_ROOT / RUNNER_WORK  # scripts/dataset/clean_dataset.py also deletes its repos/
 
 
 def read_json(path: Path):
@@ -57,7 +57,7 @@ def trace_key(settings: dict, tool_version: str, record: dict) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-load_configs = load_level_configs  # shared with scripts/build_dataset.py
+load_configs = load_level_configs  # shared with scripts/dataset/build_dataset.py
 
 
 def run_entry(entry, configs, counters, args, binary, tool_version, dataset_sha) -> dict:

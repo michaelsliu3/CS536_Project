@@ -1,4 +1,4 @@
-"""Setup checks, pinned downloads, run lock and logging for scripts/build_dataset.py."""
+"""Setup checks, pinned downloads, run lock and logging for scripts/dataset/build_dataset.py."""
 from __future__ import annotations
 
 import hashlib
@@ -45,8 +45,8 @@ OUTPUT_FILE = "context_levels.jsonl.gz"
 LOCK_FILE = ".build.lock"
 WORK_DIR = ".work"   # repos/ (clones), tmp/ (tool caches), tools/ (a downloaded tool)
 LOG_DIR = "logs"     # build_<time>.log
-_GITIGNORE_TEXT = "# Dataset build output (scripts/build_dataset.py): keep out of git.\n*\n"
-# The inspection runner's default work folder (scripts/run_tracer_batch.py --work), under the project root.
+_GITIGNORE_TEXT = "# Dataset build output (scripts/dataset/build_dataset.py): keep out of git.\n*\n"
+# The inspection runner's default work folder (scripts/tracer/run_tracer_batch.py --work), under the project root.
 RUNNER_WORK = Path("data") / "aacr_tracer"
 
 
@@ -300,7 +300,7 @@ def require_runner_idle() -> None:
     result = subprocess.run(["pgrep", "-fl", "run_tracer_batch.py"], capture_output=True, text=True)
     running = [line for line in result.stdout.splitlines() if line.strip()]
     if running:
-        raise SetupError("scripts/run_tracer_batch.py is running; stop it before deleting its clones:\n  "
+        raise SetupError("scripts/tracer/run_tracer_batch.py is running; stop it before deleting its clones:\n  "
                          + "\n  ".join(running[:5]))
 
 
@@ -328,10 +328,10 @@ def ensure_ignored(root: Path, project_root: Path, logger: logging.Logger) -> No
         logger.info(f"{root} was not ignored by git; wrote {root / '.gitignore'}")
 
 
-# ---------- cleaning a build (scripts/clean_dataset.py) ----------
+# ---------- cleaning a build (scripts/dataset/clean_dataset.py) ----------
 
 def clean_targets(root: Path, logs: bool = False, everything: bool = False) -> list[Path]:
-    """The paths scripts/clean_dataset.py deletes so the next build starts over.
+    """The paths scripts/dataset/clean_dataset.py deletes so the next build starts over.
 
     Default: the built records (OUTPUT_FILE and leftover rewrite files) and the work folder's
     clones and tool caches; the AACR file, the logs and a downloaded tool stay, so a restart

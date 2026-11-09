@@ -165,7 +165,7 @@ class AnalysisTests(unittest.TestCase):
             rows = [dict(row, protocol_hash=digest(protocol)) for row in predictions()]
             source.write_text("".join(json.dumps(row) + "\n" for row in rows))
             (root / "protocol.json").write_text(json.dumps(protocol))
-            command = [sys.executable, "scripts/analyze_predictions.py", "--predictions", str(source),
+            command = [sys.executable, "scripts/analysis/analyze_predictions.py", "--predictions", str(source),
                        "--output", str(root / "report"), "--bootstrap-samples", "20",
                        "--models", "majority", "base", "adapter"]
             run = subprocess.run(command, capture_output=True, text=True)

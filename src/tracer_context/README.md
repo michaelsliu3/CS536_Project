@@ -5,7 +5,7 @@ Builds a review context for one PR from [codebase-memory-mcp](https://github.com
 It prepares inputs only; it does not run a reviewer model.
 
 ```bash
-.venv/bin/python scripts/build_tracer_context.py \
+.venv/bin/python scripts/tracer/build_tracer_context.py \
   --repo path/to/checkout --base <base branch or commit> --out path/to/output
 ```
 
@@ -16,7 +16,7 @@ branch `aacr-base` at the merge base.
 
 The tool binary is `data/tools/codebase-memory-mcp-0.12.1/codebase-memory-mcp` (the
 macOS arm64 release build, v0.12.1, MIT), set by `tracer.binary` in the configs.
-`scripts/build_dataset.py` downloads and checksum-verifies the pinned build for your platform
+`scripts/dataset/build_dataset.py` downloads and checksum-verifies the pinned build for your platform
 if it is missing. Do not run the tool's `install` command: it edits AI client configs.
 
 ## Pipeline
@@ -55,19 +55,19 @@ When a level is packed, its parent's items go in first with exactly the lines th
 Build levels with the batch runner, which packs parents first. The single-PR script refuses configs that have a parent:
 
 ```bash
-.venv/bin/python scripts/run_tracer_batch.py --entries vllm-project__vllm__17425 $(for f in configs/levels/L*.yaml; do printf -- '--config %s ' "$f"; done)
+.venv/bin/python scripts/tracer/run_tracer_batch.py --entries vllm-project__vllm__17425 $(for f in configs/levels/L*.yaml; do printf -- '--config %s ' "$f"; done)
 ```
 
 On vllm#17425, the fixed budgets bound every level. Items left over from one level used up the next level's extra budget, so several levels lack their named kind; see the roadmap, Section 5.5.4. Treat the budgets as provisional.
 
 ## Many PRs: the AACR-Bench batch runner
 
-`scripts/run_tracer_batch.py` runs the same pipeline over AACR-Bench entries, one PR at a
+`scripts/tracer/run_tracer_batch.py` runs the same pipeline over AACR-Bench entries, one PR at a
 time (the tool allows one active cache at a time):
 
 ```bash
-.venv/bin/python scripts/run_tracer_batch.py --list --languages Go          # plan only
-.venv/bin/python scripts/run_tracer_batch.py --entries ollama__ollama__12185,cline__cline__5177
+.venv/bin/python scripts/tracer/run_tracer_batch.py --list --languages Go          # plan only
+.venv/bin/python scripts/tracer/run_tracer_batch.py --entries ollama__ollama__12185,cline__cline__5177
 ```
 
 Select entries with `--entries` (IDs `owner__repo__number`, or 0-based positions in the
@@ -102,17 +102,17 @@ PR, while `target_commit` can be an earlier version. In ollama/ollama#12185 the 
 commit has 197 changed lines and the final PR 64.
 
 The folder-per-PR runner above is for inspecting individual PRs in detail (full traces and
-selection reports). The dataset itself is built with `scripts/build_dataset.py` below.
+selection reports). The dataset itself is built with `scripts/dataset/build_dataset.py` below.
 
 ## The dataset: one command, one file (main path)
 
-`scripts/build_dataset.py ROOT` builds the context levels for every AACR-Bench entry into
+`scripts/dataset/build_dataset.py ROOT` builds the context levels for every AACR-Bench entry into
 **one file** in the dataset folder `ROOT`. It uses no LLM and runs on a laptop.
 
 ```bash
-.venv/bin/python scripts/build_dataset.py data/aacr --dry-run      # setup checks and plan only
-.venv/bin/python scripts/build_dataset.py data/aacr                # build (or continue) everything
-.venv/bin/python scripts/clean_dataset.py data/aacr                # delete the build to start over (asks first)
+.venv/bin/python scripts/dataset/build_dataset.py data/aacr --dry-run      # setup checks and plan only
+.venv/bin/python scripts/dataset/build_dataset.py data/aacr                # build (or continue) everything
+.venv/bin/python scripts/dataset/clean_dataset.py data/aacr                # delete the build to start over (asks first)
 ```
 
 Everything lives in `ROOT`:
@@ -144,7 +144,7 @@ the script writes `ROOT/.gitignore` containing `*` (`data/` is already ignored).
 - **Commits gone from GitHub:** 11 of the 196 reviewed commits were force-pushed away and can no longer be fetched (listed in the roadmap, Section 5.5.6). They are recorded as failed at the `merge_base` stage, without retries.
 - **Progress:** each PR is logged to the terminal and the `.log` file, with counts and an estimate of the time left. A summary at the end lists the failed PRs.
 - **Resuming:** re-running the same command skips PRs already built with the same commits, fetch method (`FETCH_VERSION`), tool version, trace and render versions, level configs and tokenizer, and retries failed ones (`--force` rebuilds everything). Ctrl+C, `kill -INT` or `kill -TERM` stop cleanly with exit code 130, and a crash loses at most the PR in progress. After changing builder code without bumping `FETCH_VERSION`, `RENDER_VERSION` or `TRACE_FORMAT`, rebuild with `--force`.
-- **Starting over:** `scripts/clean_dataset.py ROOT` deletes what the build made: the records file, leftover rewrite files, and the clones and caches in `.work/`.
+- **Starting over:** `scripts/dataset/clean_dataset.py ROOT` deletes what the build made: the records file, leftover rewrite files, and the clones and caches in `.work/`.
   - It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/` (`--runner-work` for another folder), but keeps that runner's saved results.
   - It keeps `positive_samples.json`, `logs/` and a downloaded tool, so the restart needs no downloads. `--logs` also deletes the logs; `--all` deletes everything the builder wrote in `ROOT`.
   - It lists each path with its size and asks first (`--yes` skips the question, `--dry-run` only lists).

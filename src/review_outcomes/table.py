@@ -1,5 +1,5 @@
 """Build the offline (PR x level) outcome table from the context-level dataset file
-(`<root>/context_levels.jsonl.gz`, e.g. data/aacr/, written by scripts/build_dataset.py).
+(`<root>/context_levels.jsonl.gz`, e.g. data/aacr/, written by scripts/dataset/build_dataset.py).
 
 Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/):
   manifest.json                         run settings, prompt and dataset hashes

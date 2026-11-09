@@ -1,6 +1,6 @@
 """One-file dataset of context levels for every AACR-Bench entry.
 
-`<root>/context_levels.jsonl.gz` (e.g. data/aacr/, built by scripts/build_dataset.py) holds one JSON line per PR with every level's
+`<root>/context_levels.jsonl.gz` (e.g. data/aacr/, built by scripts/dataset/build_dataset.py) holds one JSON line per PR with every level's
 review input text, so training and the outcome table load a single file:
 
     from src.tracer_context.dataset import load_records, level_rows

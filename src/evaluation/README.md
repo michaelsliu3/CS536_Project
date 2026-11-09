@@ -1,6 +1,6 @@
 # Analyze saved predictions
 
-`scripts/analyze_predictions.py` turns the comparison notebook's saved
+`scripts/analysis/analyze_predictions.py` turns the comparison notebook's saved
 `predictions.jsonl` into paired evidence for the midpoint report. It works
 offline and never loads weights, generates predictions, downloads data, or
 trains a model. It also accepts context-policy conditions stored in the same
@@ -12,7 +12,7 @@ Copy the completed cloud comparison directory, including `protocol.json` and
 `predictions.jsonl`, to the analysis machine. In the project environment:
 
 ```bash
-python scripts/analyze_predictions.py \
+python scripts/analysis/analyze_predictions.py \
   --predictions results/qwen3b-comparison/predictions.jsonl \
   --models majority base adapter --reference base \
   --bootstrap-samples 2000 --seed 42 \

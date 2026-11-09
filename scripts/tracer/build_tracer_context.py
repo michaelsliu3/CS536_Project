@@ -16,7 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -44,7 +44,7 @@ def main():
     cfg = load_config(args.config)
     if cfg["level"]["parent"]:
         parser.error(f"{args.config} is a nested level (parent {cfg['level']['parent']!r}); "
-                     "build levels with scripts/run_tracer_batch.py, which packs parents first")
+                     "build levels with scripts/tracer/run_tracer_batch.py, which packs parents first")
     pr = None
     if cfg["input"]["pr_text"]:
         if not args.pr_url:

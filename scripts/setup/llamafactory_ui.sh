@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local UI for preparing configurations; QLoRA training runs on NVIDIA cloud hardware.
 set -euo pipefail
-PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 LLAMAFACTORY_DIR="$PROJECT_ROOT/.cache/llamafactory"
 if [[ ! -x "$LLAMAFACTORY_DIR/venv/bin/llamafactory-cli" ]]; then
   echo "LLaMA-Factory is not installed. Follow the LLaMA-Factory UI section in README.md." >&2

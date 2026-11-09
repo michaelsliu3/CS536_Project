@@ -269,7 +269,7 @@ The tracer is [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-
    - **`context.md`:** the PR title and description, the diff, then the repository context. The budget covers only the repository context.
    - **`selection.json`:** every included and excluded item with its reason, plus token counts for each part.
 
-`scripts/run_tracer_batch.py` runs AACR entries one at a time, since the tool allows one active cache at a time. Entries are selected by ID, 0-based file position or language; the whole dataset needs `--all`. It traces each PR once and packs every level from that trace, resumes by reusing unchanged results, and records failures without stopping. It writes `data/aacr_tracer/entries/<id>/{status,trace,pr}.json`, `<level>/{context.md,selection.json}` and `summary.csv`. Reference comments are read only to count the per-entry checks below; their text never enters any output.
+`scripts/tracer/run_tracer_batch.py` runs AACR entries one at a time, since the tool allows one active cache at a time. Entries are selected by ID, 0-based file position or language; the whole dataset needs `--all`. It traces each PR once and packs every level from that trace, resumes by reusing unchanged results, and records failures without stopping. It writes `data/aacr_tracer/entries/<id>/{status,trace,pr}.json`, `<level>/{context.md,selection.json}` and `summary.csv`. Reference comments are read only to count the per-entry checks below; their text never enters any output.
 
 The PR title and description come from the GitHub API and are the **current** versions. `lastEditedAt` records whether the description was edited after the reviewed commit. Title edits are not detectable this way, and an edited description is flagged, not reconstructed.
 
@@ -368,7 +368,7 @@ Known limits:
 
 **Status:** built and tested on 3 PRs, plus an interrupted-and-resumed 2-PR run in a scratch folder. The whole dataset has **not** been run.
 
-**What it does:** one command, `scripts/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl.gz`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file.
+**What it does:** one command, `scripts/dataset/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl.gz`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file.
 
 **Setup checks**, each failing with a fix:
 - git, and `gh` logged in;
@@ -386,7 +386,7 @@ Known limits:
 - **Low disk:** below 10 GB free, the build stops cleanly before the next repository.
 - **One build per folder:** a lock file stops a second build on the same folder; a lock left by a crashed build is taken over.
 - **Logs:** progress goes to the terminal and to `ROOT/logs/build_<time>.log`, with counts and a time estimate. Failure tracebacks go to the log.
-- **Resuming:** re-running the same command skips PRs already built with the same commits, fetch method, tool, trace and render versions, level configs and tokenizer, and retries failed ones. Ctrl+C or `kill` stop cleanly. `scripts/clean_dataset.py ROOT` starts over instead.
+- **Resuming:** re-running the same command skips PRs already built with the same commits, fetch method, tool, trace and render versions, level configs and tokenizer, and retries failed ones. Ctrl+C or `kill` stop cleanly. `scripts/dataset/clean_dataset.py ROOT` starts over instead.
 - **Kept out of git:** `*.log` is git-ignored, and a root inside the repository gets its own `.gitignore` unless it is already ignored.
 - **No LLM:** it runs on a laptop.
 
@@ -446,9 +446,9 @@ The tracer now also records how long each step takes.
 - **Rebuilds:** the fetch method is part of the resume key (`FETCH_VERSION = 2`), so a resumed build rebuilds PRs made the old way.
 - **Across all 196 PRs:** 57 are more than 50 commits behind their base, so the old code could have gone wrong on any of them.
 - **11 reviewed commits are gone from GitHub.** Their reviewed version was force-pushed away. Neither the API nor `git fetch` can get them: ComfyUI#7952, #9560; node#56185; uv#11088; ClickHouse#85266, #74070; keycloak#41672, #37465, #35645, #36457, #37504. AACR's own evaluation fetches commits the same way. These are recorded as failed once, without retries (`retryable: false`). That leaves **185 buildable PRs**.
-- **Starting over:** `scripts/clean_dataset.py ROOT` deletes the built records, leftover rewrite files and the work folder's clones and caches. It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/`, but keeps that runner's saved results. It keeps the AACR file, logs and downloaded tool. `--logs` and `--all` delete more. It lists every path with its size and asks first. It refuses while a build or the inspection runner runs, and refuses a folder with no build files unless there are runner clones to delete.
+- **Starting over:** `scripts/dataset/clean_dataset.py ROOT` deletes the built records, leftover rewrite files and the work folder's clones and caches. It also deletes the repositories the inspection runner cloned into `data/aacr_tracer/repos/`, but keeps that runner's saved results. It keeps the AACR file, logs and downloaded tool. `--logs` and `--all` delete more. It lists every path with its size and asks first. It refuses while a build or the inspection runner runs, and refuses a folder with no build files unless there are runner clones to delete.
 
-**Next:** settle the index mode, then run `scripts/build_dataset.py data/aacr` on the laptop. Then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
+**Next:** settle the index mode, then run `scripts/dataset/build_dataset.py data/aacr` on the laptop. Then review the failures, the per-language behavior, and the timing on the very large repositories (elasticsearch, ClickHouse, FreeCAD).
 
 ## 6. Preprocessing without generative LLMs
 
@@ -1105,7 +1105,7 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 - **Also built:** the one-file dataset builder, which deletes each clone after use (Section 5.5.6). It was tested on 3 PRs.
 - **Next:**
   - decide between content-defined and fixed-budget levels;
-  - pilot about two PRs per language, then build the whole dataset with `scripts/build_dataset.py data/aacr`;
+  - pilot about two PRs per language, then build the whole dataset with `scripts/dataset/build_dataset.py data/aacr`;
   - run a reviewer on the levels.
 
 **Gate:** identical inputs reproduce candidate IDs and prompt hashes; no reference-driven retrieval; all prompts fit under explicit rules; reviewer/scorer behavior is credible; some context-sensitive findings exist. Measure coverage before assuming all necessary evidence is in C.
@@ -1172,7 +1172,7 @@ Recommended implementation checks:
 
 Choose new module names during implementation; paths in Section 7 are proposals.
 
-As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/build_tracer_context.py`, `scripts/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/tracer/build_tracer_context.py`, `scripts/tracer/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/dataset/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
 
 ## 14. Open decisions that must stay visible
 
@@ -1263,7 +1263,7 @@ Numbers labeled **measured** below come from read-only scripts run on Nov 4 over
   - `src/context_selection/baselines.py` (`select_context` with `diff_only`, `all_context`, `fixed`, `random` and BM25 `similarity`; full-chat token counting).
   - `src/evaluation/comparison.py` (cached paired evaluation, strict parser, `QwenComparison`).
   - `src/evaluation/analysis.py` (paired metrics, repository cluster bootstrap, cost frontier).
-  - `src/evaluation/reporting.py`, `src/evaluation/plots.py`, `scripts/analyze_predictions.py`.
+  - `src/evaluation/reporting.py`, `src/evaluation/plots.py`, `scripts/analysis/analyze_predictions.py`.
   - `src/models/qwen.py` (`QwenCoder`, which has no quantization yet).
   - `src/training/runtime.py` (atomic JSON, hashing, run locks).
   - The `tests/` suite: unittest, no GPU needed.

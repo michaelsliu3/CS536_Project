@@ -1,10 +1,10 @@
 """Delete a context-dataset build and downloaded repositories, so the next build starts over.
 
-    .venv/bin/python scripts/clean_dataset.py ROOT [--logs | --all] [--yes | --dry-run]
+    .venv/bin/python scripts/dataset/clean_dataset.py ROOT [--logs | --all] [--yes | --dry-run]
 
 By default it deletes:
   - the built records (ROOT/context_levels.jsonl.gz) and the clones and tool caches in ROOT/.work;
-  - the repositories the inspection runner (scripts/run_tracer_batch.py) cloned into
+  - the repositories the inspection runner (scripts/tracer/run_tracer_batch.py) cloned into
     data/aacr_tracer/repos (another folder with --runner-work). Its saved results stay.
 It keeps ROOT/positive_samples.json, ROOT/logs and a downloaded tool, so the restart needs no
 downloads.
@@ -28,7 +28,7 @@ import shutil
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

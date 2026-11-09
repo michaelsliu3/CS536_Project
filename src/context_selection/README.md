@@ -52,7 +52,7 @@ Preview one **already audited, locally available** record with an existing local
 reviewer tokenizer directory:
 
 ```bash
-python scripts/preview_context_selection.py \
+python scripts/analysis/preview_context_selection.py \
   --record /path/to/record.json \
   --tokenizer /path/to/local/qwen-tokenizer \
   --policy similarity --budget 512 --max-input-tokens 2016

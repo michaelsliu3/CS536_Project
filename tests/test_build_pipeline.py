@@ -177,7 +177,7 @@ class BuildKeyTests(unittest.TestCase):
 
 
 class CleanTests(Temp):
-    SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "clean_dataset.py"
+    SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "dataset" / "clean_dataset.py"
 
     def make_build(self):
         r = self.root

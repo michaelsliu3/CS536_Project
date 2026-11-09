@@ -1,4 +1,4 @@
-# Settings for scripts/build_tracer_context.py (codebase-memory-mcp context builder).
+# Settings for scripts/tracer/build_tracer_context.py (codebase-memory-mcp context builder).
 # This is the standalone "8k context only" config. The nested context levels used for the
 # dataset are in configs/levels/ (built on configs/tracer_levels_base.yaml).
 # `tracer` decides what the tool collects (changing it needs a re-trace), `selection` and

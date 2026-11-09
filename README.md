@@ -35,9 +35,11 @@ CS536_Project/
 │   │   └── __init__.py
 │   └── context_selection/
 │       └── __init__.py
-├── scripts/
-│   ├── check_device.py
-│   └── test_qwen.py
+├── scripts/                  # see scripts/README.md
+│   ├── dataset/              # build_dataset.py, clean_dataset.py
+│   ├── tracer/               # build_tracer_context.py, run_tracer_batch.py
+│   ├── setup/                # check_device.py, test_qwen.py, llamafactory_ui.sh
+│   └── analysis/             # analyze_predictions.py, preview_context_selection.py
 ├── configs/
 │   └── qwen7b.yaml
 ├── data/
@@ -104,7 +106,7 @@ uv pip install --python .cache/llamafactory/venv/bin/python -e .cache/llamafacto
 Launch it from the repository root:
 
 ```bash
-./scripts/llamafactory_ui.sh
+./scripts/setup/llamafactory_ui.sh
 ```
 
 Open [the local UI](http://127.0.0.1:7860). Stop it with Ctrl+C in its terminal.
@@ -131,7 +133,7 @@ before training.
 From project root:
 
 ```bash
-python scripts/check_device.py
+python scripts/setup/check_device.py
 ```
 
 This prints Python/PyTorch versions, CUDA and MPS availability, and selected
@@ -140,7 +142,7 @@ device (`cuda`, `mps`, or `cpu`).
 ## Run Qwen Inference Smoke Test
 
 ```bash
-python scripts/test_qwen.py
+python scripts/setup/test_qwen.py
 ```
 
 The script:
@@ -184,7 +186,7 @@ report figures from those saved predictions, see the
 [offline analysis guide](src/evaluation/README.md). For example:
 
 ```bash
-python scripts/analyze_predictions.py \
+python scripts/analysis/analyze_predictions.py \
   --predictions results/qwen3b-comparison/predictions.jsonl \
   --models majority base adapter --reference base \
   --output results/qwen3b-analysis-v1 --plots

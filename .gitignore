@@ -13,7 +13,7 @@ __pycache__/
 wandb/
 notebooks/model_downloads/
 
-# Build and run logs (e.g. <dataset root>/logs/build_*.log from scripts/build_dataset.py)
+# Build and run logs (e.g. <dataset root>/logs/build_*.log from scripts/dataset/build_dataset.py)
 *.log
 
 data/*
