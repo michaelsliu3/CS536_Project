@@ -220,3 +220,57 @@ Browser disconnects can leave the kernel running:
 reconnect before launching another writer. Persistent storage or a backup is required
 to survive instance/volume deletion; only work through the last intact checkpoint is
 recoverable. See the midpoint plan for the full artifact and metric inventory.
+
+## Related Papers
+
+Every paper the project documents cite, grouped by how closely it matches what we
+build. [Roadmap Section 15](docs/context_selector_roadmap.md#15-reading-and-citation-map)
+has how each one fits and where it differs.
+
+**Used directly**
+
+- [AACR-Bench](https://arxiv.org/html/2601.19494v3)
+  ([code](https://github.com/alibaba/aacr-bench)): the dataset and the semantic
+  judge that scores the outcome table.
+- [codebase-memory-mcp](https://arxiv.org/abs/2603.27277), a preprint
+  ([code](https://github.com/DeusData/codebase-memory-mcp)): the tracer that
+  builds the ten nested context levels.
+
+**Closest methods**
+
+- [Repoformer](https://proceedings.mlr.press/v235/wu24a.html) (ICML 2024): learns
+  when extra retrieved code is worth adding (code completion).
+- [RLCoder](https://arxiv.org/abs/2407.19487): learns retrieval from the downstream
+  model's results; our outcome table gives that signal for reviews.
+- [RECOMP](https://arxiv.org/abs/2310.04408) (ICLR 2024): selects only the useful
+  retrieved passages, close to our planned item-level selection.
+- [RepoHyper](https://arxiv.org/html/2403.06095v3)
+  ([code](https://github.com/FSoft-AI4Code/RepoHyper)): code-graph retrieval; the
+  first tracer choice, replaced because it is Python-oriented.
+
+**Alternatives and baselines**
+
+- [DraCo](https://arxiv.org/abs/2405.19782): dependency-aware retrieval.
+- [GraphCoder](https://arxiv.org/abs/2406.07003): structure-aware coarse-to-fine
+  retrieval.
+- [RepoCoder](https://arxiv.org/abs/2303.12570): iterative retrieval baseline.
+
+**Task and motivation**
+
+- [ContextCRBench](https://arxiv.org/abs/2511.07017) (FSE Industry 2026): code
+  review with fixed context choices; the midpoint pilot's dataset.
+- [Shi et al.](https://proceedings.mlr.press/v202/shi23a) (ICML 2023): irrelevant
+  context lowers accuracy (math reasoning, not code review).
+
+**Background**
+
+- [QLoRA](https://arxiv.org/abs/2305.14314): the midpoint's fine-tuning pilot.
+- [PyCG](https://arxiv.org/abs/2103.00587) and
+  [code property graphs](https://conferences.computer.org/sp/pdfs/sp/2014/4686a590.pdf):
+  earlier graph-based program analysis.
+- [ElliCE](https://papers.nips.cc/paper_files/paper/2025/hash/b34efa1182a3f96b2bc4cd844238ee31-Abstract-Conference.html)
+  (NeurIPS 2025): conceptual inspiration only.
+
+**Considered and superseded:** [CodeReviewer](https://arxiv.org/abs/2203.09095),
+[LAURA](https://arxiv.org/abs/2512.01356) and
+[SWE-PRBench](https://arxiv.org/abs/2603.26130).

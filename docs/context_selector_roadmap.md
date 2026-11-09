@@ -1373,14 +1373,46 @@ No open item should silently become an asserted fact in a later paper. Distingui
 
 ## 15. Reading and citation map
 
-Use primary sources, pin code revisions when implementing, and cite our modifications separately from the original methods:
+Use primary sources, pin code revisions when implementing, and cite our modifications separately from the original methods. This list covers every paper the project documents cite, grouped by how closely each matches what we build (updated November 8, 2026). Section 5.4 compares the retrieval methods; `docs/initial_investigation_context.md` Section 8 has the proposal-era bibliography.
 
-- [AACR-Bench paper](https://arxiv.org/html/2601.19494v3) and [dataset/code](https://github.com/alibaba/aacr-bench): task, curation, provenance, benchmark protocol.
-- [RepoHyper paper](https://arxiv.org/html/2403.06095v3) and [implementation](https://github.com/FSoft-AI4Code/RepoHyper): graph retrieval starting point.
-- [DraCo](https://arxiv.org/abs/2405.19782), [GraphCoder](https://arxiv.org/abs/2406.07003), and [PyCG](https://arxiv.org/abs/2103.00587): dependency-aware retrieval and static-analysis alternatives/components.
-- [RLCoder](https://arxiv.org/abs/2407.19487), [Repoformer](https://proceedings.mlr.press/v235/wu24a.html), and [RepoCoder](https://arxiv.org/abs/2303.12570): learned retrieval utility, retrieval gating, and iterative retrieval baselines.
-- [RECOMP](https://arxiv.org/abs/2310.04408): extractive/abstractive compression of retrieved evidence; useful conceptual comparison, not a code graph algorithm.
-- [Code property graphs](https://conferences.computer.org/sp/pdfs/sp/2014/4686a590.pdf): earlier graph-based program analysis; avoid claiming RepoHyper originated all such representations.
+### 15.1 Used directly
+
+- [AACR-Bench paper](https://arxiv.org/html/2601.19494v3) and [dataset/code](https://github.com/alibaba/aacr-bench): the dataset (Section 4) and the semantic judge that scores the outcome table (Section 8). Also its task, curation, provenance and benchmark protocol.
+- [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp), described in arXiv [2603.27277](https://arxiv.org/abs/2603.27277) (a preprint): the tracer, v0.12.1, that builds the ten nested context levels (Section 5.5).
+
+### 15.2 Closest methods
+
+| Paper | How it matches our pipeline | How it differs |
+|---|---|---|
+| [Repoformer](https://proceedings.mlr.press/v235/wu24a.html) (Wu et al., ICML 2024) | Learns when extra retrieved code is worth adding, like choosing the smallest level that is enough | Code completion, not review. One model decides and generates; we use a separate selector and a frozen reviewer. Not by itself minimum-subset selection |
+| [RLCoder](https://arxiv.org/abs/2407.19487) | Learns which retrieval helps the downstream model, including when to stop; the outcome table gives us that signal for reviews | Its completion-likelihood reward must be replaced by review scores. We take the objective, not its online reinforcement learning |
+| [RECOMP](https://arxiv.org/abs/2310.04408) (Xu, Shi and Choi, ICLR 2024) | Selects the useful retrieved sentences, or adds nothing; closest to the planned item-level selection | Language modeling and question answering; not a repository-code exploration method or a code graph algorithm |
+| [RepoHyper](https://arxiv.org/html/2403.06095v3) and its [implementation](https://github.com/FSoft-AI4Code/RepoHyper) | Code graph, embedding anchors and graph expansion, like our tracer | The first tracer recommendation (Sections 5.1–5.4), superseded by codebase-memory-mcp because its pipeline is Python-oriented and AACR has ten languages |
+
+### 15.3 Alternatives and baselines
+
+- [DraCo](https://arxiv.org/abs/2405.19782): follows code dependencies to retrieve the definitions that matter. Review adaptation still needed.
+- [GraphCoder](https://arxiv.org/abs/2406.07003): uses code structure in coarse-to-fine retrieval; more graph-building effort.
+- [RepoCoder](https://arxiv.org/abs/2303.12570): iterative retrieval baseline; its repeated generation differs from our one-call reviewer.
+
+### 15.4 Task and motivation
+
+- [ContextCRBench](https://arxiv.org/abs/2511.07017) (Hu et al., FSE Industry Papers 2026): code review with enriched context, comparing fixed context choices. The closest task, and the midpoint pilot's dataset before AACR.
+- [Shi et al.](https://proceedings.mlr.press/v202/shi23a) (ICML 2023): irrelevant context lowers accuracy. The evidence is from arithmetic and math reasoning, so cite it as motivation, not as code-review evidence.
+
+### 15.5 Background
+
+- [QLoRA](https://arxiv.org/abs/2305.14314) (Dettmers et al., 2023): the midpoint's fine-tuning pilot (Section 3), not the selector method.
+- [PyCG](https://arxiv.org/abs/2103.00587) and [code property graphs](https://conferences.computer.org/sp/pdfs/sp/2014/4686a590.pdf): earlier static analysis and graph-based program analysis. Do not claim RepoHyper originated all such representations.
+- [ElliCE](https://papers.nips.cc/paper_files/paper/2025/hash/b34efa1182a3f96b2bc4cd844238ee31-Abstract-Conference.html) (Turbal, Voitsitska and Semenova, NeurIPS 2025): conceptual inspiration only, the idea of a small input change that is still enough. It supplies no selector method or robustness guarantee.
+
+### 15.6 Considered and superseded
+
+- [CodeReviewer](https://arxiv.org/abs/2203.09095) (Li et al., ESEC/FSE 2022): removed because it has no linked issue or repository context.
+- [LAURA](https://arxiv.org/abs/2512.01356): adds PR and code context for review-comment generation.
+- [SWE-PRBench](https://arxiv.org/abs/2603.26130): reports that broader fixed context can hurt issue detection on its own benchmark.
+
+LAURA and SWE-PRBench were related evidence, not direct predecessors, and the proposal's later reference set replaced them.
 
 These references motivate the proposed architecture. They do not establish that our selected evidence preserves review quality, that AACR is sufficient for a large selector, or that a local selector produces net savings. Those are empirical questions for this plan.
 
