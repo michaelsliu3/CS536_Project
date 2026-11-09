@@ -1,12 +1,15 @@
 # Context selector roadmap: preserve code-review quality with less repository context
 
-**Revised November 7, 2026. Status: research design, not an implemented or validated system.**
+**Revised November 7, 2026; status updated November 8. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
 
 **Update, November 8, 2026:**
 - **Candidate gathering is implemented** with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the content-defined context levels, the one-command dataset build and what was measured on sample PRs.
+- **The dataset build has run on two FreeCAD PRs** with the content-defined levels, committed as a sample in `data/aacr_sample/`. The full 196-PR build has not been run.
 - **Section 8.5 records the output-side decisions,** each with the options not chosen: the reviewer, its fixed prompt, the scoring metric, which references count, score granularity, and the offline outcome table.
 - **The outcome-table code is built** but has only been smoke-tested with a 0.8B model. No Qwen3.8-27B review, real judge run or selector exists yet.
+- **Tests:** the whole suite, 114 tests, passes.
 - **Diagrams:** Section 2 opens with flow diagrams of the current architecture.
+- **Papers:** Section 15 lists every paper the project cites, grouped by how closely each matches our pipeline.
 
 This revision records the discussion moving from ContextCRBench merge-status prediction to repository-aware **review generation**. Our intended product is a context-selection component: given a diff and a reproducibly gathered pool of repository evidence, choose a small subset for a frozen reviewer. The reviewer produces useful findings; the selector does not decide whether a PR should merge.
 
@@ -321,11 +324,12 @@ These papers establish working architectures in their original tasks, not proof 
 
 ### 5.5 Implemented: codebase-memory-mcp tracer and nested context levels (November 8, 2026)
 
-**Status:**
-- **Implemented and unit-tested** (64 tests pass).
-- **All ten levels** have been built for one AACR entry (vllm-project/vllm#17425, Python).
-- **The earlier single-level default config** has also been run on one Go entry (ollama/ollama#12185) and one TypeScript entry (cline/cline#5177).
-- **Not done:** the dataset has not been run. No reviewer has seen these inputs, so nothing here says whether any level preserves review quality.
+**Status (updated Nov 8):**
+- **Implemented and unit-tested:** 66 tests cover the tracer, the levels and the dataset builder (`tests/test_tracer_context.py`, `test_tracer_batch.py`, `test_context_dataset.py`, `test_build_pipeline.py`); the whole suite of 114 passes.
+- **Built with the current, content-defined levels:** two FreeCAD PRs (#19411, #21257; Section 5.5.7), committed as `data/aacr_sample/context_levels.json`.
+- **Packed at all ten levels in both level designs:** ten PRs in eight languages, without writing a dataset (Section 5.5.7). PHP and C# have not run.
+- **Earlier runs, with the old per-level budgets:** vllm-project/vllm#17425 at all ten levels (Section 5.5.4); ollama/ollama#12185 and cline/cline#5177 with the single-level default config; three PRs through the dataset builder (Section 5.5.6).
+- **Not done:** the full 196-PR build. No reviewer has seen these inputs, so nothing here says whether any level preserves review quality.
 
 #### 5.5.1 Tool and why
 
@@ -455,18 +459,18 @@ Known limits:
   - Calls on objects whose type the tool cannot resolve are missed: in vLLM, no `logger.warning_once(...)` call links to the logger implementation.
   - The text search partly compensates, but skips names with more than 50 matches.
 - **Repeatability conditions:** `CBM_WORKERS` must stay pinned. The folder path changes the tool's similarity links (which the builder does not use) and its order within a hop (which the builder re-sorts).
-- **Untested:**
-  - The other languages: only Python, Go and TypeScript have run, and only Python at all levels.
-  - Very large repositories (elasticsearch, ClickHouse, FreeCAD).
+- **Untested (updated Nov 8):**
+  - PHP and C#. The other eight languages have been traced and packed at all ten levels (Section 5.5.7).
+  - ClickHouse, and the timing of the very large repositories over a full build. FreeCAD has been built and elasticsearch packed (Section 5.5.7).
   - The force-push fallback against GitHub.
 - **Counts depend on the reviewer tokenizer:** the earlier Qwen2.5-Coder counts were about 5% lower on the same text.
 - **PR text is current, not historical:** edits after review are flagged but not undone.
 
 #### 5.5.6 The dataset builder: one file for every PR and level (November 8, 2026)
 
-**Status:** built and tested on 3 PRs, plus an interrupted-and-resumed 2-PR run in a scratch folder. The whole dataset has **not** been run.
+**Status:** built and tested on 3 PRs with the old budgets, then on the two FreeCAD PRs with the content-defined levels (Section 5.5.7), plus an interrupted-and-resumed 2-PR run in a scratch folder. The whole dataset has **not** been run.
 
-**What it does:** one command, `scripts/dataset/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file.
+**What it does:** one command, `scripts/dataset/build_dataset.py ROOT` (code in `src/tracer_context/dataset.py` and `pipeline.py`), builds the context levels for every AACR entry into **one file** in the dataset folder: `ROOT/context_levels.jsonl`, one JSON line per PR. The standard root is `data/aacr`. The outcome-table notebook and selector training load just that file. `data/build_dataset.sh` and `data/clean_dataset.sh` run the build and clean scripts with that root when given no arguments (`DATASET_ROOT` overrides it).
 
 **File format (Nov 8):**
 - **Plain JSON Lines** (`context_levels.jsonl`), no longer gzip. Compression saved little: the 2-PR file is 9.1 MB plain against 1.7 MB compressed, and the whole dataset is estimated at about 0.3 GB plain. Plain text is readable with any JSON tool.
@@ -798,7 +802,7 @@ Proceed to selector training only if the reviewer recovers enough valid findings
 
 **Status:**
 - **Built (Nov 8):** the outcome-table code and notebook (`src/review_outcomes/`, `notebooks/outcome_table.ipynb`; Section 8.5.8).
-- **Run so far:** only a pipeline smoke test with a 0.8B model on two levels of one PR.
+- **Run so far:** only pipeline smoke tests with a 0.8B model, on two levels each of two PRs (vllm#17425, cline#5177; Section 8.5.8).
 - **Not done:** no Qwen3.8-27B review and no real judge run. The judge model is still open.
 
 Each subsection gives the decision, the options considered and not chosen (kept for reference), and what is still open. Facts about AACR-Bench below come from its public repository at commit `ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df` (`dataset/positive_samples.json`, `evaluation/judge.py`, `evaluation/evaluate.py`, `evaluation/reviewers/`, `docs/metrics.md`), read on November 8.
@@ -1053,7 +1057,7 @@ Options considered and not chosen:
 
 #### 8.5.8 Implemented: the outcome-table code and notebook (November 8, 2026)
 
-**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 8 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr/context_levels.jsonl`, Section 5.5.6), it:
+**What it is:** `notebooks/outcome_table.ipynb` drives `src/review_outcomes/` (see its README; 9 unit tests, no models needed). For every (entry, level) in the one-file context dataset (`data/aacr/context_levels.jsonl`, Section 5.5.6), it:
 
 1. reviews it with the frozen reviewer (system: Codex rubric; user: request + `context.md`);
 2. parses the JSON findings;
@@ -1274,11 +1278,12 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 **Progress (Nov 8):** retrieval uses codebase-memory-mcp instead of RepoHyper.
 
 - **Built:** the deterministic tracer, the ten nested context levels, the prompt-section renderer (PR text, diff, context) and the AACR batch runner with per-entry checks (Section 5.5).
-- **Measured:** one PR at all levels; two more at one level.
-- **Also built:** the one-file dataset builder, which deletes each clone after use (Section 5.5.6). It was tested on 3 PRs.
+- **Measured:** with the old budgets, one PR at all levels and two more at one level; then both level designs on 10 PRs in eight languages, packing only (Section 5.5.7).
+- **Also built:** the one-file dataset builder, which deletes each clone after use (Section 5.5.6). It was tested on 3 PRs, then built the committed 2-PR FreeCAD sample with the content-defined levels.
 - **Next:**
   - ~~decide between content-defined and fixed-budget levels~~ (decided Nov 8: content-defined, one input cap; Section 5.5.7);
-  - pilot about two PRs per language, then build the whole dataset with `scripts/dataset/build_dataset.py data/aacr`;
+  - choose the tracer index mode (Section 14);
+  - pilot about two PRs per language, including PHP and C#, then build the whole dataset with `data/build_dataset.sh`;
   - run a reviewer on the levels.
 
 **Gate:** identical inputs reproduce candidate IDs and prompt hashes; no reference-driven retrieval; all prompts fit under explicit rules; reviewer/scorer behavior is credible; some context-sensitive findings exist. Measure coverage before assuming all necessary evidence is in C.
@@ -1345,7 +1350,7 @@ Recommended implementation checks:
 
 Choose new module names during implementation; paths in Section 7 are proposals.
 
-As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/tracer/build_tracer_context.py`, `scripts/tracer/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/dataset/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/tracer/build_tracer_context.py`, `scripts/tracer/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/dataset/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). `scripts/dataset/clean_dataset.py` starts a build over, `data/build_dataset.sh` and `data/clean_dataset.sh` wrap both, and `data/aacr_sample/` holds a committed 2-PR sample of the dataset. The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
 
 ## 14. Open decisions that must stay visible
 
@@ -1353,7 +1358,7 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 |---|---|
 | Exact AACR release and usable size | Release hash, actual counts, reference provenance, and mismatch audit |
 | Python-only or broader language scope | Parse support and independent repository counts after filtering |
-| RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: behavior on the other languages and very large repositories |
+| RepoHyper adaptation versus alternate backend | **Decided Nov 8:** codebase-memory-mcp (Section 5.5). Still needed: PHP and C# (the other eight languages have been traced, Section 5.5.7) and a full build on the very large repositories |
 | Tracer index mode (`full` vs `fast`) | `full` mode's call/test links depend on the folder the clone sits in, and `fast` was path-independent with fewer links (Section 5.5.6). Choose before building the dataset |
 | Fixed-budget versus content-defined context levels | **Decided Nov 8:** content-defined levels with one input cap of 256,339 tokens and item limits as level totals, after measuring both on 10 PRs (Section 5.5.7). Higher outcome-table cost accepted |
 | Reviewer model/size/precision | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call, greedy (Section 8.5.2). Still needed: memory and window fit, latency, run-to-run noise |

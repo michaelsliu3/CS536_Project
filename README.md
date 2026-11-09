@@ -1,55 +1,136 @@
 # CS536 Project: Learned Context Selection for LLM Code Review
 
-This repository studies whether a learned per-diff selector can preserve a
-frozen LLM reviewer's ContextCRBench quality-assessment accuracy while reducing
-optional context tokens. The primary reviewer is
-`Qwen/Qwen2.5-Coder-7B-Instruct`; the 3B model supports lower-cost pilots.
+This project studies whether a learned selector can decide how much repository
+context a frozen LLM code reviewer needs, so that it keeps review quality while
+sending fewer input tokens. The main experiment uses
+[AACR-Bench](https://github.com/alibaba/aacr-bench): 196 pull requests from 50
+repositories in ten languages, with 1,506 reference review comments.
 
-Frozen inference supports:
+The [roadmap](docs/context_selector_roadmap.md) records the design, every decision
+with the options not chosen, and what has been measured. Its Section 2 has flow
+diagrams of the architecture.
 
-- Windows + NVIDIA GPU (CUDA)
-- Apple Silicon Mac (MPS)
+## Pipeline
 
-The central experiment keeps Qwen frozen and trains a compact context selector.
-`notebooks/qwen3b_qlora_contextcrbench.ipynb` is a separate exploratory QLoRA
-feasibility test requested for the 3B reviewer; it is not the main method and
-defaults to 3B QLoRA on NVIDIA CUDA, with notebook preparation on the M4 Max.
+1. **Dataset build** (no LLM). For every PR, a deterministic tracer,
+   [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) v0.12.1,
+   builds ten nested context levels. They run from the PR text and diff
+   (`L01_min`) to everything traced within three hops (`L10_all`). Each level
+   shows everything its kinds and item limits allow, up to one cap of 256,339
+   input tokens. The result is one file, `data/aacr/context_levels.jsonl`, with one
+   line per PR.
+2. **Outcome table.** The frozen reviewer, `Qwen/Qwen3.8-27B` with OpenAI Codex's
+   `/review` rubric and greedy decoding, reviews every (PR, level) once. AACR's
+   file-level semantic judge scores the findings against the reference comments.
+   A level identical to its parent is reviewed only once.
+3. **Selector.** Classical models (gradient-boosted trees, linear models, random
+   forests and a small MLP) read input-side PR features and pick one level per PR.
+   They are evaluated by looking up the outcome table. Item-level selection, which
+   picks individual traced items, comes next.
 
-Context-selection baselines (`diff_only`, `all_context`, `fixed`, `random`, and
-BM25 `similarity`) and a local tokenizer preview are available in
-[src/context_selection](src/context_selection/README.md). They enforce measured
-chat-token budgets without model inference; see that guide for usage, tests,
-and evaluation limits.
+## Status (November 8, 2026)
+
+- **Built and tested:** the tracer, the ten levels, the dataset builder and the
+  outcome-table code. The suite (`.venv/bin/python -m unittest discover -s tests`)
+  runs 114 tests, all passing.
+- **Run:** the dataset build on two FreeCAD PRs, committed as a sample in
+  [data/aacr_sample](data/aacr_sample/README.md). The outcome table has only been
+  smoke-tested, with a 0.8B model on two levels each of two PRs, which says nothing
+  about review quality.
+- **Not done:** the full 196-PR build, any Qwen3.8-27B review, the choice of judge
+  model, and the selector.
+
+## Quick Start
+
+Set up the environment first (below). The dataset build also needs `git` and the
+GitHub CLI `gh`, logged in. If they are missing, it downloads and verifies the
+pinned AACR-Bench file and codebase-memory-mcp build, and downloads the reviewer's
+tokenizer files.
+
+Run the setup checks and see the build plan without building anything:
+
+```bash
+data/build_dataset.sh --dry-run
+```
+
+Build the dataset into `data/aacr/context_levels.jsonl`. Re-running resumes: it
+skips PRs already built with the same inputs and retries failed ones.
+
+```bash
+data/build_dataset.sh
+```
+
+List the build and downloaded repositories, then delete them after asking, to
+start over:
+
+```bash
+data/clean_dataset.sh
+```
+
+`DATASET_ROOT=<folder>` changes the dataset folder, and extra arguments go to
+`scripts/dataset/build_dataset.py` or `clean_dataset.py` (see their `--help`). To
+read the format without building, open the committed 2-PR sample,
+`data/aacr_sample/context_levels.json`.
+
+The outcome table is built by `notebooks/outcome_table.ipynb`. Choose its profile
+with the `OUTCOME_PROFILE` environment variable:
+
+- **`cloud`** (the default) calls Qwen3.8-27B through an OpenAI-compatible server,
+  such as vLLM on the cloud GPU. Its judge is a placeholder that stops the notebook
+  until the judge model is chosen.
+- **`local-smoke`** runs `Qwen/Qwen3.5-0.8B` in-process on two levels of
+  cline/cline#5177, with a keyword stand-in for the judge. It tests the pipeline
+  only.
+
+Results go to `data/aacr/outcomes/<run_name>/`: `table.csv` per (PR, level),
+`coverage.csv` per reference, each cell's review and judgment, and `manifest.json`.
+More detail: [src/tracer_context](src/tracer_context/README.md),
+[src/review_outcomes](src/review_outcomes/README.md) and
+[scripts](scripts/README.md).
 
 ## Repository Layout
 
 ```
 CS536_Project/
 ├── src/
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── qwen.py
-│   ├── evaluation/
-│   │   └── __init__.py
-│   ├── perturbations/
-│   │   └── __init__.py
-│   └── context_selection/
-│       └── __init__.py
+│   ├── tracer_context/       # tracer, context levels, dataset builder
+│   ├── review_outcomes/      # reviewer runs, AACR judge, outcome table
+│   ├── context_selection/    # midpoint: ContextCRBench context baselines
+│   ├── evaluation/           # midpoint: splits, comparison, analysis, plots
+│   ├── training/             # midpoint: training runtime and resume
+│   ├── models/               # midpoint: Qwen inference wrapper
+│   └── perturbations/        # empty placeholder
 ├── scripts/                  # see scripts/README.md
 │   ├── dataset/              # build_dataset.py, clean_dataset.py
 │   ├── tracer/               # build_tracer_context.py, run_tracer_batch.py
 │   ├── setup/                # check_device.py, test_qwen.py, llamafactory_ui.sh
 │   └── analysis/             # analyze_predictions.py, preview_context_selection.py
 ├── configs/
-│   └── qwen7b.yaml
+│   ├── levels/               # L01_min.yaml ... L10_all.yaml
+│   ├── tracer_levels_base.yaml
+│   ├── tracer_context.yaml   # standalone single-level tracer config
+│   ├── review_prompts/       # pinned Codex /review rubric, with licenses
+│   └── qwen7b.yaml           # midpoint inference config
 ├── data/
-├── results/
-├── checkpoints/
+│   ├── build_dataset.sh      # build data/aacr/context_levels.jsonl
+│   ├── clean_dataset.sh      # delete a build to start over
+│   └── aacr_sample/          # committed 2-PR sample of the dataset
 ├── notebooks/
+│   ├── outcome_table.ipynb
+│   ├── qwen3b_qlora_contextcrbench.ipynb    # midpoint
+│   └── qwen3b_evaluation_comparison.ipynb   # midpoint
+├── tests/                    # unittest suite
+├── docs/                     # roadmap, proposal, course documents, report template
+├── paper/                    # midpoint report and plans
+├── results/  checkpoints/  models/          # local outputs, not committed
+├── log_training.sh           # midpoint: follow training logs
 ├── requirements.txt
-├── .gitignore
+├── AGENTS.md
 └── README.md
 ```
+
+Everything else under `data/` (the built dataset, clones, logs and outcome tables)
+is git-ignored.
 
 ## Environment Setup
 
@@ -82,15 +163,60 @@ pip install -r requirements.txt
 
 > Use Python 3.11 if available.
 
-For the exploratory training notebook, select the **CS536 (.venv)** kernel and
-set `HARDWARE = "auto"` (or explicitly `"nvidia"` / `"m4_max"`) in its configuration
-cell. Both profiles default to 3B QLoRA, 2048-token sequences, and all rows
-for one epoch. Prepare the notebook on the M4 Max, then train on an NVIDIA
-CUDA cloud machine; the Mac training preflight stops before downloads. The notebook's one-time install cell selects packages for the host;
-restart the kernel after installation. Mac preparation does not require bitsandbytes.
-The data and model download cells still download multi-GB files when executed.
+The dataset build runs on a laptop. Qwen3.8-27B does not fit the development
+laptop (Apple M4 Max, 36 GB), so real outcome-table runs need the cloud GPU.
 
-## LLaMA-Factory web UI
+## Verify Hardware/Runtime Detection
+
+From project root:
+
+```bash
+python scripts/setup/check_device.py
+```
+
+This prints Python/PyTorch versions, CUDA and MPS availability, and selected
+device (`cuda`, `mps`, or `cpu`).
+
+## Troubleshooting
+
+- If CUDA is expected but `torch.cuda.is_available()` is `False`, verify NVIDIA
+  drivers and install a CUDA-enabled PyTorch wheel from the official PyTorch
+  installation page.
+- If MPS is expected but unavailable, verify Apple Silicon + recent macOS and a
+  compatible PyTorch build.
+
+## Midpoint Pilot (ContextCRBench, historical)
+
+Before the AACR-Bench work, the midpoint pilot fine-tuned
+`Qwen/Qwen2.5-Coder-3B-Instruct` with QLoRA to predict ContextCRBench merge
+status. It is kept as infrastructure and lessons, not as evidence for the
+selector (roadmap Section 3), and its code and notebooks still run. The
+[midpoint report](paper/midpoint/main.pdf) describes it.
+
+### Training notebook
+
+`notebooks/qwen3b_qlora_contextcrbench.ipynb` is the exploratory QLoRA
+feasibility test for the 3B reviewer. It defaults to 3B QLoRA on NVIDIA CUDA,
+with notebook preparation on the M4 Max.
+
+Select the **CS536 (.venv)** kernel and set `HARDWARE = "auto"` (or explicitly
+`"nvidia"` / `"m4_max"`) in its configuration cell. Both profiles default to 3B
+QLoRA, 2048-token sequences, and all rows for one epoch. Prepare the notebook on
+the M4 Max, then train on an NVIDIA CUDA cloud machine; the Mac training
+preflight stops before downloads. The notebook's one-time install cell selects
+packages for the host; restart the kernel after installation. Mac preparation
+does not require bitsandbytes. The data and model download cells still download
+multi-GB files when executed.
+
+### Context-selection baselines
+
+Context-selection baselines for ContextCRBench (`diff_only`, `all_context`,
+`fixed`, `random`, and BM25 `similarity`) and a local tokenizer preview are
+available in [src/context_selection](src/context_selection/README.md). They
+enforce measured chat-token budgets without model inference; see that guide for
+usage, tests, and evaluation limits.
+
+### LLaMA-Factory web UI
 
 The optional [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory/tree/v0.9.5)
 UI uses a separate Python environment so its dependency versions do not change
@@ -128,18 +254,7 @@ inherit settings from the notebook automatically. On a cloud NVIDIA machine,
 install CUDA PyTorch and bitsandbytes in the separate LLaMA-Factory environment
 before training.
 
-## Verify Hardware/Runtime Detection
-
-From project root:
-
-```bash
-python scripts/setup/check_device.py
-```
-
-This prints Python/PyTorch versions, CUDA and MPS availability, and selected
-device (`cuda`, `mps`, or `cpu`).
-
-## Run Qwen Inference Smoke Test
+### Run Qwen inference smoke test
 
 ```bash
 python scripts/setup/test_qwen.py
@@ -147,29 +262,22 @@ python scripts/setup/test_qwen.py
 
 The script:
 
-- loads `Qwen/Qwen2.5-Coder-7B-Instruct`
+- loads `Qwen/Qwen2.5-Coder-7B-Instruct`, the midpoint's primary model
+  (`configs/qwen7b.yaml`)
 - uses chat-format messages
 - runs deterministic generation (`temperature=0`, `do_sample=False`)
 - reports model loading time and generation time
 
-## Notes
+Notes:
 
 - Hugging Face model weights are not committed to Git; each machine uses its
   own local HF cache.
-- No quantization is enabled yet (`quantization: none`) to keep baseline
-  behavior clean for later experiments.
-- The model wrapper is structured to support future work on logits, hidden
-  states, gradients, LoRA, and evaluation without changing high-level scripts.
+- No quantization is enabled (`quantization: none`) to keep baseline behavior
+  clean.
+- The model wrapper is structured to support logits, hidden states, gradients,
+  LoRA, and evaluation without changing high-level scripts.
 
-## Troubleshooting
-
-- If CUDA is expected but `torch.cuda.is_available()` is `False`, verify NVIDIA
-  drivers and install a CUDA-enabled PyTorch wheel from the official PyTorch
-  installation page.
-- If MPS is expected but unavailable, verify Apple Silicon + recent macOS and a
-  compatible PyTorch build.
-
-## Evaluate a completed Qwen3B adapter
+### Evaluate a completed Qwen3B adapter
 
 Open `notebooks/qwen3b_evaluation_comparison.ipynb` with **CS536 (.venv)**.
 Set the adapter directory (including tokenizer files and `run_manifest.json`),
@@ -196,7 +304,7 @@ Use the comparison notebook's actual output path. This command performs no
 inference or training; `--plots` uses Matplotlib. Real prediction artifacts are
 required before reporting model scores or token savings.
 
-### Cloud checkpoints and recovery
+#### Cloud checkpoints and recovery
 
 The training notebook fixes **3B QLoRA** on every profile; execution requires NVIDIA
 CUDA. Set `CHECKPOINT_ROOT` to persistent cloud storage and keep the same `RUN_NAME`
