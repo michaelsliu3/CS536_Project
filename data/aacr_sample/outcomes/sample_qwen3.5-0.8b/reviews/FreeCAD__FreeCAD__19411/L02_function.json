@@ -1,0 +1,51 @@
+{
+ "backend": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 2048,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "entry": "FreeCAD__FreeCAD__19411",
+ "input_sha256": "dbade7fe09e40127a5b891421437d02ba6766b6138085e4702d783d0f30f9052",
+ "input_tokens": 55742,
+ "key": "5c811f48699a8a8360ca543720ee9aaf9af2880deacac7cde19a000c9f951117",
+ "level": "L02_function",
+ "parsed": {
+  "error": null,
+  "findings": [
+   {
+    "body": "In DrawViewPart::getDirsFromFront(), the code uses `viewType.c_str()` to convert string to `ProjDirection` enum, but `viewType` is already an `int` enum. This causes a type mismatch that results in incorrect direction handling for slices along wrong tensor dimensions.",
+    "confidence": 0.95,
+    "from_line": 1336,
+    "note": "[P1] Un-padding slices along wrong tensor dimensions\n\nIn DrawViewPart::getDirsFromFront(), the code uses `viewType.c_str()` to convert string to `ProjDirection` enum, but `viewType` is already an `int` enum. This causes a type mismatch that results in incorrect direction handling for slices along wrong tensor dimensions.",
+    "path": "src/Mod/TechDraw/App/DrawViewPart.cpp",
+    "priority": 1,
+    "raw_path": "src/Mod/TechDraw/App/DrawViewPart.cpp",
+    "side": "right",
+    "title": "[P1] Un-padding slices along wrong tensor dimensions",
+    "to_line": 1396
+   }
+  ],
+  "invalid_findings": 0,
+  "overall": {
+   "overall_confidence_score": 0.95,
+   "overall_correctness": "patch is incorrect",
+   "overall_explanation": "The code uses a type mismatch that causes incorrect direction handling for slices along wrong tensor dimensions. The fix requires converting the string to int before passing to the enum."
+  },
+  "status": "ok"
+ },
+ "parser": "codex-json-v1",
+ "prompt_sha256": "823487e00f6c7d0ee5347a52ab0e9eed398ab0a8a67d3211767831ed3ab7ea40",
+ "prompt_version": "codex-rubric-4e4767f+one-call-request-v1",
+ "reply": {
+  "completion_tokens": 257,
+  "finish_reason": "stop",
+  "prompt_tokens": 57452,
+  "seconds": 115.07,
+  "text": "```json\n{\n  \"findings\": [\n    {\n      \"title\": \"[P1] Un-padding slices along wrong tensor dimensions\",\n      \"body\": \"In DrawViewPart::getDirsFromFront(), the code uses `viewType.c_str()` to convert string to `ProjDirection` enum, but `viewType` is already an `int` enum. This causes a type mismatch that results in incorrect direction handling for slices along wrong tensor dimensions.\",\n      \"confidence_score\": 0.95,\n      \"priority\": 1,\n      \"code_location\": {\n        \"absolute_file_path\": \"src/Mod/TechDraw/App/DrawViewPart.cpp\",\n        \"line_range\": {\n          \"start\": 1336,\n          \"end\": 1396\n        }\n      }\n    }\n  ],\n  \"overall_correctness\": \"patch is incorrect\",\n  \"overall_explanation\": \"The code uses a type mismatch that causes incorrect direction handling for slices along wrong tensor dimensions. The fix requires converting the string to int before passing to the enum.\",\n  \"overall_confidence_score\": 0.95\n}\n```\n"
+ },
+ "status": "ok",
+ "truncated": false
+}

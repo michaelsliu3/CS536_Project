@@ -1,0 +1,51 @@
+{
+ "backend": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 2048,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "entry": "FreeCAD__FreeCAD__21257",
+ "input_sha256": "a78e85ce54183b1570aab20068e5b6dfefa97d71cc6a1d105c443b6f63fc09bd",
+ "input_tokens": 40921,
+ "key": "9eb294c75833ec6d8ea4e96b1754cb55734684ab74966ecc43f19c815e171056",
+ "level": "L02_function",
+ "parsed": {
+  "error": null,
+  "findings": [
+   {
+    "body": "The function signature of Part::Feature::getShape() has changed from accepting a Base::Matrix4D* pmat parameter to accepting an int options parameter. The original implementation required pmat to be passed as a Base::Matrix4D* and the call to getTopoShape() to be made with options | NoElementMap. The new implementation simply passes options | NoElementMap to getTopoShape(). This change affects shape resolution for features that require explicit matrix transformation or element mapping, as the matrix parameter is no longer required in the new signature. The fix requires updating all callers of getShape() to pass the correct options parameter value.",
+    "confidence": 0.95,
+    "from_line": 855,
+    "note": "[P1] Part::Feature::getShape() signature mismatch causes shape resolution issues\n\nThe function signature of Part::Feature::getShape() has changed from accepting a Base::Matrix4D* pmat parameter to accepting an int options parameter. The original implementation required pmat to be passed as a Base::Matrix4D* and the call to getTopoShape() to be made with options | NoElementMap. The new implementation simply passes options | NoElementMap to getTopoShape(). This change affects shape resolution for features that require explicit matrix transformation or element mapping, as the matrix parameter is no longer required in the new signature. The fix requires updating all callers of getShape() to pass the correct options parameter value.",
+    "path": "src/Mod/Part/App/PartFeature.cpp",
+    "priority": 1,
+    "raw_path": "src/Mod/Part/App/PartFeature.cpp",
+    "side": "right",
+    "title": "[P1] Part::Feature::getShape() signature mismatch causes shape resolution issues",
+    "to_line": 859
+   }
+  ],
+  "invalid_findings": 0,
+  "overall": {
+   "overall_confidence_score": 0.95,
+   "overall_correctness": "patch is incorrect",
+   "overall_explanation": "The patch introduces a signature mismatch that affects shape resolution for features requiring explicit matrix transformation or element mapping. The original implementation required pmat to be passed as a Base::Matrix4D* parameter, but the new implementation passes options | NoElementMap directly to getTopoShape(). This change affects shape resolution for features that require explicit matrix transformation or element mapping, as the matrix parameter is no longer required in the new signature. The fix requires updating all callers of getShape() to pass the correct options parameter value."
+  },
+  "status": "ok"
+ },
+ "parser": "codex-json-v1",
+ "prompt_sha256": "823487e00f6c7d0ee5347a52ab0e9eed398ab0a8a67d3211767831ed3ab7ea40",
+ "prompt_version": "codex-rubric-4e4767f+one-call-request-v1",
+ "reply": {
+  "completion_tokens": 401,
+  "finish_reason": "stop",
+  "prompt_tokens": 42631,
+  "seconds": 26.25,
+  "text": "```json\n{\n  \"findings\": [\n    {\n      \"title\": \"[P1] Part::Feature::getShape() signature mismatch causes shape resolution issues\",\n      \"body\": \"The function signature of Part::Feature::getShape() has changed from accepting a Base::Matrix4D* pmat parameter to accepting an int options parameter. The original implementation required pmat to be passed as a Base::Matrix4D* and the call to getTopoShape() to be made with options | NoElementMap. The new implementation simply passes options | NoElementMap to getTopoShape(). This change affects shape resolution for features that require explicit matrix transformation or element mapping, as the matrix parameter is no longer required in the new signature. The fix requires updating all callers of getShape() to pass the correct options parameter value.\",\n      \"confidence_score\": 0.95,\n      \"priority\": 1,\n      \"code_location\": {\n        \"absolute_file_path\": \"src/Mod/Part/App/PartFeature.cpp\",\n        \"line_range\": {\n          \"start\": 855,\n          \"end\": 859\n        }\n      }\n    }\n  ],\n  \"overall_correctness\": \"patch is incorrect\",\n  \"overall_explanation\": \"The patch introduces a signature mismatch that affects shape resolution for features requiring explicit matrix transformation or element mapping. The original implementation required pmat to be passed as a Base::Matrix4D* parameter, but the new implementation passes options | NoElementMap directly to getTopoShape(). This change affects shape resolution for features that require explicit matrix transformation or element mapping, as the matrix parameter is no longer required in the new signature. The fix requires updating all callers of getShape() to pass the correct options parameter value.\",\n  \"overall_confidence_score\": 0.95\n}\n```\n"
+ },
+ "status": "ok",
+ "truncated": false
+}

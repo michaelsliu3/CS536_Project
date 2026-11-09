@@ -1,0 +1,51 @@
+{
+ "backend": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 2048,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "entry": "FreeCAD__FreeCAD__19411",
+ "input_sha256": "510061532618509b6e8e02f31da63a70472edcf6ec25073c7daf0cb51720a796",
+ "input_tokens": 27365,
+ "key": "5164e7ba9f797fa6cfc6d2cdc4ef67ae20f989dd4c52f4ae1020a8bfca223c07",
+ "level": "L01_min",
+ "parsed": {
+  "error": null,
+  "findings": [
+   {
+    "body": "In DrawViewPart::getDirsFromFront(), the code uses `viewType` (string) instead of `viewType` (ProjDirection) to determine the direction. This causes slices along wrong tensor dimensions to be un-padded. The fix requires casting `viewType` to `ProjDirection` before passing it to `getDirsFromFront`. The line range is 1336-1336.",
+    "confidence": 0.95,
+    "from_line": 1336,
+    "note": "[P1] Un-padding slices along wrong tensor dimensions\n\nIn DrawViewPart::getDirsFromFront(), the code uses `viewType` (string) instead of `viewType` (ProjDirection) to determine the direction. This causes slices along wrong tensor dimensions to be un-padded. The fix requires casting `viewType` to `ProjDirection` before passing it to `getDirsFromFront`. The line range is 1336-1336.",
+    "path": "src/Mod/TechDraw/App/DrawViewPart.cpp",
+    "priority": 1,
+    "raw_path": "src/Mod/TechDraw/App/DrawViewPart.cpp",
+    "side": "right",
+    "title": "[P1] Un-padding slices along wrong tensor dimensions",
+    "to_line": 1336
+   }
+  ],
+  "invalid_findings": 0,
+  "overall": {
+   "overall_confidence_score": 0.95,
+   "overall_correctness": "patch is correct",
+   "overall_explanation": "The code incorrectly uses a string parameter for direction handling, which causes slices along wrong tensor dimensions to be un-padded. The fix requires casting the string parameter to the correct `ProjDirection` enum type before passing it to the function."
+  },
+  "status": "ok"
+ },
+ "parser": "codex-json-v1",
+ "prompt_sha256": "823487e00f6c7d0ee5347a52ab0e9eed398ab0a8a67d3211767831ed3ab7ea40",
+ "prompt_version": "codex-rubric-4e4767f+one-call-request-v1",
+ "reply": {
+  "completion_tokens": 298,
+  "finish_reason": "stop",
+  "prompt_tokens": 29075,
+  "seconds": 13.2,
+  "text": "```json\n{\n  \"findings\": [\n    {\n      \"title\": \"[P1] Un-padding slices along wrong tensor dimensions\",\n      \"body\": \"In DrawViewPart::getDirsFromFront(), the code uses `viewType` (string) instead of `viewType` (ProjDirection) to determine the direction. This causes slices along wrong tensor dimensions to be un-padded. The fix requires casting `viewType` to `ProjDirection` before passing it to `getDirsFromFront`. The line range is 1336-1336.\",\n      \"confidence_score\": 0.95,\n      \"priority\": 1,\n      \"code_location\": {\n        \"absolute_file_path\": \"src/Mod/TechDraw/App/DrawViewPart.cpp\",\n        \"line_range\": {\n          \"start\": 1336,\n          \"end\": 1336\n        }\n      }\n    }\n  ],\n  \"overall_correctness\": \"patch is correct\",\n  \"overall_explanation\": \"The code incorrectly uses a string parameter for direction handling, which causes slices along wrong tensor dimensions to be un-padded. The fix requires casting the string parameter to the correct `ProjDirection` enum type before passing it to the function.\",\n  \"overall_confidence_score\": 0.95\n}\n```\n"
+ },
+ "status": "ok",
+ "truncated": false
+}

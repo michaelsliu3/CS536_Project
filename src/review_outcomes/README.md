@@ -10,7 +10,7 @@ Selector training and evaluation then only look up rows. Driver:
 | Find cells | `table.discover_cells` | one per (PR, level) in `data/aacr/context_levels.jsonl`, from `scripts/dataset/build_dataset.py data/aacr` |
 | Review | `prompts`, `backends`, `parse`, `table.run_reviews` | `reviews/<entry>/<level>.json`: raw reply, parsed findings, tokens, prompt hash, backend settings |
 | Judge | `judge`, `table.run_judgments` | `judgments/<entry>/<level>.json`: per generated comment, matched references and whether new; per reference, covered |
-| Table | `table.build_table`, `write_outputs` | `table.csv`/`table.jsonl` (per entry and level), `coverage.csv` (per reference and level), `manifest.json` |
+| Table | `table.build_table`, `write_outputs` | `table.csv`/`table.json` (per entry and level; the JSON file is one array), `coverage.csv` (per reference and level), `manifest.json` |
 
 - **Reviewer prompt:** OpenAI Codex's `/review` rubric, verbatim, as the system message. The user message is a one-sentence request plus the level's `context.md` (see [`configs/review_prompts/`](../../configs/review_prompts/README.md)). The rubric asks for JSON findings with a title, body, priority, confidence, and path plus line range. Each finding becomes one generated comment (`note` = title + body).
 - **Parsing:** bare, fenced, or prose-wrapped JSON is accepted. Anything else is `malformed`, scored as an empty review, and reported. A reply cut off at the output limit is marked `truncated`. Paths are made repository-relative using the files named in the trace, never the reference comments.
@@ -25,7 +25,9 @@ Selector training and evaluation then only look up rows. Driver:
 - **Identical levels are reviewed once:** a level whose input is identical to another's (the dataset marks `same_as_parent`) gets a copy of that review and its judgment, with `reused_from`, instead of another reviewer and judge call. Greedy decoding would give the same review anyway.
 
 **Status:**
-- **Run so far:** only pipeline smoke tests with `Qwen/Qwen3.5-0.8B`, on vllm#17425 `L01`–`L02` and then on cline#5177 `L01`–`L02` read from the dataset file.
+- **Run so far:** only pipeline tests with `Qwen/Qwen3.5-0.8B`:
+  - smoke tests on vllm#17425 `L01`–`L02`, then on cline#5177 `L01`–`L02` read from the dataset file;
+  - the committed 2-PR sample, with the notebook's `sample-local` profile (0.8B reviewer and judge, levels up to 100k tokens). Its output is in `data/aacr_sample/outcomes/` (a demonstration of the layout, not results).
 - **Open:** the judge model is undecided (roadmap Section 8.5.3).
 
 Tests (Python only, no models):

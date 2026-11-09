@@ -1,0 +1,44 @@
+{
+ "code_commit": "b7285a7b14df4522a66e8de90e173489a096deb0",
+ "config": {
+  "contexts": "data/aacr_sample/context_levels.json",
+  "entries": null,
+  "judge": {
+   "backend": "transformers",
+   "enable_thinking": false,
+   "max_tokens": 1024,
+   "model": "Qwen/Qwen3.5-0.8B"
+  },
+  "levels": null,
+  "out_root": "data/aacr_sample/outcomes",
+  "reviewer": {
+   "backend": "transformers",
+   "concurrency": 1,
+   "enable_thinking": false,
+   "max_input_tokens": 100000,
+   "max_tokens": 2048,
+   "model": "Qwen/Qwen3.5-0.8B"
+  },
+  "run_name": "sample_qwen3.5-0.8b"
+ },
+ "contexts": "data/aacr_sample/context_levels.json",
+ "contexts_sha256": "85bb5f2cd97238d881e8a429f493d7e6ce756413b771bea94db4d9ab3eb72b6b",
+ "dataset": "data/aacr/positive_samples.json",
+ "dataset_sha256": "02c8561f1c3994a26f427d479b2a3f6e6c8e6858161fbc903b45248fa2cb2097",
+ "judge_prompt_version": "aacr-file-level-ee9d7fe",
+ "parser_version": "codex-json-v1",
+ "profile": "sample-local",
+ "prompt_sha256": "823487e00f6c7d0ee5347a52ab0e9eed398ab0a8a67d3211767831ed3ab7ea40",
+ "review_prompt_version": "codex-rubric-4e4767f+one-call-request-v1",
+ "review_request": "Review the code changes in this pull request. Its title and description, its diff, and any repository context are included below; you cannot run commands or open other files. Provide prioritized, actionable findings.",
+ "reviewer_identity": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 2048,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "rubric_sha256": "ec60e7f36a1d1c2679ce095c0205ecc56f7dd8fb57707a13ef362072390f219f",
+ "written_at": "2026-11-09T02:54:43+00:00"
+}

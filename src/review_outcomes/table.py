@@ -5,7 +5,7 @@ Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/)
   manifest.json                         run settings, prompt and dataset hashes
   reviews/<entry>/<level>.json          prompt hashes, backend identity, raw reply, parsed findings
   judgments/<entry>/<level>.json        AACR judge records per generated comment, per-reference flags
-  table.csv / table.jsonl               one row per (entry, level)
+  table.csv / table.json                one row per (entry, level); table.json is one JSON array
   coverage.csv                          one row per (entry, level, reference): covered or not
 
 Every record carries a cache key over all behavior-affecting inputs, so re-running resumes:
@@ -266,6 +266,5 @@ def write_outputs(out_dir: Path, rows: list[dict], coverage: list[dict]) -> None
             writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
             writer.writerows(data)
-    with (out_dir / "table.jsonl").open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
+    write_json(out_dir / "table.json", rows)  # one JSON array, a row per (entry, level)
+    (out_dir / "table.jsonl").unlink(missing_ok=True)  # the older JSON Lines copy would be stale

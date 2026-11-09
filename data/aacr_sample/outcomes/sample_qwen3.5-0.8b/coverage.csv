@@ -1,0 +1,191 @@
+entry,level,reference,covered,is_ai_comment,source_model,context,category,path
+FreeCAD__FreeCAD__19411,L01_min,0,False,True,Gemini-3-Pro,File Level,Performance,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L01_min,1,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L01_min,2,False,False,,File Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L01_min,3,False,True,GLM-4.7,Repo Level,Code Defect,src/Mod/TechDraw/App/DrawProjGroup.h
+FreeCAD__FreeCAD__19411,L01_min,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.h
+FreeCAD__FreeCAD__19411,L01_min,5,False,False,,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L01_min,6,False,True,Qwen-Coder-480B,Diff Level,Performance,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L01_min,7,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L01_min,8,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/TechDraw/App/Preferences.cpp
+FreeCAD__FreeCAD__19411,L01_min,9,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/CommandCreateDims.cpp
+FreeCAD__FreeCAD__19411,L01_min,10,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L01_min,11,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L01_min,12,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L01_min,13,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/DimensionValidators.h
+FreeCAD__FreeCAD__19411,L01_min,14,False,True,Qwen-Coder-480B,File Level,Maintainability and Readability,src/Mod/TechDraw/Gui/DimensionValidators.h
+FreeCAD__FreeCAD__19411,L01_min,15,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/DlgPrefsTechDrawAnnotationImp.cpp
+FreeCAD__FreeCAD__19411,L01_min,16,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/DlgPrefsTechDrawDimensionsImp.cpp
+FreeCAD__FreeCAD__19411,L01_min,17,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/QGIArrow.h
+FreeCAD__FreeCAD__19411,L01_min,18,False,True,Deepseek-V3.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/QGILeaderLine.cpp
+FreeCAD__FreeCAD__19411,L02_function,0,False,True,Gemini-3-Pro,File Level,Performance,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L02_function,1,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L02_function,2,False,False,,File Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L02_function,3,False,True,GLM-4.7,Repo Level,Code Defect,src/Mod/TechDraw/App/DrawProjGroup.h
+FreeCAD__FreeCAD__19411,L02_function,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.h
+FreeCAD__FreeCAD__19411,L02_function,5,True,False,,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L02_function,6,False,True,Qwen-Coder-480B,Diff Level,Performance,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L02_function,7,True,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L02_function,8,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/TechDraw/App/Preferences.cpp
+FreeCAD__FreeCAD__19411,L02_function,9,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/CommandCreateDims.cpp
+FreeCAD__FreeCAD__19411,L02_function,10,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L02_function,11,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L02_function,12,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L02_function,13,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/DimensionValidators.h
+FreeCAD__FreeCAD__19411,L02_function,14,False,True,Qwen-Coder-480B,File Level,Maintainability and Readability,src/Mod/TechDraw/Gui/DimensionValidators.h
+FreeCAD__FreeCAD__19411,L02_function,15,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/DlgPrefsTechDrawAnnotationImp.cpp
+FreeCAD__FreeCAD__19411,L02_function,16,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/DlgPrefsTechDrawDimensionsImp.cpp
+FreeCAD__FreeCAD__19411,L02_function,17,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/QGIArrow.h
+FreeCAD__FreeCAD__19411,L02_function,18,False,True,Deepseek-V3.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/QGILeaderLine.cpp
+FreeCAD__FreeCAD__19411,L03_file,0,False,True,Gemini-3-Pro,File Level,Performance,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L03_file,1,False,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L03_file,2,False,False,,File Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.cpp
+FreeCAD__FreeCAD__19411,L03_file,3,False,True,GLM-4.7,Repo Level,Code Defect,src/Mod/TechDraw/App/DrawProjGroup.h
+FreeCAD__FreeCAD__19411,L03_file,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawProjGroup.h
+FreeCAD__FreeCAD__19411,L03_file,5,False,False,,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L03_file,6,False,True,Qwen-Coder-480B,Diff Level,Performance,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L03_file,7,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/TechDraw/App/DrawViewPart.cpp
+FreeCAD__FreeCAD__19411,L03_file,8,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/TechDraw/App/Preferences.cpp
+FreeCAD__FreeCAD__19411,L03_file,9,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/CommandCreateDims.cpp
+FreeCAD__FreeCAD__19411,L03_file,10,True,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L03_file,11,True,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L03_file,12,True,True,Claude-Code/Claude-4.5-Sonnet,Diff Level,Code Defect,src/Mod/TechDraw/Gui/DimensionValidators.cpp
+FreeCAD__FreeCAD__19411,L03_file,13,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/DimensionValidators.h
+FreeCAD__FreeCAD__19411,L03_file,14,False,True,Qwen-Coder-480B,File Level,Maintainability and Readability,src/Mod/TechDraw/Gui/DimensionValidators.h
+FreeCAD__FreeCAD__19411,L03_file,15,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/DlgPrefsTechDrawAnnotationImp.cpp
+FreeCAD__FreeCAD__19411,L03_file,16,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/DlgPrefsTechDrawDimensionsImp.cpp
+FreeCAD__FreeCAD__19411,L03_file,17,False,True,GPT-5.2,File Level,Code Defect,src/Mod/TechDraw/Gui/QGIArrow.h
+FreeCAD__FreeCAD__19411,L03_file,18,False,True,Deepseek-V3.2,Diff Level,Maintainability and Readability,src/Mod/TechDraw/Gui/QGILeaderLine.cpp
+FreeCAD__FreeCAD__21257,L01_min,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L01_min,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L01_min,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L01_min,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L01_min,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L01_min,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L01_min,6,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L01_min,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L01_min,8,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L01_min,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L01_min,10,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L01_min,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L01_min,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L01_min,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L01_min,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L01_min,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L01_min,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L01_min,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L01_min,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp
+FreeCAD__FreeCAD__21257,L02_function,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L02_function,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L02_function,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L02_function,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L02_function,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L02_function,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L02_function,6,True,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L02_function,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L02_function,8,True,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L02_function,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L02_function,10,True,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L02_function,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L02_function,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L02_function,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L02_function,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L02_function,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L02_function,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L02_function,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L02_function,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp
+FreeCAD__FreeCAD__21257,L03_file,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L03_file,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L03_file,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L03_file,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L03_file,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L03_file,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L03_file,6,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L03_file,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L03_file,8,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L03_file,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L03_file,10,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L03_file,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L03_file,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L03_file,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L03_file,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L03_file,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L03_file,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L03_file,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L03_file,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,6,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,8,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,10,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L04_callees1,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L04_callees1,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L04_callees1,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,6,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,8,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,10,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L05_callers1,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L05_callers1,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L05_callers1,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,6,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,8,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,10,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L06_tests1,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L06_tests1,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L06_tests1,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp
+FreeCAD__FreeCAD__21257,L07_agent,0,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Measure/App/Measurement.cpp
+FreeCAD__FreeCAD__21257,L07_agent,1,False,True,GLM-4.7,Diff Level,Code Defect,src/Mod/Part/App/AppPartPy.cpp
+FreeCAD__FreeCAD__21257,L07_agent,2,False,True,Qwen-Coder-480B,Diff Level,Maintainability and Readability,src/Mod/Part/App/FeatureMirroring.cpp
+FreeCAD__FreeCAD__21257,L07_agent,3,False,True,Claude-Code/Claude-4.5-Sonnet,File Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L07_agent,4,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L07_agent,5,False,True,GPT-5.2,Diff Level,Code Defect,src/Mod/Part/App/MeasureClient.cpp
+FreeCAD__FreeCAD__21257,L07_agent,6,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L07_agent,7,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L07_agent,8,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L07_agent,9,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L07_agent,10,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.cpp
+FreeCAD__FreeCAD__21257,L07_agent,11,False,False,,File Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L07_agent,12,False,False,,Diff Level,Maintainability and Readability,src/Mod/Part/App/PartFeature.h
+FreeCAD__FreeCAD__21257,L07_agent,13,False,True,Qwen-Coder-480B,Diff Level,Code Defect,src/Mod/Part/Gui/Command.cpp
+FreeCAD__FreeCAD__21257,L07_agent,14,False,True,GPT-5.2,Diff Level,Maintainability and Readability,src/Mod/Part/Gui/Mirroring.cpp
+FreeCAD__FreeCAD__21257,L07_agent,15,False,True,GPT-5.2,Diff Level,Performance,src/Mod/Part/Gui/TaskCheckGeometry.cpp
+FreeCAD__FreeCAD__21257,L07_agent,16,False,True,GLM-4.7,File Level,Code Defect,src/Mod/Part/Gui/TaskSweep.cpp
+FreeCAD__FreeCAD__21257,L07_agent,17,False,True,Gemini-3-Pro,Diff Level,Maintainability and Readability,src/Mod/PartDesign/App/FeatureSketchBased.cpp
+FreeCAD__FreeCAD__21257,L07_agent,18,False,True,Deepseek-V3.2,File Level,Maintainability and Readability,src/Mod/Surface/App/Blending/FeatureBlendCurve.cpp

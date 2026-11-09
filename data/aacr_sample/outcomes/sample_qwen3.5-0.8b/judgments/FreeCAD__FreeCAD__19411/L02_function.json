@@ -1,0 +1,44 @@
+{
+ "balanced": 0.1904761904761905,
+ "covered": 2,
+ "covered_indices": [
+  5,
+  7
+ ],
+ "entry": "FreeCAD__FreeCAD__19411",
+ "expected": 19,
+ "generated": 1,
+ "judge": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 1024,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "judge_errors": 0,
+ "judge_prompt_version": "aacr-file-level-ee9d7fe",
+ "key": "843ce712f2619c34440c94d6671c2453803809d5a83334bdbe11af135691ac90",
+ "level": "L02_function",
+ "matched_generated": 1,
+ "precision": 1.0,
+ "recall": 0.10526315789473684,
+ "records": [
+  {
+   "from_line": 1336,
+   "hit_new_gt": true,
+   "judge_error": null,
+   "judge_reason": "1. Match — both flag the uninitialized variable risk (though the generated comment mentions `viewType` being an `int` enum, the core issue of potential type mismatch leading to incorrect handling is the same as the reference comment 1).\n2. No match — the generated comment discusses a specific type mismatch in `viewType.c_str()` and incorrect handling of slices along wrong dimensions, whereas reference comment 2 discusses a logic optimization (using `else-if` instead of `if-else`) and error handl",
+   "judged": true,
+   "matched_gt_indices": [
+    5,
+    7
+   ],
+   "order": 0,
+   "path": "src/Mod/TechDraw/App/DrawViewPart.cpp",
+   "to_line": 1396
+  }
+ ],
+ "review_key": "5c811f48699a8a8360ca543720ee9aaf9af2880deacac7cde19a000c9f951117",
+ "seconds": 1.46
+}

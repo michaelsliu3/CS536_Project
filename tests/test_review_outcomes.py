@@ -9,7 +9,7 @@ from src.review_outcomes.prompts import (
     REVIEW_REQUEST, RUBRIC_PATH, judge_prompt, load_rubric, prompt_sha256, review_messages,
 )
 from src.review_outcomes.table import (
-    build_table, discover_cells, run_judgments, run_reviews, summarize_by_level,
+    build_table, discover_cells, run_judgments, run_reviews, summarize_by_level, write_outputs,
 )
 from src.tracer_context.dataset import append_record
 
@@ -169,6 +169,11 @@ class TableTests(unittest.TestCase):
         self.assertEqual((row["covered"], row["expected"], row["human_covered"], row["human_expected"]), (1, 8, 1, 1))
         self.assertEqual(rows[1]["review_status"], "too_long")
         self.assertEqual(sum(c["covered"] for c in coverage), 1)
+        (out / "table.jsonl").write_text("stale\n", encoding="utf-8")  # an older run's file
+        write_outputs(out, rows, coverage)
+        self.assertEqual(json.loads((out / "table.json").read_text(encoding="utf-8")), rows)  # one JSON array
+        self.assertFalse((out / "table.jsonl").exists())
+        self.assertTrue((out / "table.csv").is_file() and (out / "coverage.csv").is_file())
         summary = summarize_by_level(rows)
         self.assertEqual([s["level"] for s in summary], ["L01_min", "L02_function"])
         self.assertAlmostEqual(summary[0]["recall_pooled"], 0.125)

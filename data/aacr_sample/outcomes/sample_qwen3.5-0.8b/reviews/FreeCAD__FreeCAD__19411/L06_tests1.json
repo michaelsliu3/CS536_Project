@@ -1,0 +1,21 @@
+{
+ "backend": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 2048,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "entry": "FreeCAD__FreeCAD__19411",
+ "error": "114542 input tokens > 100000",
+ "input_sha256": "a5b18e66befb4337e44f5750ba5550ba0d9fa102b599e550d244c6ea4d63e226",
+ "input_tokens": 114542,
+ "key": "379f49c54a1553ea8133462e45d76c92c466690c751bd4efd49863229d3bd7c0",
+ "level": "L06_tests1",
+ "parser": "codex-json-v1",
+ "prompt_sha256": "823487e00f6c7d0ee5347a52ab0e9eed398ab0a8a67d3211767831ed3ab7ea40",
+ "prompt_version": "codex-rubric-4e4767f+one-call-request-v1",
+ "reused_from": "L05_callers1",
+ "status": "too_long"
+}

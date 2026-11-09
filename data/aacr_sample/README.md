@@ -29,6 +29,7 @@ Lines (`context_levels.jsonl`, one PR per line), and is not committed.
   rows = level_rows(records.values())
   ```
 
+- **Outcome-table sample:** `outcomes/sample_qwen3.5-0.8b/` is the review table the notebook writes for these two PRs with the `sample-local` profile. It is a pipeline demonstration with a 0.8B reviewer and judge, not results (see `outcomes/README.md`).
 - **Rebuild it** from a build of those two entries, for example after a change to the level
   configs or builder versions:
 

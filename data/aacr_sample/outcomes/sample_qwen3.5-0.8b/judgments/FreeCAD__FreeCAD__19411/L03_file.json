@@ -1,0 +1,46 @@
+{
+ "balanced": 0.2727272727272727,
+ "covered": 3,
+ "covered_indices": [
+  10,
+  11,
+  12
+ ],
+ "entry": "FreeCAD__FreeCAD__19411",
+ "expected": 19,
+ "generated": 1,
+ "judge": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 1024,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "judge_errors": 0,
+ "judge_prompt_version": "aacr-file-level-ee9d7fe",
+ "key": "a33b06ba20b71f56016a5668dcc88a49e313d3e1863e834e75a093871bbdcb52",
+ "level": "L03_file",
+ "matched_generated": 1,
+ "precision": 1.0,
+ "recall": 0.15789473684210525,
+ "records": [
+  {
+   "from_line": 1562,
+   "hit_new_gt": true,
+   "judge_error": null,
+   "judge_reason": "1. Match — both flag the uninitialized variable risk (though the generated comment mentions `RefType::invalidRef` while the reference comments discuss uninitialized `line.x` causing verticality issues, the core semantic concern of invalidating the dimension reference type due to missing sub-elements is addressed in both).\n2. Match — both flag the uninitialized variable risk (the generated comment explicitly states the function returns `RefType::invalidRef` when no subElements are provided, which",
+   "judged": true,
+   "matched_gt_indices": [
+    10,
+    11,
+    12
+   ],
+   "order": 0,
+   "path": "src/Mod/TechDraw/Gui/DimensionValidators.cpp",
+   "to_line": 1562
+  }
+ ],
+ "review_key": "1a1acc2b4fc733813c5ed053bbf77948fd68aa6dc74630ede5bed411b4f02f55",
+ "seconds": 1.56
+}

@@ -1,0 +1,46 @@
+{
+ "balanced": 0.2727272727272727,
+ "covered": 3,
+ "covered_indices": [
+  6,
+  8,
+  10
+ ],
+ "entry": "FreeCAD__FreeCAD__21257",
+ "expected": 19,
+ "generated": 1,
+ "judge": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 1024,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "judge_errors": 0,
+ "judge_prompt_version": "aacr-file-level-ee9d7fe",
+ "key": "059be5364e804cb0972a3578e2cab2a005988a47d9e410c58e98dc8e060debac",
+ "level": "L02_function",
+ "matched_generated": 1,
+ "precision": 1.0,
+ "recall": 0.15789473684210525,
+ "records": [
+  {
+   "from_line": 855,
+   "hit_new_gt": true,
+   "judge_error": null,
+   "judge_reason": "1. Match — both address the issue of using an uninitialized integer as a flag parameter, which can lead to undefined behavior or incorrect default value handling.\n2. No match — the generated comment discusses a signature change and parameter passing, whereas the reference comment specifically addresses a naming change and bitwise operator precedence in a condition.\n3. Match — both discuss the need to improve code clarity and explicitly show intended evaluation order in a conditional statement.\n4",
+   "judged": true,
+   "matched_gt_indices": [
+    6,
+    8,
+    10
+   ],
+   "order": 0,
+   "path": "src/Mod/Part/App/PartFeature.cpp",
+   "to_line": 859
+  }
+ ],
+ "review_key": "9eb294c75833ec6d8ea4e96b1754cb55734684ab74966ecc43f19c815e171056",
+ "seconds": 1.79
+}

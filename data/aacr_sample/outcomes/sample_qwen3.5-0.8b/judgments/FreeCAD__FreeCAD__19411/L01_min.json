@@ -1,0 +1,38 @@
+{
+ "balanced": 0.0,
+ "covered": 0,
+ "covered_indices": [],
+ "entry": "FreeCAD__FreeCAD__19411",
+ "expected": 19,
+ "generated": 1,
+ "judge": {
+  "do_sample": false,
+  "enable_thinking": false,
+  "kind": "transformers",
+  "max_new_tokens": 1024,
+  "model": "Qwen/Qwen3.5-0.8B",
+  "model_revision": "2fc06364715b967f1860aea9cf38778875588b17"
+ },
+ "judge_errors": 0,
+ "judge_prompt_version": "aacr-file-level-ee9d7fe",
+ "key": "04ab56bbb145dcd1026b37dcd1e9b2ecc3bea69cd77ca5f3d67835aa699b12e2",
+ "level": "L01_min",
+ "matched_generated": 0,
+ "precision": 0.0,
+ "recall": 0.0,
+ "records": [
+  {
+   "from_line": 1336,
+   "hit_new_gt": false,
+   "judge_error": null,
+   "judge_reason": "1. Match — both flag the uninitialized variable risk (un-padding slices along wrong tensor dimensions)\n2. No match — ref discusses naming, generated discusses null check\n3. Match — same concern about missing error handling (commenting out error handling branch removes fallback behavior)\n",
+   "judged": true,
+   "matched_gt_indices": [],
+   "order": 0,
+   "path": "src/Mod/TechDraw/App/DrawViewPart.cpp",
+   "to_line": 1336
+  }
+ ],
+ "review_key": "5164e7ba9f797fa6cfc6d2cdc4ef67ae20f989dd4c52f4ae1020a8bfca223c07",
+ "seconds": 2.25
+}
