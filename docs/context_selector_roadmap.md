@@ -1,6 +1,12 @@
 # Context selector roadmap: preserve code-review quality with less repository context
 
-**Revised November 7, 2026; status updated November 8. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
+**Revised November 7, 2026; status updated November 9. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
+
+**Update, November 9, 2026:**
+- **Selector-stage plan added (Section 9.4):** the cloud GPU builds the dataset and the outcome table; the selector is trained and evaluated on a Colab CPU runtime from two small hand-off files (input-side features per PR, scores per (PR, level)), purely by lookup.
+- **Evaluation design made concrete:** repository-grouped 5-fold CV on non-test PRs, a test set of repositories fixed by a seeded hash before any modelling, ties to the lower level, and a tentative Nov 9 → Dec 1 schedule (Sections 9.4.4–9.4.5, 10.1).
+- **New open decisions:** the PR category feature, how test repositories are chosen, and confirmation with Lesia about the scope refinement and an MLP instead of a small transformer (Sections 9.4.6, 14).
+- **Agent prompts P0–P6** for implementing the selector stage are in Appendix A. None of them authorizes a cloud run.
 
 **Update, November 8, 2026:**
 - **Candidate gathering is implemented** with codebase-memory-mcp instead of RepoHyper. Section 5.5 covers the tracer, the content-defined context levels, the one-command dataset build and what was measured on sample PRs.
@@ -23,7 +29,7 @@ The November 4 roadmap is retained at the end as a **retired historical plan**, 
 | Starting dataset | Start with AACR-Bench, reconstructing repository snapshots | Usable release size, supported languages, reference validity, and split feasibility |
 | ContextCRBench | Preserve the midpoint pilot; consider a separate transfer evaluation | Whether its review references and available snapshots support the same task |
 | Context gathering | **Implemented (Nov 8):** codebase-memory-mcp static code graph plus nested context levels (Section 5.5). RepoHyper was the earlier recommendation | Behavior on the other 8 AACR languages and on very large repositories; whether the levels separate review quality |
-| Selector | **Decided Nov 8:** for the ten levels, classical learned models (gradient-boosted trees, linear models, random forests, small MLP) on input-side features, compared with repository-grouped cross-validation. **Next step:** item-level selection (traced items, not lines), evaluated with live reviews. An LLM selector comparison is also planned (Section 9.3) | Which algorithm and target work best; how to train the item-level selector; whether an LLM selector beats the classical ones by more than its cost |
+| Selector | **Decided Nov 8:** for the ten levels, classical learned models (gradient-boosted trees, linear models, random forests, small MLP) on input-side features, compared with repository-grouped cross-validation. **Next step:** item-level selection (traced items, not lines), evaluated with live reviews. An LLM selector comparison is also planned (Section 9.3). **Planned Nov 9:** trained and evaluated on Colab (CPU) from exported features and the outcome table (Section 9.4) | Which algorithm and target work best; how to train the item-level selector; whether an LLM selector beats the classical ones by more than its cost |
 | Reviewer | **Decided Nov 8:** `Qwen/Qwen3.8-27B`, one call per (PR, level), our own fixed prompt, greedy decoding, JSON findings; Claude is an allowed fallback (Section 8.5.2) | Revision, quantization, memory and window fit, run-to-run noise, and whether it passes the pilot criteria |
 | Preprocessing | Avoid generative LLM calls for fetching, parsing, graph construction, and metadata extraction | Manual effort needed for reliable reference and adoption annotations |
 | Learning signal | **Decided Nov 8:** an offline (PR × level) outcome table scored with AACR's file-level semantic metric against all 1,506 references; labels compare levels within each PR (Sections 8.5.3–8.5.7) | Judge model, judge validation against a human audit, labeling rule and its parameter |
@@ -1199,6 +1205,112 @@ Keep the reviewer frozen throughout a comparison. Using related Qwen models for 
   - the review and judging code in `src/review_outcomes/`, which can review any rendered selection.
 - **Optional bridge:** many more levels as a grid of content type × depth (for example 8 × 3 = 24 levels, or 196 × 24 = 4,704 reviews). It keeps a complete offline table while moving toward finer choices.
 
+### 9.4 Selector-stage plan (Nov 9): cloud GPU for the heavy work, Colab for the selector
+
+**Status: planned, not built.** Agreed at the November 9 meeting; it refines Section 9.3 into an execution plan. Nothing in this section is a result. The full dataset, the full outcome table and any Qwen3.8-27B behavior do not exist yet, so the dates below assume the cloud work goes smoothly; they are not commitments.
+
+**In one sentence:** the heavy work (dataset build, 27B reviews, judge) runs on the cloud GPU with the pipeline already in the repository and produces two files: input-side features per PR, and a score table per (PR, level). Colab reads only these files and trains and evaluates the selector on CPU. The selector never calls the reviewer; every evaluation is a table lookup.
+
+#### 9.4.1 Who does what
+
+Owners are as discussed on November 9 and remain tentative until the team confirms them.
+
+| Stage | What | Where | Owner | Notes |
+|---|---|---|---|---|
+| Dataset build | `data/build_dataset.sh` → `data/aacr/context_levels.jsonl` (text and statistics for ten levels per PR) | Laptop (no LLM) | Michael | Code done; the full build has not run. Choose the tracer index mode (`full`/`fast`) first |
+| Pilot | 27B reviewer plus judge on 10–20 PRs: GPU time, memory, run-to-run noise | Cloud GPU | Michael / Ruiding | Each cloud run needs fresh team authorization |
+| Outcome table | `notebooks/outcome_table.ipynb`: one review per (PR, level), judged → `table.csv`, `coverage.csv` | Cloud GPU | Michael / Ruiding | Code done; only a 0.8B smoke test so far (Section 8.5.8) |
+| **Export for Colab** | Turn features and the score table into small files (**new**) | Any machine | Agent prompt P1 (Appendix A) | No level text; the files are small |
+| **Selector training and evaluation** | Classical models, repository-grouped CV, baselines, ablations | **Colab (CPU is enough)** | Li-Hua / Michael | **Focus of this section** |
+| Test evaluation | Once, after freezing | Colab | All | |
+| Report | NeurIPS format | Local | All | |
+
+The selector uses scikit-learn, optional LightGBM, or a small MLP on tabular features, so it needs no GPU. A free Colab CPU runtime is enough, which is why the selector stage lives there.
+
+#### 9.4.2 The two hand-off files (Colab's only inputs)
+
+**Features, `selector_features.parquet` (one row per PR).** Only input-side fields from `context_levels.jsonl`, **never any level text**:
+
+- **PR level:** `language`, `stats.changed_files`, `stats.changed_symbols`, `stats.changed_symbols_by_label.*`, `stats.hunks`, `stats.diff_chars`, `stats.pr_title_chars`, `stats.pr_body_chars`, `stats.guide_files`, `stats.search_hits`, `stats.search_names`, `stats.callers_by_hop.*`, `stats.callees_by_hop.*`, `stats.test_callers_by_hop.*`, `stats.graph_nodes`, `stats.graph_edges`.
+- **Per level (ten groups):** `input_tokens`, `context_tokens`, `same_as_parent`, `capped`, `fits`.
+- **Identifiers (not features):** `id`; `repo`, used only for grouping splits.
+
+**Must never enter the features file:** `audit.*` (including `change_line_count` and `comment_lines`, which are computed from the reference comments or the final PR size), any reference comment text, AACR `category`, the comments' `context` field, and repository names as features.
+
+**Score table, `outcome_table.csv` (one row per (PR, level)).** The `table.csv` written by `src/review_outcomes/table.py`, unchanged. Its columns: `entry, level, language, input_tokens, review_status, truncated, findings, invalid_findings, output_tokens, review_seconds, reused_from, expected, generated, matched_generated, covered, recall, precision, balanced, human_expected, human_covered, ai_expected, ai_covered, judge_errors`. Also needed: `coverage.csv` (whether each reference is covered at each level) and `manifest.json` (versions, reviewer, judge, prompt hash).
+
+**Development data before the real table exists:**
+- the committed 2-PR sample in `data/aacr_sample/`, whose outcomes are a 0.8B smoke test and **not a result**;
+- a synthetic generator (prompt P1). Every synthetic file carries `"synthetic": true` in its manifest, and no synthetic result may appear in the report or its figures.
+
+#### 9.4.3 Selector design
+
+This follows Section 9.3.
+
+- **Inputs:** the features above; each level's token count is one of them.
+- **Targets, both built and compared under CV:**
+  1. **Per-level quality regression (preferred):** predict each level's quality, then choose with a decision rule. λ or the tolerance can change afterwards without retraining.
+  2. **Direct classification:** predict the target level produced by the labeling rule (the meeting's "softmax over 10 levels").
+- **Labeling rules (choose one on validation and freeze it):**
+  - best trade-off: maximize `quality − λ × tokens ÷ tokens of the PR's largest level`;
+  - smallest sufficient: the smallest level whose quality reaches a fraction (for example 90%) of the PR's best;
+  - per-level regression with a quality floor: the cheapest level predicted above the floor.
+- **Ties always go to the lower level** (as decided at the meeting). Many levels equal their parent (`same_as_parent`), so ties are the norm, not an edge case.
+- **Quality metric `quality`:** configurable; default `balanced` (AACR's headline score), alternative `recall`. With a median of 6 references per PR, per-PR scores are coarse (Section 8.5.5), so every rule needs a tolerance, sized from the run-to-run noise measured in the pilot.
+- **Models:** gradient-boosted trees, logistic/linear regression, random forest, small MLP; nearest neighbour and a length rule as sanity checks.
+- **PR category feature (team decision needed):** the meeting called PR category (bug, cleanup, new feature, …) an important feature, but this roadmap excludes AACR's `category` because it is answer-side annotation, unavailable at inference (Section 9.3). **Default: not used.** If used, it must be a clearly labelled "oracle feature" ablation, or be derived from the PR title and description (for example by keywords).
+- **Out of scope here:** training the reviewer, an LLM selector, and item-level selection. The last two remain the planned next steps of Section 9.3; item-level selection needs live reviews and therefore the cloud GPU.
+
+#### 9.4.4 Evaluation design
+
+- **Splits:** not 80/10/10. With about 185 buildable PRs (Section 5.5.6) from at most about 50 repositories, use **repository-grouped K-fold CV** (K = 5 suggested) on the non-test data for model and hyperparameter choice. **A test set of repositories (about 15–20%) is chosen by a seeded hash** and saved before any CV, and is not looked at until freezing. Report the actual PR and repository counts.
+- **All levels of a PR always stay in the same fold.**
+- **Policies, all by lookup in the score table (no new reviewer calls):** each fixed level (ten), the largest level under a token limit, a random level (several seeds), each selector (several seeds), and the per-PR oracle (labelled an upper bound, not a deployable method).
+- **Metrics:** AACR's computation — pooled recall, precision and balanced score (sum the counts, then divide) — plus per-PR means; human-only recall (392 human references); AI-reference recall by source model (to check whether a same-family model is favored); mean input tokens; judge-error counts.
+- **Cost accounting:** record separately the reviewer input tokens, the selector's own time, and the offline GPU hours for the score table (the cost of producing training labels) (Section 11).
+- **Uncertainty:** paired cluster bootstrap by repository. With few repositories the intervals will be wide; report them honestly.
+- **Success criterion:** the old "1 percentage point / 30% fewer tokens" thresholds are retired (Section 1). Choose the quality tolerance and savings target on validation data, **freeze them before touching test**, and report what happens. A negative result is a result; analyze its cause.
+- **Test is evaluated once.** Hyperparameters, λ, tolerance and model choice use CV only.
+
+#### 9.4.5 Schedule (Nov 9 → Dec 1, tentative)
+
+| Dates | Colab / selector side | Cloud / data side | Blockers |
+|---|---|---|---|
+| Nov 9–11 | P1–P3: exporter, synthetic data, labels, evaluation, models, CV — all running on synthetic data and the 2-PR sample | Choose the tracer index mode (`full` vs `fast`); start the full dataset build; meet Lesia | Judge model, PR category feature, thinking mode |
+| Nov 11–14 | P4: Colab notebooks run on synthetic data; ready for real data | **Pilot** (10–20 PRs): 27B memory and time at 256K input, noise, judge versus blinded human audit | Whether 27B serves 256K inputs is untested; each cloud run needs authorization |
+| Nov 14–19 | Wait; check the pipeline on pilot data | Full score table (about 185 PRs × 10 levels; identical levels reviewed once) | **Largest uncertainty:** GPU time must be projected from the pilot |
+| Nov 19–23 | CV on real data; choose rule and model; freeze | — | |
+| Nov 23–25 | One lookup evaluation on test after freezing | — | |
+| Nov 24–Dec 1 | Figures, RQ3 analysis, report; talk by Dec 3 | | |
+
+**If the score table is not done by Nov 19:** follow Section 12's priority order. Cut language coverage first (for example, keep only verified languages), then the number of PRs. **Do not cut reference validation or held-out evaluation.**
+
+#### 9.4.6 Decisions the team must make first
+
+1. **Tracer index mode:** `full` (results depend on the clone's folder) or `fast` (path-independent, fewer links). Needed before the full build (Section 14).
+2. **Judge model:** a local open model or an API model; the number of judge calls is large (the Nov 9 plan estimated about 16,000, not measured). Validate with a blinded human audit.
+3. **PR category feature:** use or not (Section 9.4.3).
+4. **Quality metric and labeling rule:** defaults above; final choice on validation.
+5. **Test repositories:** chosen by hash and saved before any score is seen.
+6. **Confirm with Lesia:** whether the refined topic needs approval, and whether an MLP selector instead of the proposal's "small transformer" is acceptable.
+
+#### 9.4.7 Risks
+
+- **Weak signal in the table:** the ten levels may score similarly, or differ by less than run-to-run noise, leaving the selector nothing to learn. Measure noise with repeated pilot reviews; on validation, compare the real oracle gain with a shuffled-oracle gain (the real gain must clearly exceed it). If not, report the negative result honestly and strengthen the RQ3 analysis.
+- **Label noise and class skew:** the best level may usually be a low one, pushing the selector to always pick low. Report the per-level label distribution and compare with "always the lowest level".
+- **Small data:** about 185 PRs make model selection easy to overfit. Limit model complexity, use several seeds and grouped CV, and do not tune repeatedly against CV.
+- **Reference quality:** 74% of references are AI-generated and some are nitpicks. Report human-only recall.
+- **Judge/reviewer family bias:** report recall by AI source model.
+
+#### 9.4.8 What this plan does not do
+
+- **No 27B on Colab.** Whether 27B fits a GPU at 256K input is unverified, and Colab's GPUs are not suitable.
+- **No LLM selector or item-level selection** in this stage (Section 9.3 next steps; they need live reviews on the cloud GPU and more time).
+- **No changes to the existing pipeline.** Prompt P5 only prepares a runbook and tools; the team runs the cloud work.
+- **Not verified:** the plan was written from the current code and the sample's fields; the pipeline was not run for it.
+
+Agent prompts for implementing this stage are in Appendix A.
+
 ## 10. Splits, baselines, and experimental controls
 
 ### 10.1 Splits
@@ -1206,6 +1318,8 @@ Keep the reviewer frozen throughout a comparison. Using related Qwen models for 
 Freeze groups before learning anything from labels. Prefer repository-disjoint train/validation/test splits; keep every PR revision, comment, candidate subset, and duplicate/fork cluster together. Audit near-duplicate diffs across groups. A random comment-level split leaks shared code and PR context.
 
 An 80/10/10 split is a starting ratio, not a rule. After Python filtering, the repository count may make that ratio produce an unusably small validation/test set. Publish actual counts and language/context-level composition. If necessary, use grouped development cross-validation with a separately locked test set, or report a deliberately limited pilot. Do not claim robust cross-repository generalization from one or two held-out repositories.
+
+**Planned Nov 9 for the level selector (Section 9.4.4):** no 80/10/10. About 15–20% of repositories are fixed as the test set by a seeded hash and saved before any modelling; model selection uses repository-grouped 5-fold CV over the rest, with all levels of a PR in one fold. Test is evaluated once, after freezing.
 
 Selection training data are independent at PR/repository level, not at subset level. Report both counts. Repository-disjoint evaluation reduces project leakage but does not eliminate possible pretraining contamination in public models.
 
@@ -1254,7 +1368,7 @@ Record separately:
 - Repository indexing, retrieval, and graph-construction time, with cold versus cached runs.
 - End-to-end wall-clock latency, throughput, peak memory, and hardware.
 - Local/cloud compute cost and remote API cost under a dated pricing assumption, when applicable.
-- Offline supervision/judging cost and training cost, separate from deployment cost.
+- Offline supervision/judging cost and training cost, separate from deployment cost. For the level selector, the outcome table's GPU hours are the cost of producing its training labels (Section 9.4.4).
 - Cache reuse and the number of future reviews over which indexing/training costs are amortized.
 
 A local model is not computationally free. Do not claim significant dollar savings until measured under a deployment scenario. Compare quality at matched reviewer-token budgets and report the total-system frontier as well. Avoid conflating fewer additional-context tokens with the same percentage reduction in the entire prompt, whose mandatory diff/instructions remain.
@@ -1312,6 +1426,8 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 
 **Decided (Nov 8):** for the ten levels, Phase D first trains several classical models on input-side features. These are gradient-boosted trees, linear models, random forests and a small MLP, compared with repository-grouped cross-validation and several seeds; all evaluation is by outcome-table lookup (Section 9.3). An LLM selector comparison on the same folds is also planned.
 
+**Planned (Nov 9):** the execution plan for this phase, its hand-off files, evaluation design, tentative schedule and risks are in Section 9.4; implementation prompts are in Appendix A.
+
 **Next, after this initial selector (decided Nov 8): item-level selection.** The selector chooses individual traced items instead of a level, and evaluation uses live reviews instead of a complete offline table. The training approach is still open (Section 9.3).
 
 ### Phase E — frozen test and optional transfer
@@ -1352,7 +1468,7 @@ Recommended implementation checks:
 
 Choose new module names during implementation; paths in Section 7 are proposals.
 
-As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/tracer/build_tracer_context.py`, `scripts/tracer/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/dataset/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). `scripts/dataset/clean_dataset.py` starts a build over, `data/build_dataset.sh` and `data/clean_dataset.sh` wrap both, and `data/aacr_sample/` holds a committed 2-PR sample of the dataset. The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded.
+As of November 8, the candidate gathering and input rendering are coded: `src/tracer_context/`, `scripts/tracer/build_tracer_context.py`, `scripts/tracer/run_tracer_batch.py`, `configs/levels/`, and tests in `tests/test_tracer_context.py` and `tests/test_tracer_batch.py` (Section 5.5). The one-file dataset builder is `scripts/dataset/build_dataset.py` with `src/tracer_context/dataset.py` and `pipeline.py`, tested in `tests/test_context_dataset.py` and `tests/test_build_pipeline.py` (Section 5.5.6). `scripts/dataset/clean_dataset.py` starts a build over, `data/build_dataset.sh` and `data/clean_dataset.sh` wrap both, and `data/aacr_sample/` holds a committed 2-PR sample of the dataset. The outcome table (reviewer runs and AACR scoring) is coded in `src/review_outcomes/`, `notebooks/outcome_table.ipynb`, `configs/review_prompts/` and `tests/test_review_outcomes.py` (Section 8.5.8), but has only been smoke-tested with a 0.8B model. The selector has not been coded; Section 9.4 and Appendix A plan it under `src/selector/`, `scripts/selector/`, `configs/selector/`, `tests/test_selector_*.py` and `colab/`.
 
 ## 14. Open decisions that must stay visible
 
@@ -1371,8 +1487,10 @@ As of November 8, the candidate gathering and input rendering are coded: `src/tr
 | Severity and adoption use | Reliable annotations; otherwise remain auxiliary or omitted |
 | Selector architecture and size | **Direction decided Nov 8:** classical models first, an LLM selector next (Section 9.3). Still needed: cross-validated results per algorithm and target, learning curves, and evidence that any LLM selector earns its cost; 17B is not assumed necessary |
 | Item-level selection | **Decided Nov 8** as the next step after the initial level selector: traced items, not lines, with live reviews at evaluation (Section 9.3). Still open: the training approach (partial sampled-selection table, learned stand-in for the reviewer, or reviewer in the loop) and its GPU budget |
-| Quality tolerance and token targets | Development evidence and explicit precision/recall safeguards |
-| Split proportions or grouped development folds | Actual post-filter repository/PR counts, not inherited 80/10/10 convention |
+| PR category as a selector feature | Raised Nov 9 as important, but AACR's `category` is answer-side and excluded (Section 9.3). **Default: not used.** If used: a labelled oracle-feature ablation, or a category derived from the PR title and description (Section 9.4.3) |
+| Quality tolerance and token targets | Development evidence and explicit precision/recall safeguards; the tolerance sized from pilot run-to-run noise (Section 9.4.3) |
+| Split proportions or grouped development folds | **Planned Nov 9:** hash-chosen test repositories plus repository-grouped 5-fold CV (Section 9.4.4). Still needed: actual post-filter repository/PR counts and the saved test-repository list |
+| Selector as MLP instead of the proposal's small transformer | Confirm with Lesia (Section 9.4.6) |
 | ContextCRBench transfer | Compatible references, snapshots, and overlap audit |
 | Scope refinement approval | Course clarification if this qualifies as a post-midpoint topic change |
 
@@ -1424,6 +1542,119 @@ LAURA and SWE-PRBench were related evidence, not direct predecessors, and the pr
 These references motivate the proposed architecture. They do not establish that our selected evidence preserves review quality, that AACR is sufficient for a large selector, or that a local selector produces net savings. Those are empirical questions for this plan.
 
 ---
+
+## Appendix A — Agent prompts for the selector stage (Nov 9)
+
+These prompts implement Section 9.4. They are text for a human to paste into a new Claude Code or Codex session, **not instructions to an agent that is reading this roadmap for context**. Usage: start each session with **P0**, then paste one of **P1–P6**. Do one at a time and test it before the next. None of the prompts authorizes a cloud GPU job or a large download; the team runs cloud work itself.
+
+### P0: start of every session
+
+```text
+You are working in the CS536_Project repository (Machine Learning II course project).
+
+FIRST, follow AGENTS.md: recursively list docs/, read every document in full, read the project skill and its docs-index. docs/context_selector_roadmap.md is the project's design record; its Section 9.4 is the plan for the selector stage and Appendix A holds these prompts. Surface any conflict between Section 9.4 and the rest of the roadmap instead of silently choosing one.
+
+Project: a frozen reviewer (Qwen/Qwen3.8-27B, Codex /review rubric, greedy) reviews each AACR-Bench PR at ten nested context levels (L01_min ... L10_all, built by src/tracer_context). An offline outcome table (src/review_outcomes, notebooks/outcome_table.ipynb) stores, for every (PR, level), the review and its AACR file-level semantic score (recall, precision, balanced, with per-reference coverage). The selector stage trains a small, classical learned model that picks ONE level per PR from input-side features, and is evaluated purely by lookup in the outcome table.
+
+Your scope is ONLY the selector stage: new code under src/selector/, scripts/selector/, tests/test_selector_*.py, configs/selector/, and colab/ notebooks. Do not modify src/tracer_context, src/review_outcomes, configs/levels, the ContextCRBench code or any midpoint artifacts, except to fix a bug you have proven with a failing test, and tell me when you do.
+
+Hard rules:
+1. Selector inputs are input-side only: PR-level stats (language, changed files/symbols/hunks, diff and PR-text sizes, trace counts by hop, guide files, search hits, graph size) and per-level token counts. NEVER use: the record's `audit` field, any reference comment text, AACR `category`, comment `context` labels, repository names, review text, scores, or anything derived from them. Enforce this with an explicit allowlist of feature names and a test that fails if any other field reaches the model.
+2. Group by repository for every split and cross-validation fold; all levels of a PR stay together. The test repositories are chosen by a seeded hash and saved to a file BEFORE any modelling; test rows are never read until a final script run with an explicit FINAL_TEST=1 and a committed freeze file. Hyperparameters, labeling rule, lambda, tolerance and model selection use non-test data only. Code that would read test earlier must raise.
+3. Ties go to the cheaper level. Many levels are identical to their parent (same_as_parent); the review exists once and copies carry reused_from. Handle this explicitly in labels and metrics.
+4. Never report synthetic-data results as results. Synthetic outputs must carry "synthetic": true in their manifest and filenames, and plotting scripts must refuse to mix them with real tables.
+5. Do not launch cloud GPU jobs, big downloads, or any 27B/judge run. Tests must run on CPU in seconds without network. Fixed seeds; deterministic outputs.
+6. Do not invent numbers. English code comments; unittest under tests/; small functions.
+7. Python 3.11 and the project's pinned scikit-learn (see requirements / roadmap); add LightGBM only as an optional import with a clear fallback.
+
+Before coding, reply with a short plan (files, interfaces, tests). Proceed without waiting unless the spec is ambiguous or conflicts with the repo.
+```
+
+### P1: exporter, loaders, synthetic data, leakage guards
+
+```text
+Task: the data interface of the selector stage.
+
+1. src/selector/data.py and scripts/selector/export_features.py: read data/aacr/context_levels.jsonl (and data/aacr_sample/context_levels.json) with src.tracer_context.dataset.load_records and write selector_features.parquet (CSV fallback), one row per PR: id, repo, language, the allowlisted PR-level stats (flatten nested stats such as callers_by_hop.1/2/3 and changed_symbols_by_label.*, missing keys become 0), and for each level L01..L10 the columns {level}_input_tokens, {level}_context_tokens, {level}_same_as_parent, {level}_capped, {level}_fits. Do NOT export level text. Do NOT export `audit`, references, repo-derived text. Print the exported column list. Record in manifest.json: source file sha256, dataset build versions from each record's `build` field, export code version, and a "synthetic" flag.
+2. Define FEATURE_ALLOWLIST (explicit names) in src/selector/features.py. build_feature_matrix(df) must raise on any column not in the allowlist, and tests must prove that audit.*, category, repo, and any column containing "comment"/"reference"/"score"/"recall" cannot pass.
+3. src/selector/table.py: load outcome table(s) (table.csv, coverage.csv, manifest.json written by src/review_outcomes/table.py), validate the expected columns, join with the features by entry id, and expose a clean long table (entry, level, quality columns, tokens, same_as_parent, review_status, judge_errors, reused_from). Flag cells with judge_errors > 0 or review_status != ok; keep them but let callers choose to exclude them and always report the counts. Check that every PR has all ten levels.
+4. scripts/selector/make_synthetic_table.py: create a synthetic features file and outcome table for N PRs across R repositories with a seed, with a plausible structure (quality generally non-decreasing in level but noisy, some PRs where low levels already suffice, many levels identical to parent, a few failed cells, 1-12 references per PR). Both files carry "synthetic": true. This is only for developing and testing code.
+5. src/selector/splits.py: choose test repositories by seeded hash (fraction configurable, default 0.2), save them to configs/selector/test_repos.json, and provide grouped K-fold over the remaining repositories (K=5, seeded) that keeps every PR of a repository in one fold. Tests: no repository in two places; deterministic; test access raises without FINAL_TEST=1.
+
+Tests under tests/test_selector_data.py. Acceptance: all tests pass on CPU; running the export on data/aacr_sample/context_levels.json produces a 2-row features file; the synthetic generator plus loaders round-trip.
+```
+
+### P2: labels, decision rules, lookup evaluation
+
+```text
+Task: labels, decision rules and lookup evaluation. Depends on P1.
+
+1. src/selector/labels.py: given the long outcome table, build per-PR targets for a configurable quality metric (balanced by default; recall, precision available):
+   - best_tradeoff(lambda): argmax over levels of quality - lambda * tokens / tokens_of_the_PRs_largest_level;
+   - smallest_sufficient(tolerance): the smallest level whose quality >= (1 - tolerance) * the PR's best quality (and handle best quality 0: choose the smallest level);
+   - per-level quality vector for regression targets.
+   Ties always go to the cheaper level; identical levels (same_as_parent) must not create fake alternatives. Provide the label distribution per level and the share of PRs where the best level is the lowest.
+2. src/selector/decide.py: given predicted per-level quality for a PR and costs, apply rules: best_tradeoff and cheapest_above_floor, returning one level. Never choose a level that does not exist for that PR.
+3. src/selector/evaluate.py: evaluate a policy by lookup. A policy maps PR -> level. Report, pooled over PRs exactly as AACR does (sum covered / sum expected; sum matched_generated / sum generated; harmonic mean) and as per-PR means: recall, precision, balanced, human-only recall, AI recall (and per AI source model if coverage.csv has it), mean input tokens, token saving versus L10 and versus the best fixed level, number of excluded or failed cells. Policies: fixed level (each of 10), largest level under a token limit, random level (seeds), oracle (per-PR best by quality with ties to cheaper; labelled upper bound), plus any model-based policy.
+4. Uncertainty: paired cluster bootstrap by repository (2000 draws, seeded) for differences between two policies; pairing preserved across policies.
+5. Frontier: sweep lambda or the tolerance to trace (mean input tokens, pooled quality) points; helper to interpolate the fixed-level frontier at a given token budget.
+6. A "headroom" diagnostic: oracle gain over the best fixed level, and the same gain after shuffling which PR's level-quality vector belongs to which PR within a token bin (a permutation control). Real signal must clearly exceed the permutation gain; print the numbers and a clear sentence when it does not.
+
+Tests with tiny hand-built tables: pooled versus per-PR scores differ as expected (use a 2-PR example), tie rules, identical-level handling, oracle >= every other policy, bootstrap pairing, permutation control. Acceptance: tests pass on CPU.
+```
+
+### P3: selector models, CV, baselines, ablations
+
+```text
+Task: classical selectors with repository-grouped cross-validation. Depends on P1-P2.
+
+1. src/selector/models.py: scikit-learn pipelines for (a) per-level quality regression (one multi-output model or ten models) with GradientBoosting / RandomForest / Ridge / small MLP (MLPRegressor) and optional LightGBM; (b) direct classification of the chosen target level with LogisticRegression / RandomForest / GradientBoosting / small MLP; (c) sanity baselines: always-lowest-level, nearest-neighbour on a few size features, and a length rule (add levels by increasing cost until a token limit). Standardize numeric features inside the pipeline; log-transform heavy-tailed counts (configurable). All with random_state from a seed.
+2. scripts/selector/run_cv.py: repository-grouped K-fold over the non-test PRs (from P1 splits), several seeds. For each fold and model, fit on the training folds only, predict the held-out fold's per-level quality or level, apply the decision rule, and evaluate by lookup (P2). Keep the labeling rule, lambda/tolerance, and quality metric as sweepable parameters; selection happens ONLY by comparing CV results (nested selection of the rule inside training folds is preferred when feasible; if not, state the optimism in the output README). Output results/selector/cv/<run_id>/: per-fold predictions (entry, chosen level), metrics JSON, frontier points, protocol.json (git commit, feature list, seeds, data sha256, synthetic flag).
+3. Ablations selectable from the CLI: regression vs classification target; labeling rule; quality metric (balanced vs recall); with vs without per-level token features; with vs without trace counts; feature-group removal; model type; training-set size learning curve.
+4. A report script that builds the main comparison table (all policies at matched mean tokens) and a frontier figure (PDF+PNG) from saved files only, with seed bands and repository-level bootstrap intervals, and refuses synthetic outputs unless --allow-synthetic is passed (and then stamps SYNTHETIC on the figure).
+5. Selector cost: record the per-PR inference time of the chosen model (median, p95) and the feature-extraction time.
+
+Tests on synthetic data: fold integrity (no repository in train and validation together), no test rows, feature allowlist enforced end to end, determinism with a fixed seed, outputs contain the protocol file. Acceptance: tests pass on CPU; a full CV run on a 60-PR synthetic table finishes in under a few minutes.
+```
+
+### P4: Colab notebooks (thin wrappers)
+
+```text
+Task: thin Colab notebooks under colab/ generated by scripts/make_colab_notebooks.py using nbformat. Each notebook has fewer than 10 cells and no experiment logic.
+
+- 00_setup.ipynb: mount Google Drive; set DRIVE_ROOT; clone or pull the repo to /content; pip install the pinned requirements for the selector stage (scikit-learn, pandas, pyarrow, matplotlib, pyyaml, optional lightgbm); print Python and library versions; check that DRIVE_ROOT contains selector_features.parquet, outcome_table.csv, coverage.csv and manifest.json (or offer a clearly labelled SYNTHETIC mode that generates synthetic files and stamps every output as synthetic).
+- 01_cv.ipynb: run scripts/selector/run_cv.py with parameters at the top (data paths, seeds, models, rule, lambda/tolerance grid), show the CV table and the frontier figure, write results back to Drive.
+- 02_ablations.ipynb: run the ablation CLI options and show the table.
+- 03_final_test.ipynb: guarded cell. It refuses to run unless configs/selector/selector_final.yaml exists in the checked-out commit, the data hash matches, and CONFIRM_FINAL = True is set by hand; it sets FINAL_TEST=1 only inside that cell; it produces the final table and figures.
+
+Requirements: CPU runtime is sufficient (state that clearly); idempotent cells; no hard-coded paths other than DRIVE_ROOT; show the git commit hash used; display a warning banner if the manifest says synthetic. Do not execute heavy cells; validate the notebooks with nbformat and dry-run (--help) the scripts.
+```
+
+### P5: cloud runbook and pilot tools (prepare only, do not run)
+
+```text
+Task: prepare, but do NOT run, the cloud-side pilot. The human team will execute it after fresh authorization.
+
+Read src/review_outcomes/README.md, notebooks/outcome_table.ipynb, src/tracer_context/README.md and roadmap sections 5.5.6, 5.5.7, 8.5, 9.4. Then produce:
+
+1. docs/cloud_pilot_runbook.md: a step-by-step runbook for (a) deciding the tracer index mode (full vs fast) on a few PRs and comparing results from two folders; (b) building data/aacr with data/build_dataset.sh and checking failures; (c) a pilot of 10-20 PRs (about two per language, include PHP and C#) through the outcome-table notebook with Qwen/Qwen3.8-27B; (d) checks the roadmap says must be done in the pilot: model plus a ~256k-token input fits GPU memory and the context window, latency per review, the share of malformed or truncated reviews, run-to-run noise by repeating greedy reviews, and judge agreement with a blinded human audit. For every command, say what it costs (time, GPU) and mark each cloud step "needs authorization".
+2. scripts/selector/make_audit_sheet.py: from a finished outcome-table run, sample generated comments (seeded, stratified by level) and write a blinded CSV for human judging (columns: id, file, generated comment, candidate reference text shown without the judge's verdict), plus a script that computes agreement (Cohen's kappa and raw agreement) between the human verdicts and the judge's recorded matches. The audit sheet may contain reference text, so it must be written outside git and listed in .gitignore.
+3. scripts/selector/noise_report.py: given two or more outcome-table runs of the same cells, report per-cell differences in findings count and in recall/precision/balanced, and the distribution of absolute per-PR changes; recommend a tolerance for the labeling rules (the 90th percentile of absolute per-PR change in balanced score is a reasonable default; print it).
+4. scripts/selector/cost_projection.py: from pilot timings (seconds per review and per judge call, input tokens per cell) project the GPU hours for the full table of 185 PRs x 10 levels with identical levels counted once; print assumptions explicitly; never use numbers that were not passed in.
+
+Tests for the audit/noise/projection scripts on tiny fixtures. Do not start servers, download models, or call any API.
+```
+
+### P6: freeze and final test evaluation
+
+```text
+Task: freeze the protocol and run the single final test evaluation. Run only after the team has chosen the final model, labeling rule and parameters from CV results.
+
+1. scripts/selector/freeze.py writes configs/selector/selector_final.yaml: feature allowlist hash, model type and hyperparameters, labeling rule and its parameters, quality metric, the fitted-on-all-nonTest-data model artifact hash (if models are saved), seeds, the list of test repositories file hash, outcome-table manifest hash, and the code commit. The script refuses to run on a dirty git tree.
+2. scripts/selector/final_eval.py: refuses unless selector_final.yaml is committed and hashes match the current data; sets FINAL_TEST=1 only inside the process; fits on all non-test PRs with the frozen settings; evaluates every policy (fixed levels, largest-under-limit, random, selector seeds, oracle) on the test PRs by lookup; produces the headline table, frontier figure with seed bands, repository-cluster paired bootstrap of selector minus best fixed, and writes results/final/protocol.json with all hashes.
+3. RQ3 analysis script (from saved files only): per chosen level versus L01 and versus the best fixed level, count PRs where more context helped (score up beyond the noise tolerance), hurt, or did not matter; breakdown by language, PR size quartile, and whether a level was identical to its parent; per-AI-source recall; ten example PRs chosen by a documented deterministic rule (not cherry-picked) including cases where the selector chose an expensive level with no gain or skipped a level that helped. Never include reference comment text in files committed to git.
+4. results/final/README.md describing the provenance of every table and figure. If a bug is found later, document it and rerun with the same frozen settings; no retuning on test.
+```
 
 ## Historical appendix — November 4 roadmap, retired
 
