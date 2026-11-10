@@ -55,26 +55,10 @@ LLM call. Call k re-sends the prompt plus the tool results of turns 1..k-1, so t
 tokens are sent again and again and the total grows roughly with n^2. The tool names are
 examples and the block sizes are schematic, not measurements.
 
-## Selector-training figure (how labels are made)
-
-| File | What |
-|---|---|
-| `gen_selector_training.py` | Generates `selector_training.tex` (edit this, then run `python3 gen_selector_training.py selector_training.tex`) |
-| `selector_training.tex` / `.pdf` / `.png` | The figure |
-
-One PR, read left to right as a table: (1) its ten contexts and their input tokens,
-(2) the frozen LLM reviews each level once, (3) the AACR judge checks which human reference
-comments each review found, (4) each level's score = quality - lambda x tokens / max tokens,
-and the best level is that PR's training label. Repeated for all 196 PRs this is the outcome
-table (1,960 reviews); the selector learns input-side features -> label by table lookup.
-Token counts are real (FreeCAD/FreeCAD#21257); findings, coverage and scores are made up.
-The label rule shown (best trade-off, lambda = 0.5) is one of the candidate rules in
-`docs/context_selector_roadmap.md` 8.5.7; the rule is not decided yet.
-
 ## Teacher-labelled training figure (exam analogy)
 
 `gen_selector_training_teacher.py` generates `selector_training_teacher.tex` (`.pdf`, `.png`),
-in the same one-PR table style as `selector_training`. Drawn from the team's description;
+Drawn from the team's description;
 this labelling scheme is **not yet written in `docs/context_selector_roadmap.md`** (which
 labels levels by reviewing every level with the frozen LLM, section 8.5.7).
 
