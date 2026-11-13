@@ -76,8 +76,10 @@ The outcome table is built by `notebooks/outcome_table.ipynb`. Choose its profil
 with the `OUTCOME_PROFILE` environment variable:
 
 - **`cloud`** (the default) calls Qwen3.8-27B through an OpenAI-compatible server,
-  such as vLLM on the cloud GPU. Its judge is a placeholder that stops the notebook
-  until the judge model is chosen.
+  such as vLLM on the cloud GPU. Download the model there first with
+  `.venv/bin/python scripts/setup/download_reviewer_model.py`, which also prints the
+  `vllm serve` command. Its judge is a placeholder that stops the notebook until the
+  judge model is chosen.
 - **`local-smoke`** runs `Qwen/Qwen3.5-0.8B` in-process on two levels of
   cline/cline#5177, with a keyword stand-in for the judge. It tests the pipeline
   only.
@@ -103,7 +105,7 @@ CS536_Project/
 ├── scripts/                  # see scripts/README.md
 │   ├── dataset/              # build_dataset.py, clean_dataset.py
 │   ├── tracer/               # build_tracer_context.py, run_tracer_batch.py
-│   ├── setup/                # check_device.py, test_qwen.py, llamafactory_ui.sh
+│   ├── setup/                # download_reviewer_model.py, check_device.py, test_qwen.py, llamafactory_ui.sh
 │   └── analysis/             # analyze_predictions.py, preview_context_selection.py
 ├── configs/
 │   ├── levels/               # L01_min.yaml ... L10_all.yaml
