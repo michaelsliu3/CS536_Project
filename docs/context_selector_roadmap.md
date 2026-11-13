@@ -2,6 +2,8 @@
 
 **Revised November 7, 2026; status updated November 9. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
 
+**Update, November 12, 2026:** Section 4.7 adds three suggested alternative datasets (DeepSWE, FrontierCode, CyberGym), with one real sample of each and the preprocessing each would need. None of them replaces AACR-Bench.
+
 **Update, November 9, 2026:**
 - **Selector-stage plan added (Section 9.4):** the cloud GPU builds the dataset and the outcome table; the selector is trained and evaluated on a Colab CPU runtime from two small hand-off files (input-side features per PR, scores per (PR, level)), purely by lookup.
 - **Evaluation design made concrete:** repository-grouped 5-fold CV on non-test PRs, a test set of repositories fixed by a seeded hash before any modelling, ties to the lower level, and a tentative Nov 9 → Dec 1 schedule (Sections 9.4.4–9.4.5, 10.1).
@@ -255,6 +257,138 @@ ContextCRBench is a benchmark, but benchmark records can be partitioned for trai
 For this project, preserve its completed pilot and first establish AACR results. A later ContextCRBench transfer study must verify available human review references, revision pointers, and repository reconstruction. PR title/body, issue context, and nearby before/after code do not themselves supply complete call chains or related classes.
 
 If only packaged context fields are recoverable, report transfer in that **restricted-context setting**. Do not claim a repository-aware test. Do not use `is_merged` as a substitute for generated-review quality, and check repository/PR overlap with AACR before calling the result external validation.
+
+### 4.7 Possible alternative datasets (researched November 12, 2026)
+
+Three benchmarks were suggested to the team as possible alternatives: DeepSWE, FrontierCode and CyberGym. This section records what each one contains, one real sample from each, and whether it could replace AACR-Bench. **Conclusion: none of them replaces AACR-Bench, which stays the dataset.** Nothing here is implemented.
+
+**What a replacement must provide.** For each item, our pipeline needs:
+1. a real change, as a diff, at a repository snapshot the tracer can index;
+2. reference review findings anchored to a file and lines, for AACR's file-level judge (Section 8.5);
+3. enough independent PRs and repositories, varying in how much context a finding needs;
+4. languages the tracer handles;
+5. public data under a research-compatible license.
+
+| | DeepSWE | FrontierCode | CyberGym |
+|---|---|---|---|
+| Maker, date | Datacurve, 2026 | Cognition, June 8, 2026 | UC Berkeley, ICLR 2026 |
+| What it measures | An agent implements a long feature; hidden tests grade it | An agent writes a change a maintainer would merge; tests plus a maintainer rubric grade it | An agent writes an input that triggers a known vulnerability; running it under a sanitizer grades it |
+| Size | 113 tasks, 92 repository URLs | 150 tasks (Main 100, Diamond 50), 36 repositories | 1,507 tasks, 188 projects |
+| Languages | TypeScript 35, Go 34, Python 34, Rust 5, JavaScript 5 | Not listed per task | C++ 1,276, C 228, Rust 2, Swift 1 (as labelled) |
+| Data access | Public on GitHub. Apache-2.0 for Datacurve's task content; the upstream code keeps its own permissive license | **Not public.** Tasks are kept private; model makers can submit for evaluation | Public on Hugging Face, 236 GB. Code Apache-2.0 |
+| Change and snapshot | Base commit plus a reference patch written for the benchmark, never upstreamed | Not available | Vulnerable and fixed snapshots (tarballs) plus the fix patch |
+| Review comments | None | None public | None; one short vulnerability description per task |
+| Preprocessing for our pipeline | High: levels are easy to build, but every reference comment would have to be created | Not possible | High: a new builder path for tarballs, a synthetic change under review, and one synthetic reference per task |
+| Verdict | Not a replacement | Not usable | Not a replacement; at most a security-only side study |
+
+#### 4.7.1 DeepSWE (Datacurve)
+
+**What it is.** 113 long-horizon tasks from active open-source projects, in Harbor's task format.
+- **Files per task:** `task.toml` (repository URL, base commit, Docker image, limits), `instruction.md` (the prompt), `environment/`, `tests/` (held-out tests and a grader) and `solution/solution.patch` (a reference patch, not used for grading).
+- **Task types:** 106 feature requests, 4 bug fixes and 3 enhancements.
+- **Size:** reference patches have a median of 642 changed lines (mean 701, max 1,647) across a median of 6 files; prompts have a median of 291 words. These are our counts from the repository.
+- **Contamination:** the tasks were written for the benchmark and never upstreamed, which limits training contamination.
+
+**Sample** (`tasks/fastapi-implicit-head-options`, real):
+
+```text
+task.toml: task_id = "fastapi-implicit-head-options", category = "feature_request", language = "python",
+           repository_url = "https://github.com/fastapi/fastapi",
+           base_commit_hash = "11614be9021aa4ac078d4d0693a8b5250a1010d8"
+instruction.md (start): "GET routes lack implicit HEAD controls, and FastAPI has no OPTIONS response exposing
+           path metadata. Add `auto_head` and `auto_options` to FastAPI/APIRouter constructors, decorators,
+           `api_route`, `add_api_route`, and `include_router`. ..."  (217 words in total)
+solution/solution.patch: 943 changed lines in 4 files.   tests/: test.patch, grader.py, config.json
+```
+
+**Fit: not a replacement.** There is no pull request and no review comment: the reference is a working solution, and the grade comes from tests. The judge would have nothing to match a review against. It is also smaller than our 185 PRs.
+
+**Preprocessing needed, and how much:**
+- **Context levels: low.** Each task has a repository URL, a base commit and a patch. The builder would need an input path that applies a patch instead of diffing to a target commit, since the reference solution isn't a GitHub commit. A build of 113 tasks should take a few hours at the AACR rate.
+- **Reference comments: high, and a different kind of label.**
+  - Human annotators could write reviews of the reference patches, but those are working solutions, so there is little to flag.
+  - Alternatively, run coding agents on the tasks in Docker (Pier/Harbor), keep the patches that fail hidden tests, and turn the test failures into references. Those references are not tied to lines, the run costs agent and container time, and the judge would need adapting.
+- **Usable without labels:** as a large-diff stress test of the tracer and the 256k-token cap.
+
+#### 4.7.2 FrontierCode (Cognition)
+
+**What it is.** 150 tasks from 36 flagship open-source repositories, written by their maintainers (more than 40 hours per task). Each task has a maintainer rubric of blocking and non-blocking criteria, graded by:
+- injected unit tests and shell commands;
+- "reverse-classical" checks, where the agent's own tests must fail on the base commit;
+- scope checks on which files and how many lines change;
+- LLM prompts that grade code quality.
+
+There are three nested subsets: Extended (all 150), Main (100) and Diamond (50).
+
+**Data access.** The tasks are not released, to avoid contamination; model makers can submit models for evaluation instead. Only one example task is published, in the launch post, and its rubric is shown only through an interactive demo.
+
+**Sample** (the one public example, paraphrased; repository: jsonschema, C++):
+- **Task:** add a `LOG_WARNING()` helper returning `std::ostream &` in `src/logger.h`. It must always print to standard error, ignore `--verbose` and add the `warning:` prefix. Then use it for every `warning: <message>` print in the codebase.
+- **Guidelines:** build and format with `make`; add GoogleTest or POSIX-shell tests registered in `test/CMakeLists.txt`; start the branch from the given base commit.
+- **One blocking criterion described:** a multi-line warning must chain every line on one `LOG_WARNING()` stream rather than mixing in `std::cerr`, which a strong model got wrong.
+
+**Fit: not usable.** It is the closest in spirit to code review, since rubric items read like maintainer review comments, but there is no data to build on. It is worth citing as related work on mergeability versus test-passing.
+
+**Preprocessing:** not applicable.
+
+#### 4.7.3 CyberGym (UC Berkeley)
+
+**What it is.** 1,507 vulnerability-reproduction tasks built from the OSS-Fuzz and ARVO corpora (1,368 ARVO and 139 OSS-Fuzz IDs), across 188 projects.
+
+Each task has five files:
+- `repo-vul.tar.gz`, the vulnerable snapshot (median 17 MB, largest 2.3 GB, 118 GB in total);
+- `repo-fix.tar.gz`, the fixed snapshot;
+- `description.txt`, a median of 24 words;
+- `error.txt`, the sanitizer's crash stack;
+- `patch.diff`, the fix.
+
+The agent must produce an input that reproduces the crash. Four difficulty levels reveal progressively more:
+- **level 0:** the vulnerable repository only;
+- **level 1:** plus the description;
+- **level 2:** plus the crash stack;
+- **level 3:** plus the fixed repository and the patch.
+
+**Sample** (`arvo:10013`, real):
+
+```text
+tasks.json: project_name = "graphicsmagick", project_language = "c++",
+            project_main_repo = "https://foss.heptapod.net/graphicsmagick/graphicsmagick"
+description.txt: "A vulnerability exists in the QuantumTransferMode() function where CIE Log images with an
+            alpha channel are not supported."
+error.txt:  WARNING: MemorySanitizer: use-of-uninitialized-value
+              #0 ... in DisassociateAlphaRegion /src/graphicsmagick/coders/tiff.c:1653:11
+              #1 ... in ReadTIFFImage /src/graphicsmagick/coders/tiff.c:2664:23
+patch.diff: coders/tiff.c, QuantumTransferMode(), case PHOTOMETRIC_LOGL:
+            -            *quantum_type=CIEYQuantum;
+            +            if (!image->matte)
+            +              {
+            +                *quantum_type=CIEYQuantum;
+            (plus ChangeLog and www/Changelog.html edits; the repository is Mercurial, not GitHub)
+```
+
+**Fit: not a replacement.**
+- There is no review comment and no change under review: the diff is a fix, and the description is one sentence that isn't tied to lines.
+- Every item is the same kind of finding: a memory-safety bug found by fuzzing.
+- Nearly all of it is C/C++.
+- With splits grouped by repository, the effective sample is 188 projects, not 1,507 tasks.
+
+Its level 0–3 design is a close analogue of our context levels (how much information an agent needs to find a bug), so it belongs in related work.
+
+**Preprocessing needed, and how much: high.**
+- **Download:** about 236 GB.
+- **Builder:** a new path for local tarball snapshots. 28% of tasks (421) are hosted outside GitHub, for example on Ghostscript's and FFmpeg's own servers, GitLab and Heptapod, and the builder's fetch and merge-base steps assume GitHub commits.
+- **A synthetic change under review:** for example, the reverse of the fix, which reintroduces the bug, with the description placed at the patched lines as its single reference.
+
+That construction has known flaws:
+- The vulnerable code usually predates any single change, so the "PR" is artificial.
+- The reverse diff often shows the removed check directly, so the finding may be visible from the diff alone.
+- One reference per item makes each review's recall 0 or 1.
+
+It could be an optional security-only transfer study after the main AACR results, not a replacement.
+
+**Sources:** [DeepSWE repository](https://github.com/datacurve-ai/deep-swe) (README, PROVENANCE.md, tasks; counts computed from a clone on Nov 12), [DeepSWE leaderboard](https://deepswe.datacurve.ai/); [Introducing FrontierCode](https://cognition.ai/blog/frontier-code) (Cognition, June 8, 2026); [CyberGym paper](https://arxiv.org/abs/2506.02548), [code](https://github.com/sunblaze-ucb/cybergym), [dataset](https://huggingface.co/datasets/sunblaze-ucb/cybergym) (`tasks.json` and task `arvo:10013` read on Nov 12).
+
+**Takeaway.** Of the options seen so far, ContextCRBench (Section 4.6) is still the only realistic route to more training data, because it has real review comments on real PRs. For these three: cite FrontierCode and CyberGym in related work, and use DeepSWE only as an unlabelled stress test if it's needed.
 
 ## 5. Repository exploration: reuse RepoHyper, adapt the task
 
