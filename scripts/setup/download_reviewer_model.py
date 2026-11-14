@@ -28,8 +28,8 @@ Re-running resumes: finished files are kept, and a weight file cut off by Ctrl+C
 continues from the bytes already on disk. Through a mirror the script downloads the weight
 files itself (huggingface_hub 1.x and later restart a cut-off file from its beginning) and
 replaces a connection that stays slow: from mainland China some connections to the file CDN
-are throttled to a few tens of KB/s and never recover, while a new connection to the same
-file is fast. Each run's full log (DEBUG level) goes to logs/download_reviewer_model_<time>.log.
+are throttled to between 20 and 250 KB/s and never recover, while a new connection to the
+same file runs at several MB/s. Each run's full log (DEBUG level) goes to logs/download_reviewer_model_<time>.log.
 """
 from __future__ import annotations
 
@@ -675,15 +675,18 @@ def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) ->
     failed: list[str] = []
     stop = ctx["stop"]
 
-    def download(f: RemoteFile) -> float:
+    def download(f: RemoteFile) -> tuple[float, int]:
+        """Returns the seconds taken and the bytes that were already on disk from an earlier run."""
         progress.start(f.name)
-        started = time.monotonic()
+        started, resumed = time.monotonic(), 0
         log.debug(f"start {f.name} ({fmt_bytes(f.size)}){' (replacing a bad cached copy)' if f.force else ''}")
         if ctx["direct"] and f.sha256:  # weight file: fetch its blob here; huggingface_hub then links it
             if f.force:
                 remove_cached(f, ctx["snapshot"])
                 (ctx["blobs"] / f"{f.sha256}.incomplete").unlink(missing_ok=True)
                 f.force = False
+            part = ctx["blobs"] / f"{f.sha256}.incomplete"
+            resumed = min(part.stat().st_size, f.size) if part.is_file() else 0
             fetch_weight_file(f, ctx, args.retries)
             progress.land(f)
 
@@ -703,7 +706,7 @@ def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) ->
             return path
 
         with_retries(f.name, attempt, args.retries, stop)
-        return time.monotonic() - started
+        return time.monotonic() - started, resumed
 
     # Small files first, so the config and tokenizer arrive (and mirror problems show) early.
     ordered = sorted(todo, key=lambda f: f.size)
@@ -713,7 +716,7 @@ def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) ->
         for future in as_completed(futures):
             f = futures[future]
             try:
-                seconds = future.result()
+                seconds, resumed = future.result()
             except OfficialHubBlocked:
                 raise  # stops every download: the mirror is sending this run to the official hub
             except Exception as error:  # noqa: BLE001 - recorded and reported at the end
@@ -723,7 +726,8 @@ def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) ->
                 continue
             progress.finish(f)
             log.info(f"[{progress.done_files}/{progress.count}] {f.name}: {fmt_bytes(f.size)} in "
-                     f"{fmt_duration(seconds)} ({f.size / max(seconds, 1e-9) / 1e6:.1f} MB/s)")
+                     f"{fmt_duration(seconds)} ({(f.size - resumed) / max(seconds, 1e-9) / 1e6:.1f} MB/s"
+                     + (f"; {fmt_bytes(resumed)} was already here from an earlier run)" if resumed else ")"))
     except (KeyboardInterrupt, OfficialHubBlocked):
         stop.set()  # a `with` block would wait here for every running file to finish
         pool.shutdown(wait=False, cancel_futures=True)
@@ -903,9 +907,11 @@ def parse_args(argv=None):
     parser.add_argument("--workers", type=int, default=8, help="parallel file downloads (default 8)")
     parser.add_argument("--retries", type=int, default=8,
                         help="failed requests in a row, per file, before giving up (default 8)")
-    parser.add_argument("--min-speed", type=float, default=200, metavar="KB/S",
+    parser.add_argument("--min-speed", type=float, default=500, metavar="KB/S",
                         help="replace a weight file's connection when it stays below this speed for "
-                             f"{WINDOW_SECONDS:g} s; the download resumes on a new one (default 200; 0 turns it off)")
+                             f"{WINDOW_SECONDS:g} s; the download resumes on a new one. After {SLOW_STREAK} slow "
+                             f"connections in a row the next is kept for {SLOW_PAUSE / 60:g} minutes, so a link that "
+                             "is slow as a whole still downloads (default 500; 0 turns the check off)")
     parser.add_argument("--hub-download", action="store_true",
                         help="download weight files with huggingface_hub's own downloader instead of this script's: "
                              "no resume between runs and no replacing of slow connections")
