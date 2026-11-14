@@ -119,6 +119,7 @@ CS536_Project/
 │   └── aacr_sample/          # committed 2-PR sample of the dataset
 ├── notebooks/
 │   ├── outcome_table.ipynb
+│   ├── future_work/          # the outcome table with Claude as the reviewer (API; not run yet)
 │   ├── qwen3b_qlora_contextcrbench.ipynb    # midpoint
 │   └── qwen3b_evaluation_comparison.ipynb   # midpoint
 ├── tests/                    # unittest suite
