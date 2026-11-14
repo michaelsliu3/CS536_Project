@@ -319,7 +319,8 @@ def log_runtime() -> None:
     else:
         log.warning("no NVIDIA GPU found (nvidia-smi failed); serving the model with vLLM needs the cloud GPU")
     if not vllm and not shutil.which("vllm"):
-        log.warning("vLLM is not installed here; install it on the GPU machine before serving")
+        log.info("vLLM is not in this environment or on PATH. It can live in its own environment "
+                 "(vLLM 0.17.0 or later for this model); activate that one before serving")
 
 
 def disk_report(path: Path) -> tuple[Path, int]:
@@ -1130,9 +1131,13 @@ def main(argv=None) -> int:
         log.warning("partial snapshot (--include) verified; run without --include for the full model")
         return 0
     log.info(f"READY: {repo}@{revision} is complete and verified in {snapshot}")
-    log.info("next, on this machine, start the reviewer server and leave it running "
-             "(the notebook expects it at " + reviewer["base_url"] + "):\n    "
+    log.info("next, on this machine, activate the environment that has vLLM, start the reviewer server and leave "
+             "it running (the notebook expects it at " + reviewer["base_url"] + "):\n    "
              + serve_command(repo, revision, window, reviewer, env["hf_home"], env["endpoint"]))
+    log.info("activate the environment rather than calling its `vllm` by full path: the first start builds a module "
+             "with `ninja`, which must be on PATH. At startup vLLM logs `GPU KV cache size` and `Maximum concurrency "
+             f"for {window or 262144:,} tokens per request`; if the window does not fit the GPU, add "
+             "`--language-model-only` (text only, frees the vision encoder)")
     log.info(f"when it is up, `curl -s {reviewer['base_url'].rstrip('/')}/models` lists {repo}; then run "
              f"notebooks/outcome_table.ipynb (OUTCOME_PROFILE=cloud, the default). The judge model is still "
              f"undecided, so the notebook stops at its judge cell until one is set; the reviews run before that.")
