@@ -9,9 +9,12 @@ vLLM loads the model from the Hugging Face cache. This script:
 2. downloads exactly that snapshot through https://hf-mirror.com (or --endpoint) into the
    Hugging Face cache, the same place `vllm serve` looks. On AutoDL that is
    /root/autodl-tmp/huggingface, the data disk, as in notebooks/hf_hub_endpoint.py.
-   With a mirror, the run never contacts the official hub: every request and redirect is
-   checked, any request to huggingface.co or hf.co (or their subdomains) stops the run with
-   an error, and the log lists every host contacted;
+   With a mirror, the run never contacts huggingface.co, which is unreachable from mainland
+   China: every request and redirect is checked, a request to huggingface.co (or a subdomain)
+   stops the run with an error, and the log lists every host contacted. hf-mirror.com serves
+   the file list and small files itself and redirects the large weight files to Hugging
+   Face's file CDN (hosts under hf.co, such as cas-bridge.xethub.hf.co), which is reachable
+   from China; those hosts are allowed and logged;
 3. checks every file's size and hash, the safetensors shards against the index, and that the
    config and tokenizer load offline from the cache;
 4. prints the `vllm serve` command. Once that server is up, run the notebook.
@@ -71,9 +74,13 @@ COMMIT_HASH = re.compile(r"^[0-9a-f]{40}$")
 UNIQUE_TEMP = re.compile(r"^[0-9a-f]+\.[0-9a-f]{8}\.incomplete$")
 STALE_SECONDS = 60  # a live download writes continuously; an untouched temp file is an orphan
 
-# The official hub's domains, with every subdomain (cdn-lfs.huggingface.co, cas-bridge.xethub.hf.co,
-# ...). Through a mirror, this script refuses to contact any of them.
-OFFICIAL_DOMAINS = ("huggingface.co", "hf.co")
+# The official hub: huggingface.co with every subdomain, and its short name hf.co. It is
+# unreachable from mainland China, so through a mirror this script refuses to contact it.
+HUB_DOMAIN = "huggingface.co"
+# Hugging Face's file CDN: the subdomains of hf.co (cas-bridge.xethub.hf.co, cdn-lfs.hf.co,
+# us.aws.cdn.hf.co, ...). hf-mirror.com redirects large files there, and they are reachable
+# from mainland China, so they are allowed and logged.
+FILE_CDN_DOMAIN = "hf.co"
 PROXY_VARIABLES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
 
 log = logging.getLogger("download_reviewer_model")
@@ -81,8 +88,14 @@ _blobs_dir: Path | None = None  # for cleaning up temp files on Ctrl+C
 
 
 def is_official_host(host: str | None) -> bool:
+    """The hub itself: huggingface.co, its subdomains, and the bare hf.co."""
     host = (host or "").lower().rstrip(".")
-    return any(host == domain or host.endswith("." + domain) for domain in OFFICIAL_DOMAINS)
+    return host == HUB_DOMAIN or host.endswith("." + HUB_DOMAIN) or host == FILE_CDN_DOMAIN
+
+
+def is_file_cdn_host(host: str | None) -> bool:
+    """Hugging Face's file CDN: a subdomain of hf.co."""
+    return (host or "").lower().rstrip(".").endswith("." + FILE_CDN_DOMAIN)
 
 
 def strip_query(url: str) -> str:
@@ -95,7 +108,8 @@ class OfficialHubBlocked(RuntimeError):
 
 class NetworkGuard:
     """Logs every host the run contacts and, when downloading through a mirror, refuses the
-    official hub. Two layers: huggingface_hub's HTTP client, which sees every request and every
+    official hub (huggingface.co); Hugging Face's file CDN, where a mirror sends large files, is
+    allowed. Two layers: huggingface_hub's HTTP client, which sees every request and every
     redirect hop (also through a proxy), and DNS lookups, which catch any other Python code."""
 
     def __init__(self, block_official: bool):
@@ -110,7 +124,7 @@ class NetworkGuard:
             with self.lock:
                 self.blocked = self.blocked or (f"{host} ({strip_query(url)})" if url else host)
             log.error(f"BLOCKED {via} request to {host}{' for ' + strip_query(url) if url else ''}; "
-                      f"this run uses only the mirror")
+                      f"this run uses only the mirror and the file CDN it redirects to")
             raise OfficialHubBlocked(f"refused to contact {host}, the official Hugging Face hub")
         if via == "dns":
             log.debug(f"dns lookup {host}")
@@ -119,7 +133,8 @@ class NetworkGuard:
             first = host not in self.requests
             self.requests[host] = self.requests.get(host, 0) + 1
         if first:
-            log.info(f"network: first request to {host} ({via})")
+            kind = " (Hugging Face's file CDN, where the mirror sends large files)" if is_file_cdn_host(host) else ""
+            log.info(f"network: first request to {host}{kind} ({via})")
         log.debug(f"{via} request {strip_query(url) if url else host}")
 
     def install(self) -> bool:
@@ -155,9 +170,11 @@ class NetworkGuard:
     def summary(self) -> str:
         with self.lock:
             hosts = ", ".join(f"{host} ({count})" for host, count in sorted(self.requests.items())) or "none"
-        official = any(is_official_host(host) for host in self.requests)
-        return (f"hosts contacted (requests): {hosts}; official Hugging Face hub "
-                f"{'CONTACTED' if official else 'never contacted'}")
+            official = any(is_official_host(host) for host in self.requests)
+            cdn = sorted(host for host in self.requests if is_file_cdn_host(host))
+        return (f"hosts contacted (requests): {hosts}; official Hugging Face hub ({HUB_DOMAIN}) "
+                f"{'CONTACTED' if official else 'never contacted'}"
+                + (f"; large files came from Hugging Face's file CDN ({', '.join(cdn)})" if cdn else ""))
 
 
 _guard = NetworkGuard(block_official=False)
@@ -355,7 +372,8 @@ def trace_redirects(url: str, max_hops: int = 6) -> list[tuple[int | None, str]]
 
 def probe_endpoint(endpoint: str, repo: str, revision: str, files: list[RemoteFile]) -> None:
     """Show where the mirror sends a plain file and a weight (LFS) file, hop by hop. A hop to the
-    official hub raises OfficialHubBlocked before anything is downloaded."""
+    official hub raises OfficialHubBlocked before anything is downloaded; a hop to Hugging Face's
+    file CDN is expected for the weight file and must answer from this machine."""
     lfs = min((f for f in files if f.sha256), key=lambda f: f.size, default=None)
     for name in ["config.json"] + ([lfs.name] if lfs else []):
         url = f"{endpoint}/{repo}/resolve/{revision}/{name}"
@@ -757,8 +775,9 @@ def main(argv=None) -> int:
         if constants.HF_HUB_DISABLE_XET is not True:
             log.error("Xet is still enabled; its transfers bypass the mirror. Refusing to continue")
             return 1
-        log.info(f"network policy: only {urlsplit(env['endpoint']).hostname} and the hosts it sends files from; "
-                 f"any request to {' or '.join(OFFICIAL_DOMAINS)} (or a subdomain) stops the run "
+        log.info(f"network policy: only {urlsplit(env['endpoint']).hostname} and the hosts it sends files from "
+                 f"(Hugging Face's file CDN, *.{FILE_CDN_DOMAIN}, is allowed); any request to {HUB_DOMAIN} "
+                 f"(or a subdomain) or the bare {FILE_CDN_DOMAIN} stops the run "
                  f"({'checked on every HTTP request and redirect, and on DNS' if http_hook else 'checked on DNS only: this huggingface_hub has no client hook'})")
     for name in PROXY_VARIABLES:
         if value := os.environ.get(name):
@@ -926,7 +945,7 @@ if __name__ == "__main__":
         if _blobs_dir is not None:
             remove_temp_files(_blobs_dir, older_than=None)
         endpoint = os.environ.get("HF_ENDPOINT", DEFAULT_ENDPOINT)
-        log.error(f"stopped: {error}. The mirror sent this request on to the official hub, which this run never "
+        log.error(f"stopped: {error}. The mirror sent this request on to {HUB_DOMAIN}, which this run never "
                   f"contacts. Check that {endpoint} serves files from this machine (`curl -I {endpoint}`), or pass "
                   f"another mirror with --endpoint. Finished files are kept.")
         log.info(f"network: {_guard.summary()}")

@@ -49,10 +49,17 @@ class DownloadReviewerModelTest(unittest.TestCase):
         self.assertIn("HF_ENDPOINT=https://hf-mirror.com", command)
 
     def test_official_hosts(self):
-        for host in ("huggingface.co", "cdn-lfs.huggingface.co", "hf.co", "cas-bridge.xethub.hf.co",
-                     "us.aws.cdn.hf.co", "HuggingFace.co."):
+        for host in ("huggingface.co", "cdn-lfs.huggingface.co", "hf.co", "HuggingFace.co."):
             self.assertTrue(dl.is_official_host(host), host)
+            self.assertFalse(dl.is_file_cdn_host(host), host)
         for host in ("hf-mirror.com", "cdn.hf-mirror.com", "nothf.co", "huggingface.co.example.cn", "127.0.0.1", None):
+            self.assertFalse(dl.is_official_host(host), host)
+            self.assertFalse(dl.is_file_cdn_host(host), host)
+
+    def test_file_cdn_hosts_are_not_the_hub(self):
+        # hf-mirror.com redirects large files to these; they answer from mainland China.
+        for host in ("cas-bridge.xethub.hf.co", "cdn-lfs.hf.co", "us.aws.cdn.hf.co", "CDN-LFS-US-1.hf.co."):
+            self.assertTrue(dl.is_file_cdn_host(host), host)
             self.assertFalse(dl.is_official_host(host), host)
 
     def test_guard_refuses_the_official_hub_through_a_mirror(self):
@@ -60,12 +67,26 @@ class DownloadReviewerModelTest(unittest.TestCase):
         guard.check("hf-mirror.com", "https://hf-mirror.com/api/models/x")
         guard.check("hf-mirror.com", "https://hf-mirror.com/x/resolve/r/config.json")
         with self.assertRaises(dl.OfficialHubBlocked):
-            guard.check("cas-bridge.xethub.hf.co", "https://cas-bridge.xethub.hf.co/x?token=secret")
+            guard.check("cdn-lfs.huggingface.co", "https://cdn-lfs.huggingface.co/x?token=secret")
         with self.assertRaises(dl.OfficialHubBlocked):
             guard.check("huggingface.co", via="dns")
-        self.assertEqual(guard.blocked, "cas-bridge.xethub.hf.co (https://cas-bridge.xethub.hf.co/x)")  # no token
+        with self.assertRaises(dl.OfficialHubBlocked):
+            guard.check("hf.co", via="dns")
+        self.assertEqual(guard.blocked, "cdn-lfs.huggingface.co (https://cdn-lfs.huggingface.co/x)")  # no token
         self.assertEqual(guard.requests, {"hf-mirror.com": 2})
-        self.assertIn("official Hugging Face hub never contacted", guard.summary())
+        self.assertIn("official Hugging Face hub (huggingface.co) never contacted", guard.summary())
+
+    def test_guard_allows_the_file_cdn_through_a_mirror(self):
+        guard = dl.NetworkGuard(block_official=True)
+        guard.check("hf-mirror.com", "https://hf-mirror.com/x/resolve/r/model.safetensors")
+        guard.check("cas-bridge.xethub.hf.co", via="dns")
+        guard.check("cas-bridge.xethub.hf.co", "https://cas-bridge.xethub.hf.co/x?Signature=secret")
+        self.assertIsNone(guard.blocked)
+        self.assertEqual(guard.requests, {"hf-mirror.com": 1, "cas-bridge.xethub.hf.co": 1})
+        summary = guard.summary()
+        self.assertIn("never contacted", summary)
+        self.assertIn("file CDN (cas-bridge.xethub.hf.co)", summary)
+        self.assertNotIn("secret", summary)
 
     def test_guard_only_logs_with_the_official_endpoint(self):
         guard = dl.NetworkGuard(block_official=False)
