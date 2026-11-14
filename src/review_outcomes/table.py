@@ -37,9 +37,10 @@ log = logging.getLogger("review_outcomes")
 SUMMARY_EVERY = 300.0  # seconds between progress summaries in the log
 
 
-def start_run_log(out_dir: Path, stage: str = "reviews") -> Path:
+def start_run_log(out_dir: Path, stage: str = "reviews", console_level: int = logging.WARNING) -> Path:
     """Write this module's log to <out_dir>/logs/<stage>_<time>.log, and show warnings and errors
-    on the console (under the notebook cell). Calling it again starts a new file."""
+    on the console (under the notebook cell; a script passes logging.INFO to show every line).
+    Calling it again starts a new file."""
     path = Path(out_dir) / "logs" / f"{stage}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
     path.parent.mkdir(parents=True, exist_ok=True)
     for handler in [h for h in log.handlers if getattr(h, "run_log", False)]:
@@ -48,7 +49,7 @@ def start_run_log(out_dir: Path, stage: str = "reviews") -> Path:
     file_handler = logging.FileHandler(path, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
     console = logging.StreamHandler()
-    console.setLevel(logging.WARNING)
+    console.setLevel(console_level)
     console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
     for handler in (file_handler, console):
         handler.run_log = True

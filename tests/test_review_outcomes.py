@@ -234,6 +234,29 @@ class TableTests(unittest.TestCase):
         self.assertIn("judge stage: 3 of 5 cells have a review to score", text)
         self.assertIn("judge stage finished: 3 cells scored", text)
 
+    def test_review_script_selects_prs_and_reads_the_notebook_profile(self):
+        import importlib.util
+        import sys
+
+        from src.review_outcomes.profiles import read_notebook_profile
+        from src.review_outcomes.table import Cell
+
+        path = Path(__file__).resolve().parents[1] / "scripts" / "outcome" / "run_reviews.py"
+        spec = importlib.util.spec_from_file_location("run_reviews", path)
+        script = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = script
+        spec.loader.exec_module(script)
+        cells = [Cell(entry, level, f"{entry} {level}", 10) for entry in ("b", "a", "c") for level in ("L01", "L02")]
+        self.assertEqual([c.entry for c in script.select_cells(cells, 2, None)], ["b", "b", "a", "a"])  # dataset order
+        self.assertEqual([c.entry for c in script.select_cells(cells, None, ["c"])], ["c", "c"])
+        self.assertEqual(len(script.select_cells(cells, None, None)), 6)
+        with self.assertRaises(SystemExit):
+            script.select_cells(cells, None, ["missing"])
+        reviewer = read_notebook_profile("cloud")["reviewer"]
+        self.assertEqual(script.make_reviewer(reviewer).identity["model"], "Qwen/Qwen3.8-27B")
+        with self.assertRaises(ValueError):
+            read_notebook_profile("no-such-profile")
+
     def test_too_long_cells_are_reviewed_once_the_limit_allows(self):
         cells, calls = discover_cells(self.contexts), []
 

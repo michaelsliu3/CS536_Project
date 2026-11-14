@@ -14,5 +14,6 @@ root from its own location, so the working directory only matters for relative a
 | | `check_device.py` | Checks the PyTorch device (CUDA, MPS or CPU). |
 | | `test_qwen.py` | Loads Qwen2.5-Coder-7B for a smoke test (large download). |
 | | `llamafactory_ui.sh` | Starts the local LLaMA-Factory web UI (see the root README). |
+| `outcome/` | `run_reviews.py` | Runs the outcome table's review stage from a terminal with the notebook's profile (`cloud` by default), so a long run can sit in `screen`. Saves each review as it arrives, resumes on re-run, and logs every call to the run folder's `logs/`. `--first N` reviews only the first N PRs and estimates the rest. |
 | `analysis/` | `analyze_predictions.py` | Analyzes saved paired predictions (see `src/evaluation/README.md`). |
 | | `preview_context_selection.py` | Previews one context policy with a local tokenizer, without inference. |
