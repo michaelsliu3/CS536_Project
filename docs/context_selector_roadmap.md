@@ -2,6 +2,8 @@
 
 **Revised November 7, 2026; status updated November 9. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
 
+**Update, November 14, 2026:** The reviewer stage of the outcome table has run once in full: Qwen3.8-27B reviewed all 185 PRs at all 10 levels (1,850 cells) in 5h48m. 13.7% of the cells hold a reply the parser could not read, concentrated at `L01_min`. The judge stage has not run, so there is still no score and no table. Details and open decisions are in [outcome_table_first_run.md](outcome_table_first_run.md). The status line above and the sections below predate this run.
+
 **Update, November 12, 2026:** Section 4.7 adds three suggested alternative datasets (DeepSWE, FrontierCode, CyberGym), with one real sample of each and the preprocessing each would need. None of them replaces AACR-Bench.
 
 **Update, November 9, 2026:**
