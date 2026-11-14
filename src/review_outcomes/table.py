@@ -374,18 +374,16 @@ def references_by_entry(dataset_path: Path) -> dict[str, dict]:
 
 
 def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Callable[[str], str], out_dir: Path,
-                  force: bool = False, progress: Callable | None = None) -> list[dict]:
+                  force: bool = False, progress: Callable | None = None, concurrency: int = 1) -> list[dict]:
     """Score each reviewed cell with AACR's metric; reuse records whose cache key matches.
 
     Malformed and empty replies are scored as reviews with no findings. Cells without a
     reply (too_long, error) are not scored. Judge errors are kept and retried next run.
+    Identical reviews are judged once; `concurrency` reviews are judged at a time.
     """
-    out_dir, results = Path(out_dir), []
-    judged: dict[str, dict] = {}  # this run's judgments by key: identical reviews are judged once
-    scorable = [r for r in reviews if r.get("status") in ("ok", "malformed", "empty_output")]
-    log.info(f"judge stage: {len(scorable)} of {len(reviews)} cells have a review to score; "
-             f"judge {getattr(judge, 'identity', repr(judge))}; output {out_dir}")
-    stage_started, new_calls, errors = time.monotonic(), 0, 0
+    out_dir = Path(out_dir)
+    identity = getattr(judge, "identity", repr(judge))
+    scorable = []  # (review, key, path), in order
     for review in reviews:
         if review.get("status") not in ("ok", "malformed", "empty_output"):
             continue
@@ -393,43 +391,58 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
         # A retried review's key covers its first call only, so its answer in force is named too.
         answer = retry_rule.answer_id(review)
         key = _key({"review": review["key"], **({"answer": answer} if answer else {}), "references": _key(comments),
-                    "judge": getattr(judge, "identity", repr(judge)), "judge_prompt": JUDGE_PROMPT_VERSION})
-        path = out_dir / "judgments" / review["entry"] / f"{review['level']}.json"
-        if key in judged:
-            record = {**judged[key], "entry": review["entry"], "level": review["level"],
-                      "reused_from": judged[key]["level"]}
-            write_json(path, record)
-            results.append(record)
-            if progress:
-                progress(record)
+                    "judge": identity, "judge_prompt": JUDGE_PROMPT_VERSION})
+        scorable.append((review, key, out_dir / "judgments" / review["entry"] / f"{review['level']}.json"))
+    judged: dict[str, dict] = {}  # by key: the saved judgment, or the one made in this run
+    todo: dict[str, tuple[dict, Path]] = {}
+    for review, key, path in scorable:
+        if key in judged or key in todo:
             continue
         saved = read_json(path)
         if not force and saved and saved.get("key") == key and not saved.get("judge_errors"):
             judged[key] = saved
-            results.append(saved)
-            if progress:
-                progress(saved)
-            continue
+        else:
+            todo[key] = (review, path)
+    log.info(f"judge stage: {len(scorable)} of {len(reviews)} cells have a review to score; {len(judged)} distinct "
+             f"reviews already judged, {len(todo)} to judge with concurrency {max(1, concurrency)}; "
+             f"judge {identity}; output {out_dir}")
+    stage_started, counter, lock = time.monotonic(), {"done": 0, "errors": 0}, threading.Lock()
+
+    def judge_one(item: tuple[str, tuple[dict, Path]]) -> dict:
+        key, (review, path) = item
         started = time.monotonic()
         findings = review["parsed"]["findings"] if review.get("parsed") else []
-        score = score_review(comments, findings, judge)
+        score = score_review(references[review["entry"]]["comments"], findings, judge)
         record = {"key": key, "entry": review["entry"], "level": review["level"], "review_key": review["key"],
-                  "judge": getattr(judge, "identity", repr(judge)), "judge_prompt_version": JUDGE_PROMPT_VERSION,
+                  "judge": identity, "judge_prompt_version": JUDGE_PROMPT_VERSION,
                   "seconds": round(time.monotonic() - started, 2), **score}
         write_json(path, record)
-        judged[key] = record
-        results.append(record)
-        new_calls += 1
-        errors += record["judge_errors"]
+        with lock:
+            counter["done"] += 1
+            counter["errors"] += record["judge_errors"]
+            count = counter["done"]
         level = logging.WARNING if record["judge_errors"] else logging.INFO
-        log.log(level, f"judged {len(results)}/{len(scorable)} {record['entry']} {record['level']}: "
+        log.log(level, f"judged {count}/{len(todo)} {record['entry']} {record['level']}: "
                        f"{record['generated']} generated, {record['expected']} expected, {record['covered']} covered, "
                        f"recall {record['recall']:.2f}, {record['judge_errors']} judge errors, {record['seconds']}s")
+        return record
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        for key, record in zip(todo, pool.map(judge_one, todo.items())):
+            judged[key] = record
+    results, placed = [], set()
+    for review, key, path in scorable:
+        record = judged[key]
+        if key in placed:  # an identical review: copy its judgment
+            record = {**record, "entry": review["entry"], "level": review["level"], "reused_from": judged[key]["level"]}
+            write_json(path, record)
+        placed.add(key)
+        results.append(record)
         if progress:
             progress(record)
-    log.info(f"judge stage finished: {len(results)} cells scored, {new_calls} judged now, "
-             f"{len(results) - new_calls} reused, {errors} judge errors"
-             + (" (re-run to retry them)" if errors else "") + f", in {_duration(time.monotonic() - stage_started)}")
+    log.info(f"judge stage finished: {len(results)} cells scored, {len(todo)} judged now, "
+             f"{len(results) - len(todo)} reused, {counter['errors']} judge errors"
+             + (" (re-run to retry them)" if counter["errors"] else "") + f", in {_duration(time.monotonic() - stage_started)}")
     return results
 
 

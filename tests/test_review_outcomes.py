@@ -611,5 +611,60 @@ class RetryTests(unittest.TestCase):
         self.assertIn("no retry policy in this profile", script.describe_plan(plan, None, self.out))
 
 
+class JudgeStageTests(unittest.TestCase):
+    def test_judge_script_reads_saved_reviews_and_the_profile_names_a_judge(self):
+        import importlib.util
+        import sys
+
+        from src.review_outcomes.profiles import read_notebook_profile
+        from src.review_outcomes.table import Cell, write_json
+
+        folder = Path(__file__).resolve().parents[1] / "scripts" / "outcome"
+        spec = importlib.util.spec_from_file_location("run_judgments", folder / "run_judgments.py")
+        script = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = script
+        spec.loader.exec_module(script)
+        self.addCleanup(lambda: sys.path.remove(str(folder)) if str(folder) in sys.path else None)
+
+        judge = read_notebook_profile("cloud")["judge"]  # the reviewer's model on the reviewer's server
+        reviewer = read_notebook_profile("cloud")["reviewer"]
+        self.assertEqual((judge["model"], judge["model_revision"], judge["base_url"]),
+                         (reviewer["model"], reviewer["model_revision"], reviewer["base_url"]))
+        self.assertEqual(script.make_chat(judge).identity["max_tokens"], 3000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            cells = [Cell("o__r__1", level, level, 10) for level in ("L01", "L02", "L03", "L04")]
+            findings = [{"note": "a", "path": "p.py"}, {"note": "b", "path": "no_reference_here.py"}]
+            for level, status, key in (("L01", "ok", "k1"), ("L02", "ok", "k1"), ("L03", "too_long", "k3")):
+                write_json(out / "reviews" / "o__r__1" / f"{level}.json",
+                           {"key": key, "entry": "o__r__1", "level": level, "status": status,
+                            "parsed": {"findings": findings} if status == "ok" else None})
+            reviews, missing = script.load_reviews(out, cells)
+            self.assertEqual(([r["level"] for r in reviews], missing), (["L01", "L02", "L03"], ["o__r__1 L04"]))
+            text = script.describe(reviews, missing, {"o__r__1": {"comments": REFS}}, out, {"kind": "fake"})
+            self.assertIn("3 saved reviews, statuses {'ok': 2, 'too_long': 1}; 1 cells have no saved review", text)
+            self.assertIn("1 distinct reviews to score, with 2 findings; about 1 judge calls", text)
+
+    def test_reviews_are_judged_in_parallel_once_each_and_resume(self):
+        reviews = [{"key": f"k{i % 3}", "entry": "o__r__1", "level": f"L{i:02d}", "status": "ok",
+                    "parsed": {"findings": [{"note": f"G{i % 3} x", "path": "p.py", "from_line": 1, "to_line": 1}]}}
+                   for i in range(6)]
+        references = {"o__r__1": {"project_main_language": "Python", "comments": REFS}}
+        calls = []
+
+        def judge(prompt):
+            calls.append(prompt)
+            return "[3]"
+        judge.identity = {"kind": "fixed"}
+        with tempfile.TemporaryDirectory() as tmp:
+            judgments = run_judgments(reviews, references, judge, Path(tmp), concurrency=4)
+            self.assertEqual(len(calls), 3)  # six cells, three distinct reviews
+            self.assertEqual([j["level"] for j in judgments], [f"L{i:02d}" for i in range(6)])
+            self.assertEqual([j.get("reused_from") for j in judgments], [None, None, None, "L00", "L01", "L02"])
+            again = run_judgments(reviews, references, judge, Path(tmp), concurrency=4)
+            self.assertEqual((len(calls), again), (3, judgments))
+
+
 if __name__ == "__main__":
     unittest.main()

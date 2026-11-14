@@ -137,7 +137,7 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 
 ## 6. What is not done
 
-- **Judge stage:** not run. The judge model is undecided, and the manifest still holds a placeholder for it.
+- **Judge stage:** not run. The judge model was decided on November 14: `Qwen/Qwen3.8-27B`, the reviewer's model on the same server, with `scripts/outcome/run_judgments.py` to run it. It has not been checked against a second judge or a human audit.
 - **Table:** not built; it is assembled from the judgments.
 - **Malformed cells:** nothing has been re-run or repaired.
 
@@ -182,7 +182,7 @@ The cost is small: about 6.7 million input tokens, against 59.5 million for the 
 
 ## 8. Still open
 
-1. **The judge model.**
+1. **How well the judge agrees** with a second judge from another model family and with a human check.
 2. **Whether the retry rule recovers enough cells,** and what to do with those it does not.
 3. **Whether the parser should read the last JSON object in a reply instead of the first** (Section 5).
 

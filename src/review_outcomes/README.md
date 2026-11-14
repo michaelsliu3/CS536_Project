@@ -35,7 +35,7 @@ Selector training and evaluation then only look up rows. Driver:
 - **Pipeline tests** with `Qwen/Qwen3.5-0.8B`:
   - smoke tests on vllm#17425 `L01`–`L02`, then on cline#5177 `L01`–`L02` read from the dataset file;
   - the committed 2-PR sample, with the notebook's `sample-local` profile (0.8B reviewer and judge, levels up to 100k tokens). Its output is in `data/aacr_sample/outcomes/` (a demonstration of the layout, not results).
-- **Open:** the judge model is undecided (roadmap Section 8.5.3).
+- **Judge model (decided November 14, 2026):** for the `cloud` profile the judge is `Qwen/Qwen3.8-27B`, the reviewer's model on the same server. `scripts/outcome/run_judgments.py` runs the judge stage on the saved reviews and writes the table. It has not been run, and the judge has not been checked against a second judge or a human audit.
 
 Tests (Python only, no models):
 

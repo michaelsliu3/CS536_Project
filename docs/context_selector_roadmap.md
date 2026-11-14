@@ -1097,7 +1097,9 @@ Options considered and not chosen as the primary score:
 | Side-by-side preference between levels | Possible for "same quality with less context" claims; adjacent levels only, to limit cost |
 | AACR's deprecated one-to-one metric | Not comparable with the current metric |
 
-**Open: which judge model.**
+**Decided November 14, 2026: the judge is `Qwen/Qwen3.8-27B`, the reviewer's model, on the same server** (the first row below). It is already loaded there, and the judge only matches each generated comment against a fixed list of reference comments, so favouring its own writing matters less than it would for a quality rating. A smaller model was not chosen because the stage is about 1,000 short calls and matching errors become label noise. Still to do: run a second judge from another model family on a sample and report the agreement, and the human audit below. No judge run exists yet.
+
+**The options that were considered:**
 
 | Judge option | Trade-off |
 |---|---|
