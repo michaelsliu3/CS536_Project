@@ -1,6 +1,6 @@
 # Outcome table, first reviewer run (November 14, 2026)
 
-**Status: the review stage is complete for all 185 PRs and 10 context levels. The first pass left 13.7% of the cells with a reply the parser could not read; a retry rule decided, implemented and run on November 14 brought that to 1.7% (Sections 7 and 8). The judge model is chosen but the judge stage has not run, so no score and no table exists yet.**
+**Status: the review stage is complete for all 185 PRs and 10 context levels. The first pass left 13.7% of the cells with a reply the parser could not read; a retry rule decided, implemented and run on November 14 brought that to 1.7% (Sections 7 and 8). The 41 cells still without a usable review are left out (Section 9). The judge model is chosen but the judge stage has not run, so no score and no table exists yet.**
 
 This document records what the first full run of the frozen reviewer produced, what went wrong in it and why, and what is still open. Every number below was computed from the saved review files and the run log.
 
@@ -139,7 +139,7 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 
 - **Judge stage:** not run. The judge model was decided on November 14: `Qwen/Qwen3.8-27B`, the reviewer's model on the same server, with `scripts/outcome/run_judgments.py` to run it. It has not been checked against a second judge or a human audit.
 - **Table:** not built; it is assembled from the judgments.
-- **Malformed cells:** repaired by the retry rule except for 31 (Section 8).
+- **Malformed cells:** repaired by the retry rule except for 31 (Section 8), which are left out together with the 10 too-long cells (Section 9).
 
 ## 7. Decision: a retry rule for replies without an answer
 
@@ -200,9 +200,11 @@ The steps taken were 177 longer-limit calls and 75 follow-ups: 53 on a first rep
 
 **The 30 replies still without an answer** (31 cells):
 
-- **12 were cut off again** after using all 16,000 tokens.
+- **12 were cut off again:** 11 after using all 16,000 tokens, and 1 whose longer reply finished without the JSON and whose follow-up was then cut off.
 - **13 answered with a tool call:** 12 that began as tool calls and repeated one after the follow-up, and 1 that began as a cut-off.
 - **5 were skipped** for lack of room in the window (Section 7).
+
+Section 9 goes through these one by one.
 
 **Per level, malformed cells after the retry:**
 
@@ -218,13 +220,130 @@ The steps taken were 177 longer-limit calls and 75 follow-ups: 53 on a first rep
 - **The follow-up does not stop tool calls.** Told that no command can be run, the model asked to read a file instead.
 - **The follow-up can change a verdict.** Six first replies said only that the patch was correct. After the follow-up, three of them returned findings. For such a reply the follow-up is a second review, not a reformatting of the first.
 
-## 9. Still open
+## 9. The 41 cells that are not used
+
+**Decided November 14, 2026: the 41 cells without a usable review are left out. They are not retried again, and they are not counted as reviews with no findings.** A missing answer is a failure of the reviewer setup, not a judgement that the code is fine, so scoring it as zero would record something the reviewer never said.
+
+The 41 are the 31 malformed cells and the 10 too-long cells. They fall into four groups.
+
+| Group | Cells | Can another retry help? |
+|---|---|---|
+| A. Input larger than the reviewer can read | 10 | No |
+| B. No room left in the window for a retry | 5 | No |
+| C. Cut off again after the retry | 13 | In principle, but the evidence says rarely |
+| D. Answered with a tool call again | 13 | Only with a new, untested rule |
+
+### 9.1 Group A: input larger than the reviewer can read (10 cells)
+
+**Which:** all ten levels of `ollama__ollama__9654`.
+
+**Why it failed:** its input is 782,761 tokens at every level, including `L01_min`, so the diff alone is that large. The model's window is 262,144 tokens and the run's input cap is 256,000. The cells were never sent, and no reply exists.
+
+**Why a retry is not possible:** there is nothing to retry. No setting of this reviewer can read an input three times its window. Only cutting the diff would fit, and a cut diff is a different input from the one the reference comments were written for.
+
+**Consequence:** this PR is out of the table entirely, which leaves 184 PRs.
+
+### 9.2 Group B: no room left in the window (5 cells)
+
+| Cell | Input tokens | First reply | Room left for a reply |
+|---|---|---|---|
+| `FreeCAD__FreeCAD__21257` `L10_all` | 255,989 | cut off at 4,096 | 4,445 |
+| `elastic__elasticsearch__133365` `L10_all` | 255,915 | cut off at 4,096 | 4,519 |
+| `facebook__react__33059` `L10_all` | 255,979 | cut off at 4,096 | 4,455 |
+| `valkey-io__valkey__1485` `L10_all` | 255,971 | cut off at 4,096 | 4,463 |
+| `elastic__elasticsearch__118183` `L10_all` | 255,998 | finished without the JSON (3,689 tokens) | about 560 after that reply |
+
+**Why they failed:** these levels were trimmed to just under the 256,000-token cap when the dataset was built. With the rubric and request, the prompt is about 257,700 tokens, which leaves about 4,450 tokens of the window for the reply. The first reply used its 4,096 tokens on reasoning (or, in the last row, ended without the JSON).
+
+**Why a retry is not possible:** the window holds the prompt and the reply together. A longer reply would have at most about 350 to 420 tokens more than the first one, and a follow-up would have to fit the first reply, the follow-up message and the answer into about 560 tokens. The rule skips a step that gains fewer than 1,024 tokens. The only way to make room is a shorter input, which would no longer be the `L10_all` level.
+
+**Note:** the `valkey` reply was cut off while writing its JSON, a few lines before the end. It is still not used: reading it would need a hand-made exception for one cell.
+
+### 9.3 Group C: cut off again after the retry (13 cells, 12 distinct replies)
+
+Eleven replies used all 16,000 tokens of the longer limit without writing the JSON. One of them is shared by two levels with identical input, which makes 12 cells. A thirteenth cell took both steps and was then cut off in the follow-up.
+
+| Cell | Input tokens | How the 16,000-token reply ends |
+|---|---|---|
+| `ollama__ollama__8938` `L03_file` | 12,783 | an endless run of the digit 9 |
+| `sveltejs__svelte__15250` `L10_all` | 26,348 | listing "Issue 6" of many; 63% of its lines repeat earlier ones |
+| `wavetermdev__waveterm__1755` `L01_min` | 18,380 | item 89 of a numbered walk through the diff; 57% repeated lines |
+| `langflow-ai__langflow__6044` `L05_callers1` | 42,448 | re-deriving line numbers; 32% repeated lines |
+| `langflow-ai__langflow__6044` `L08_depth2` | 72,395 | re-reading a function "one more time"; 31% repeated lines |
+| `wavetermdev__waveterm__1998` `L05_callers1` | 57,831 | opening another file to look at; 28% repeated lines |
+| `vllm-project__vllm__12608` `L01_min` | 3,768 | copying the diff out line by line; 25% repeated lines |
+| `elastic__elasticsearch__133365` `L09_depth2_docs` | 61,128 | copying code out line by line |
+| `mpv-player__mpv__16090` `L08_depth2` and `L09_depth2_docs` (same input) | 64,190 | about to state "the main bug" |
+| `ollama__ollama__9746` `L09_depth2_docs` | 87,800 | debating whether its findings count as blocking |
+| `wavetermdev__waveterm__1755` `L02_function` | 38,975 | tracing an authentication call |
+| `immich-app__immich__16893` `L02_function` | 5,216 | see below |
+
+**Why they failed:** the model does not converge. With thinking off it deliberates in its answer, and on these inputs the deliberation does not end: it repeats itself, copies the diff out, or keeps reopening a question it had settled. Four times the output room made no difference. Input size is not the cause, since two of these inputs are under 6,000 tokens.
+
+**The `immich` cell:** its longer reply finished without the JSON, the follow-up asked for the JSON, and the follow-up reply reasoned again for 4,096 tokens and was cut off. So both steps ran and neither produced an answer.
+
+**Why not retry again:**
+
+- **More room is unlikely to help most of them.** At least seven of the eleven show the signs of a loop (heavy repetition, copying, a run of one digit). A limit of 32,000 tokens would let them loop for longer. A few might finish, but nothing in the replies says which.
+- **A follow-up on a cut-off reply is a different rule.** It would put up to 16,000 tokens of unfinished reasoning back into the prompt and ask for the JSON. The one case that came close to this (`immich`) reasoned again and was cut off.
+- **Each further rule moves away from the reviewer as defined.** The reviewer is one call, with two retry steps that were fixed before their results were seen. A third step chosen after seeing which cells failed would be fitted to those cells.
+- **The gain is at most 12 replies** out of 1,569.
+
+### 9.4 Group D: answered with a tool call again (13 cells)
+
+Twelve of these began as a tool call. The thirteenth (`kestra-io__kestra__7381` `L01_min`) began as a cut-off, finished its longer reply without the JSON, and answered the follow-up with a tool call. All 13 are at `L01_min`.
+
+| Cell | Input tokens | Tool asked for in the last reply |
+|---|---|---|
+| `filamentphp__filament__15267` | 356 | Read a file |
+| `filamentphp__filament__15217` | 833 | Bash |
+| `langflow-ai__langflow__5896` | 1,196 | Grep |
+| `lvgl__lvgl__8129` | 1,645 | Bash |
+| `elastic__elasticsearch__118998` | 1,872 | Grep |
+| `google-gemini__gemini-cli__5793` | 1,948 | Grep |
+| `immich-app__immich__17124` | 2,326 | Bash |
+| `n8n-io__n8n__15057` | 2,583 | Bash (`echo "no-op"`) |
+| `dotnet__aspnetcore__59322` | 2,764 | a `StructuredOutput` tool |
+| `ollama__ollama__9379` | 3,070 | Bash (`cat` a file) |
+| `sveltejs__svelte__16232` | 3,544 | Read a file |
+| `elastic__elasticsearch__133365` | 5,356 | Read a file |
+| `kestra-io__kestra__7381` | 6,319 | Grep |
+
+**Why they failed:** these are the smallest inputs in the table, 356 to 6,319 tokens. `L01_min` gives the reviewer the diff and little else, and the rubric was written for an agent that explores a repository. With so little to go on, the model tries to fetch more. Its first reply was a tool call, the follow-up said that no command can be run, and it answered with another tool call.
+
+**What the last replies contain:**
+
+- **Five are only a tool call,** with no review text.
+- **Eight write some analysis first** and then end in a tool call. Two of those are notable. `dotnet__aspnetcore__59322` says "I cannot run commands, so I'll reason from the diff alone" and then tries to hand in its answer through a tool named `StructuredOutput` instead of writing JSON. `n8n-io__n8n__15057` describes a defect in prose and then runs `echo "no-op"`.
+
+**Why not retry again:**
+
+- **The same message was already ignored.** Sending it a second time would most likely get a third tool call.
+- **A stronger message is a new rule with unknown effect.** It could be written, for example to say that a tool call is not an answer, but it has not been tried.
+- **The answers that exist are not in the agreed format.** A few replies contain a review in prose or inside tool-call parameters. Reading those would mean writing a second parser for 13 cells, and prose findings carry no file and line range for the judge to match on.
+- **A second follow-up is a second review.** Section 8 showed the follow-up changing three of six verdicts.
+
+### 9.5 What leaving them out means
+
+- **How it is done.** Every row of the table carries `review_status`. A row is used only when that status is `ok`. The judge stage as written still scores a malformed reply as an empty review, so the filter has to be applied when the table is read. That filter is not written yet, because the selector code does not exist.
+- **PRs affected.** 27 PRs lose at least one level. `ollama__ollama__9654` loses all ten. `elastic__elasticsearch__133365` loses three (`L01_min`, `L09_depth2_docs`, `L10_all`), and `langflow-ai__langflow__6044`, `mpv-player__mpv__16090` and `wavetermdev__waveterm__1755` lose two each. The other 22 lose one.
+- **Levels affected.**
+
+  | `L01_min` | `L02` | `L03` | `L04` | `L05` | `L06` | `L07` | `L08` | `L09` | `L10_all` |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 16 | 3 | 2 | 1 | 3 | 1 | 1 | 3 | 4 | 7 |
+
+  (Each count includes the one cell of `ollama__ollama__9654`.)
+- **Still to settle for the selector stage.** A PR with a missing level cannot have that level chosen or compared. How labels are formed for those 26 PRs is a decision for that stage. `L01_min` is missing for 15 of them, so the comparison of the minimal level rests on 169 PRs, not 184.
+- **A selection effect to report.** The missing `L01_min` cells are not random: they are the PRs where the model asked for more context. Leaving them out removes exactly the cases where the minimal level was least sufficient, which favours `L01_min` slightly. Counting them as zero would have overstated the opposite.
+
+## 10. Still open
 
 1. **How well the judge agrees** with a second judge from another model family and with a human check.
-2. **What to do with the 31 cells still without an answer.** They count as reviews with no findings, and 15 of them are at `L01_min`.
+2. **How the selector stage handles a PR with a missing level** (Section 9.5).
 3. **Whether the parser should read the last JSON object in a reply instead of the first** (Section 5).
 
-## 10. Where the files are
+## 11. Where the files are
 
 All of it is git-ignored and exists on the laptop and on the cloud server.
 
