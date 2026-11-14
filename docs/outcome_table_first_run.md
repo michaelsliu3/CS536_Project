@@ -1,6 +1,6 @@
-# Outcome table, first reviewer run (November 14, 2026)
+# Outcome table, first reviewer run and first table (November 14, 2026)
 
-**Status: the review stage is complete for all 185 PRs and 10 context levels. The first pass left 13.7% of the cells with a reply the parser could not read; a retry rule decided, implemented and run on November 14 brought that to 1.7% (Sections 7 and 8). The 41 cells still without a usable review are left out (Section 9). The judge model is chosen but the judge stage has not run, so no score and no table exists yet.**
+**Status: the outcome table exists. Qwen3.8-27B reviewed all 185 PRs at 10 context levels, a retry rule repaired most replies that had no answer (Sections 7 and 8), 41 cells are left out (Section 9), and the same model judged every review (Section 10). The first result is that recall is about 6 to 7% at every level, so the levels barely differ in aggregate. The judge has not been checked against a second judge or a human audit, so every score here is provisional.**
 
 This document records what the first full run of the frozen reviewer produced, what went wrong in it and why, and what is still open. Every number below was computed from the saved review files and the run log.
 
@@ -135,10 +135,9 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 - **Duplicate findings occur.** Some reviews repeat one comment at several line ranges. They are kept as written; the judge decides what they match.
 - **The run resumes safely.** Each review is written to its own file as it arrives, and a re-run sends only cells that have no saved reply.
 
-## 6. What is not done
+## 6. What the first pass left undone
 
-- **Judge stage:** not run. The judge model was decided on November 14: `Qwen/Qwen3.8-27B`, the reviewer's model on the same server, with `scripts/outcome/run_judgments.py` to run it. It has not been checked against a second judge or a human audit.
-- **Table:** not built; it is assembled from the judgments.
+- **Judge stage and table:** done after this first pass; see Section 10. The judge has not been checked against a second judge or a human audit.
 - **Malformed cells:** repaired by the retry rule except for 31 (Section 8), which are left out together with the 10 too-long cells (Section 9).
 
 ## 7. Decision: a retry rule for replies without an answer
@@ -337,13 +336,87 @@ Twelve of these began as a tool call. The thirteenth (`kestra-io__kestra__7381` 
 - **Still to settle for the selector stage.** A PR with a missing level cannot have that level chosen or compared. How labels are formed for those 26 PRs is a decision for that stage. `L01_min` is missing for 15 of them, so the comparison of the minimal level rests on 169 PRs, not 184.
 - **A selection effect to report.** The missing `L01_min` cells are not random: they are the PRs where the model asked for more context. Leaving them out removes exactly the cases where the minimal level was least sufficient, which favours `L01_min` slightly. Counting them as zero would have overstated the opposite.
 
-## 10. Still open
+## 10. The judge run and the first table
+
+### 10.1 What was run
+
+| Item | Value |
+|---|---|
+| Judge | `Qwen/Qwen3.8-27B`, the reviewer's model and revision, on the same server; temperature 0, thinking off, at most 3,000 output tokens |
+| Metric | AACR-Bench's file-level semantic metric: one judge call per generated comment, against the reference comments on the same file |
+| Code | commit `1b1fea5`, `scripts/outcome/run_judgments.py`, 8 reviews judged at a time |
+| Input | the 1,840 cells that have a review (1,569 distinct), with 1,352 distinct findings |
+| Time | 15m23s, no judge errors |
+| Output | `judgments/`, `table.csv` (1,850 rows), `table.json`, `coverage.csv` (14,160 rows) |
+
+The judge was chosen on November 14. It is already loaded on the server, the stage is about 1,200 short calls, and the judge only matches each comment against a fixed list of references, so a preference for its own writing matters less than it would for a quality rating.
+
+### 10.2 Result per level
+
+Only the 1,809 usable cells are counted (Section 9). Recall is the share of reference comments covered; precision is the share of generated comments that match a reference. Both are pooled over PRs, as AACR does.
+
+| Level | PRs | Mean input tokens | Findings per PR | Recall | Precision | Recall, human references only |
+|---|---|---|---|---|---|---|
+| `L01_min` | 169 | 6,086 | 1.04 | 7.3% | 51% | 6.7% |
+| `L02_function` | 182 | 14,407 | 0.79 | 6.0% | 55% | 6.6% |
+| `L03_file` | 183 | 21,925 | 0.92 | 6.0% | 48% | 5.9% |
+| `L04_callees1` | 184 | 25,286 | 0.91 | 6.1% | 48% | 6.4% |
+| `L05_callers1` | 182 | 29,789 | 0.87 | 6.7% | 55% | 7.3% |
+| `L06_tests1` | 184 | 30,730 | 0.82 | 5.9% | 53% | 6.4% |
+| `L07_agent` | 184 | 38,101 | 0.87 | 6.9% | 56% | 9.2% |
+| `L08_depth2` | 182 | 49,843 | 0.81 | 6.2% | 54% | 6.4% |
+| `L09_depth2_docs` | 181 | 51,118 | 0.85 | 6.6% | 54% | 6.5% |
+| `L10_all` | 178 | 98,921 | 0.80 | 5.7% | 52% | 6.4% |
+
+Over all usable cells: 1,567 generated comments, 820 of them matching a reference, and 879 of 13,883 reference slots covered (6.3%).
+
+**What the table shows:**
+
+- **Recall is low at every level.** The reviewer writes under one finding per PR on average, and a PR has 7.7 reference comments on average (median 5.5). It cannot cover most of them whatever context it gets.
+- **More context does not raise recall in aggregate.** The range across levels is 5.7% to 7.3%, and `L10_all` has the lowest recall at 16 times the input of `L01_min`. One percentage point here is about 14 covered references, so no ordering of the levels should be read from this table.
+- **About half the findings match a reference** at every level (48% to 56%).
+- **More context makes the reviewer say less.** The share of reviews with no finding rises from 36% at `L01_min` to 48% at `L10_all`.
+
+### 10.3 The same PRs at every level
+
+The rows above cover different PRs per level. On the 158 PRs where all ten levels are usable:
+
+| | Recall |
+|---|---|
+| Always `L01_min` | 7.3% |
+| Always `L10_all` | 5.9% |
+| Best and worst single level | 7.3% (`L01_min`) and 5.9% (`L10_all`) |
+| Best level per PR, chosen with hindsight | 13.3% |
+
+- **58 PRs have no covered reference at any level,** so no choice of level matters for them.
+- **90 PRs have levels that differ** in how many references they cover. These are where a selector can gain or lose.
+- **`L10_all` against `L01_min`, PR by PR:** more references covered in 21 PRs, fewer in 31, the same in 106.
+- **With ties going to the lower level, `L01_min` is the best level for 101 of the 158 PRs.** Among the 90 where levels differ it is still the most frequent best level (33), followed by `L02_function` (17) and `L04_callees1` (9).
+
+**How to read the hindsight row.** 13.3% is not what a selector can reach. It takes the best of ten reviews per PR, and a single review is noisy, so part of the gap to 7.3% is the best of ten noisy draws and not the effect of context. How much is noise is unknown until some cells are reviewed more than once.
+
+### 10.4 What this means for the project
+
+- **Always choosing `L01_min` is a strong baseline.** It has the highest recall at the lowest cost, so a selector has to beat it on recall, not only on tokens.
+- **The signal to learn is in about 90 PRs,** which is a small set for training and cross-validation.
+- **The question the table cannot answer yet** is whether the per-PR differences between levels are real or noise.
+
+### 10.5 Limits of these numbers
+
+- **The judge is unchecked.** No second judge and no human audit has been run. A judge of the reviewer's own model may match too generously or too strictly; the 48% to 56% precision has not been inspected by hand.
+- **One review per cell.** Replies on this server are not exactly repeatable (Section 5), and nothing here measures run-to-run variation.
+- **Retried cells are a different kind of reply.** 233 usable cells came from a retry. They cover 5.2% of their references, against 6.5% for the others. That is not a like-for-like comparison, since the retried cells are the PRs the model struggled with.
+- **`L01_min` is slightly flattered** by the 15 PRs left out of it (Section 9.5). On the 158 PRs with every level usable it still has the highest recall.
+- **The first JSON object is read** when a reply contains more than one (Section 5).
+
+## 11. Still open
 
 1. **How well the judge agrees** with a second judge from another model family and with a human check.
-2. **How the selector stage handles a PR with a missing level** (Section 9.5).
-3. **Whether the parser should read the last JSON object in a reply instead of the first** (Section 5).
+2. **Whether the differences between levels within a PR are real or noise.** This needs repeated reviews of some cells.
+3. **How the selector stage handles a PR with a missing level** (Section 9.5).
+4. **Whether the parser should read the last JSON object in a reply instead of the first** (Section 5).
 
-## 11. Where the files are
+## 12. Where the files are
 
 All of it is git-ignored and exists on the laptop and on the cloud server.
 
@@ -353,6 +426,10 @@ All of it is git-ignored and exists on the laptop and on the cloud server.
 | `logs/reviews_20261114-181507.log` | the full run's log: one line per call, a progress line every five minutes |
 | `logs/reviews_20261114-175742.log` | the three-PR timing run |
 | `logs/reviews_20261115-005717.log`, `logs/reviews_20261115-011901.log` | the retry trial and the retry run |
-| `manifest.json` | the settings, prompt and input hashes of the run |
+| `logs/judgments_20261115-053223.log` | the judge run |
+| `judgments/<PR>/<level>.json` | the judge's record for each generated comment, and which references were covered |
+| `table.csv`, `table.json` | one row per (PR, level): tokens, review status, retry steps, findings, recall, precision |
+| `coverage.csv` | one row per (PR, level, reference): covered or not |
+| `manifest.json` | the settings, prompt and input hashes of the run, and the judge's identity |
 
-The folder is 18 MB. The times in the log are the server's clock (China Standard Time).
+The folder is about 30 MB. The times in the log are the server's clock (China Standard Time).

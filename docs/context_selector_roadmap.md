@@ -2,7 +2,7 @@
 
 **Revised November 7, 2026; status updated November 9. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
 
-**Update, November 14, 2026:** The reviewer stage of the outcome table has run once in full: Qwen3.8-27B reviewed all 185 PRs at all 10 levels (1,850 cells) in 5h48m. 13.7% of the cells held a reply the parser could not read, concentrated at `L01_min`; a retry rule run the same day brought that to 1.7%. The judge model is chosen (Qwen3.8-27B) but the judge stage has not run, so there is still no score and no table. Details and open decisions are in [outcome_table_first_run.md](outcome_table_first_run.md). The status line above and the sections below predate this run.
+**Update, November 14, 2026:** The reviewer stage of the outcome table has run once in full: Qwen3.8-27B reviewed all 185 PRs at all 10 levels (1,850 cells) in 5h48m. 13.7% of the cells held a reply the parser could not read, concentrated at `L01_min`; a retry rule run the same day brought that to 1.7%. The same model then judged every review, so the first table exists: recall is about 6 to 7% at every level and the levels barely differ in aggregate. The judge is not yet checked against a second judge or a human audit. Details and open decisions are in [outcome_table_first_run.md](outcome_table_first_run.md). The status line above and the sections below predate this run.
 
 **Update, November 12, 2026:** Section 4.7 adds three suggested alternative datasets (DeepSWE, FrontierCode, CyberGym), with one real sample of each and the preprocessing each would need. None of them replaces AACR-Bench.
 
@@ -1097,7 +1097,7 @@ Options considered and not chosen as the primary score:
 | Side-by-side preference between levels | Possible for "same quality with less context" claims; adjacent levels only, to limit cost |
 | AACR's deprecated one-to-one metric | Not comparable with the current metric |
 
-**Decided November 14, 2026: the judge is `Qwen/Qwen3.8-27B`, the reviewer's model, on the same server** (the first row below). It is already loaded there, and the judge only matches each generated comment against a fixed list of reference comments, so favouring its own writing matters less than it would for a quality rating. A smaller model was not chosen because the stage is about 1,000 short calls and matching errors become label noise. Still to do: run a second judge from another model family on a sample and report the agreement, and the human audit below. No judge run exists yet.
+**Decided November 14, 2026: the judge is `Qwen/Qwen3.8-27B`, the reviewer's model, on the same server** (the first row below). It is already loaded there, and the judge only matches each generated comment against a fixed list of reference comments, so favouring its own writing matters less than it would for a quality rating. A smaller model was not chosen because the stage is about 1,000 short calls and matching errors become label noise. Still to do: run a second judge from another model family on a sample and report the agreement, and the human audit below. The first judge run is recorded in [outcome_table_first_run.md](outcome_table_first_run.md), Section 10.
 
 **The options that were considered:**
 
