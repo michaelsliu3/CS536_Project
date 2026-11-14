@@ -47,6 +47,10 @@ class DownloadReviewerModelTest(unittest.TestCase):
         self.assertIn(f"vllm serve {reviewer['model']} --revision {reviewer['model_revision']} "
                       f"--tokenizer-revision {reviewer['model_revision']}", command)
         self.assertIn("--port 8000", command)  # the notebook's base_url
+        # vLLM's default of 1,024 sequences fails to start with this model; the notebook sends `concurrency` at once.
+        self.assertTrue(command.endswith(f"--max-num-seqs {max(8, reviewer['concurrency'])}"))
+        many = dl.serve_command(reviewer["model"], reviewer["model_revision"], 262144, {**reviewer, "concurrency": 32}, "/hf")
+        self.assertTrue(many.endswith("--max-num-seqs 32"))
 
     def test_serve_command_keeps_vllm_on_the_mirror(self):
         reviewer = dl.read_notebook_profile("cloud")["reviewer"]

@@ -892,8 +892,12 @@ def serve_command(repo: str, revision: str, window: int | None, reviewer: dict, 
         env.append(f"HF_HUB_CACHE={os.environ['HF_HUB_CACHE']}")
     env.append("HF_HUB_OFFLINE=1")  # load only what is in the cache, with no network calls
     env.append(f"HF_ENDPOINT={endpoint}")  # if anything still goes online, it goes to the mirror
+    # vLLM's default of 1,024 parallel sequences does not start with this model on a 96 GB GPU: each
+    # sequence needs a slot of its state cache, and about 600 fit. The notebook sends `concurrency` at once.
+    max_seqs = max(8, int(reviewer.get("concurrency") or 1))
     command = ["vllm", "serve", repo, "--revision", revision, "--tokenizer-revision", revision,
-               "--max-model-len", str(window or 262144), "--generation-config", "vllm", "--port", str(port)]
+               "--max-model-len", str(window or 262144), "--generation-config", "vllm", "--port", str(port),
+               "--max-num-seqs", str(max_seqs)]
     return " ".join(env) + " " + shlex.join(command)
 
 
