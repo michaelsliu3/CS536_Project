@@ -7,6 +7,7 @@ Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/)
   judgments/<entry>/<level>.json        AACR judge records per generated comment, per-reference flags
   table.csv / table.json                one row per (entry, level); table.json is one JSON array
   coverage.csv                          one row per (entry, level, reference): covered or not
+  logs/<stage>_<time>.log               the run's log, when start_run_log() was called (the notebook does)
 
 Every record carries a cache key over all behavior-affecting inputs, so re-running resumes:
 matching cells are reused, changed ones are redone. Reference comments are read only in the
@@ -17,16 +18,107 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 from src.review_outcomes.judge import score_review
 from src.review_outcomes.parse import PARSER_VERSION, parse_review
 from src.review_outcomes.prompts import JUDGE_PROMPT_VERSION, REVIEW_PROMPT_VERSION, prompt_sha256, review_messages
+
+
+log = logging.getLogger("review_outcomes")
+SUMMARY_EVERY = 300.0  # seconds between progress summaries in the log
+
+
+def start_run_log(out_dir: Path, stage: str = "reviews") -> Path:
+    """Write this module's log to <out_dir>/logs/<stage>_<time>.log, and show warnings and errors
+    on the console (under the notebook cell). Calling it again starts a new file."""
+    path = Path(out_dir) / "logs" / f"{stage}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for handler in [h for h in log.handlers if getattr(h, "run_log", False)]:
+        log.removeHandler(handler)
+        handler.close()
+    file_handler = logging.FileHandler(path, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
+    for handler in (file_handler, console):
+        handler.run_log = True
+        log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    log.info(f"log file {path}")
+    return path
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _duration(seconds: float) -> str:
+    seconds = int(max(seconds, 0))
+    hours, rest = divmod(seconds, 3600)
+    return f"{hours}h{rest // 60:02d}m" if hours else f"{rest // 60}m{rest % 60:02d}s"
+
+
+class _ReviewProgress:
+    """Counts finished model calls and logs each one, every problem, and a periodic summary."""
+
+    def __init__(self, calls: int, tokens: int):
+        self.calls, self.tokens = calls, tokens
+        self.done = self.done_tokens = self.output_tokens = 0
+        self.statuses: dict[str, int] = {}
+        self.truncated = 0
+        self.started = self.last_summary = time.monotonic()
+        self.lock = threading.Lock()
+
+    def record(self, record: dict) -> None:
+        reply, status = record.get("reply") or {}, record["status"]
+        where = f"{record['entry']} {record['level']}"
+        with self.lock:
+            self.done += 1
+            self.done_tokens += record.get("input_tokens") or 0
+            self.output_tokens += reply.get("completion_tokens") or 0
+            self.statuses[status] = self.statuses.get(status, 0) + 1
+            self.truncated += bool(record.get("truncated"))
+            count, due = self.done, time.monotonic() - self.last_summary >= SUMMARY_EVERY
+            if due:
+                self.last_summary = time.monotonic()
+        if status == "error":
+            log.error(f"review {count}/{self.calls} {where}: FAILED, {record.get('input_tokens')} input tokens: "
+                      f"{record.get('error')} (kept as an error; the next run retries it)")
+        else:
+            findings = len((record.get("parsed") or {}).get("findings", []))
+            log.info(f"review {count}/{self.calls} {where}: {status}, {record.get('input_tokens'):,} input tokens "
+                     f"(prompt {reply.get('prompt_tokens')}), {reply.get('completion_tokens')} output tokens, "
+                     f"{reply.get('seconds')}s, finish={reply.get('finish_reason')}, {findings} findings")
+            if record.get("truncated"):
+                log.warning(f"{where}: the reply hit the output limit ({reply.get('completion_tokens')} tokens) "
+                            f"and was cut off; parsed as {status}")
+            elif status != "ok":
+                log.warning(f"{where}: the reply is {status} (it counts as a review with no findings): "
+                            f"{(reply.get('text') or '')[:200]!r}")
+        if due or count == self.calls:
+            self.summary()
+
+    def summary(self) -> None:
+        with self.lock:
+            elapsed = time.monotonic() - self.started
+            rate = self.done_tokens / elapsed if elapsed > 0 else 0
+            left = (self.tokens - self.done_tokens) / rate if rate > 0 else None
+            log.info(f"progress: {self.done}/{self.calls} calls ({100 * self.done / max(self.calls, 1):.1f}%), "
+                     f"{self.done_tokens:,} of {self.tokens:,} input tokens, {self.output_tokens:,} output tokens, "
+                     f"{rate:,.0f} input tokens/s, elapsed {_duration(elapsed)}, "
+                     f"about {_duration(left) if left is not None else '?'} left; statuses {dict(sorted(self.statuses.items()))}, "
+                     f"{self.truncated} cut off at the output limit")
 
 
 def sha256_text(text: str) -> str:
@@ -90,20 +182,34 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
         return _key({"input": sha256_text(cell.text), "prompt": prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
                      "backend": reviewer.identity, "parser": PARSER_VERSION})
 
-    def one(cell: Cell) -> dict:
-        context, key = cell.text, key_of(cell)
-        path = out_dir / "reviews" / cell.entry / f"{cell.level}.json"
-        saved = read_json(path)
+    def path_of(cell: Cell) -> Path:
+        return out_dir / "reviews" / cell.entry / f"{cell.level}.json"
+
+    def reusable(cell: Cell, key: str) -> dict | None:
         # Errors are retried; too_long is re-checked against this run's limit (no model call),
         # so raising max_input_tokens later reviews the cells that now fit.
+        saved = read_json(path_of(cell))
         if not force and saved and saved.get("key") == key and saved.get("status") not in ("error", "too_long"):
+            return saved
+        return None
+
+    def too_long(cell: Cell) -> bool:
+        return max_input_tokens is not None and (cell.input_tokens or 0) > max_input_tokens
+
+    def one(cell: Cell) -> dict:
+        context, key = cell.text, key_of(cell)
+        saved = reusable(cell, key)
+        if saved:
             return saved
         record = {"key": key, "entry": cell.entry, "level": cell.level, "input_sha256": sha256_text(context),
                   "input_tokens": cell.input_tokens, "prompt_sha256": prompt_hash,
                   "prompt_version": REVIEW_PROMPT_VERSION, "backend": reviewer.identity, "parser": PARSER_VERSION}
-        if max_input_tokens is not None and (cell.input_tokens or 0) > max_input_tokens:
+        if too_long(cell):
             record.update(status="too_long", error=f"{cell.input_tokens} input tokens > {max_input_tokens}")
+            log.info(f"{cell.entry} {cell.level}: too long, not sent ({record['error']})")
         else:
+            record["started_at"] = _now()
+            log.debug(f"sending {cell.entry} {cell.level} ({cell.input_tokens} input tokens)")
             try:
                 reply = reviewer(review_messages(context, rubric))
                 parsed = parse_review(reply["text"], cell.known_paths)
@@ -111,13 +217,22 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
                               truncated=reply.get("finish_reason") == "length")
             except Exception as error:  # noqa: BLE001 - recorded; retried on the next run
                 record.update(status="error", error=f"{type(error).__name__}: {error}"[:2000])
-        write_json(path, record)
+            record["finished_at"] = _now()
+            tracker.record(record)
+        write_json(path_of(cell), record)
         return record
 
     keys = [key_of(cell) for cell in cells]
     first: dict[str, Cell] = {}
     for cell, key in zip(cells, keys):
         first.setdefault(key, cell)
+    saved_already = sum(1 for key, cell in first.items() if reusable(cell, key))
+    to_send = [cell for key, cell in first.items() if not too_long(cell) and not reusable(cell, key)]
+    tracker = _ReviewProgress(len(to_send), sum(cell.input_tokens or 0 for cell in to_send))
+    log.info(f"review stage: {len(cells)} cells from {len({c.entry for c in cells})} entries, {len(first)} distinct inputs; "
+             f"{saved_already} already saved, {sum(too_long(c) for c in first.values())} over the limit of "
+             f"{max_input_tokens} input tokens, {len(to_send)} to send ({tracker.tokens:,} input tokens) with "
+             f"concurrency {max(1, concurrency)}; reviewer {reviewer.identity}; output {out_dir}")
     done = {}
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         for key, record in zip(first, pool.map(one, first.values())):
@@ -135,6 +250,12 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
             if progress:
                 progress(record)
         results.append(record)
+    statuses: dict[str, int] = {}
+    for record in results:
+        statuses[record["status"]] = statuses.get(record["status"], 0) + 1
+    log.info(f"review stage finished: {len(results)} cells, statuses {dict(sorted(statuses.items()))}, "
+             f"{tracker.done} model calls in {_duration(time.monotonic() - tracker.started)}"
+             + (f"; {statuses['error']} failed and will be retried by the next run" if statuses.get("error") else ""))
     return results
 
 
@@ -153,6 +274,10 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
     """
     out_dir, results = Path(out_dir), []
     judged: dict[str, dict] = {}  # this run's judgments by key: identical reviews are judged once
+    scorable = [r for r in reviews if r.get("status") in ("ok", "malformed", "empty_output")]
+    log.info(f"judge stage: {len(scorable)} of {len(reviews)} cells have a review to score; "
+             f"judge {getattr(judge, 'identity', repr(judge))}; output {out_dir}")
+    stage_started, new_calls, errors = time.monotonic(), 0, 0
     for review in reviews:
         if review.get("status") not in ("ok", "malformed", "empty_output"):
             continue
@@ -184,8 +309,17 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
         write_json(path, record)
         judged[key] = record
         results.append(record)
+        new_calls += 1
+        errors += record["judge_errors"]
+        level = logging.WARNING if record["judge_errors"] else logging.INFO
+        log.log(level, f"judged {len(results)}/{len(scorable)} {record['entry']} {record['level']}: "
+                       f"{record['generated']} generated, {record['expected']} expected, {record['covered']} covered, "
+                       f"recall {record['recall']:.2f}, {record['judge_errors']} judge errors, {record['seconds']}s")
         if progress:
             progress(record)
+    log.info(f"judge stage finished: {len(results)} cells scored, {new_calls} judged now, "
+             f"{len(results) - new_calls} reused, {errors} judge errors"
+             + (" (re-run to retry them)" if errors else "") + f", in {_duration(time.monotonic() - stage_started)}")
     return results
 
 

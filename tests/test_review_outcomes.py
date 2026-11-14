@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from src.review_outcomes.backends import OpenAIChat
@@ -179,6 +180,59 @@ class TableTests(unittest.TestCase):
         self.assertEqual([s["level"] for s in summary], ["L01_min", "L02_function"])
         self.assertAlmostEqual(summary[0]["recall_pooled"], 0.125)
         self.assertEqual(summary[1]["statuses"], {"too_long": 1})
+
+    def test_run_log_records_every_call_problem_and_summary(self):
+        from src.review_outcomes import table
+
+        levels = {f"L{i:02d}": {"text": f"context {i}", "input_tokens": 100 * i} for i in range(1, 6)}
+        contexts = self.root / "five.jsonl"
+        append_record(contexts, {"id": "o__r__9", "index": 0, "status": "ok", "levels": levels, "known_paths": ["p.py"]})
+        cells = discover_cells(contexts)
+
+        def reviewer(messages):
+            text = messages[1]["content"]
+            if text.endswith("context 2"):
+                raise RuntimeError("HTTP 500: server fell over")
+            reply = {"text": codex_reply([finding("a finding", "p.py", 1)]), "finish_reason": "stop",
+                     "prompt_tokens": 10, "completion_tokens": 5, "seconds": 0.1}
+            if text.endswith("context 3"):
+                reply.update(text="not json at all")
+            if text.endswith("context 4"):
+                reply.update(text='{"findings": [', finish_reason="length", completion_tokens=4096)
+            return reply
+        reviewer.identity = {"kind": "fake"}
+        out = self.root / "logged"
+        path = table.start_run_log(out)
+        self.addCleanup(lambda: [(table.log.removeHandler(h), h.close()) for h in list(table.log.handlers)])
+        with mock.patch.object(table, "SUMMARY_EVERY", 0):
+            reviews = run_reviews(cells, reviewer, "RUBRIC", out, max_input_tokens=450)
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(path.parent, out / "logs")
+        self.assertIn("review stage: 5 cells from 1 entries, 5 distinct inputs; 0 already saved, 1 over the limit of 450 "
+                      "input tokens, 4 to send (1,000 input tokens) with concurrency 1", text)
+        self.assertIn("o__r__9 L01: ok, 100 input tokens (prompt 10), 5 output tokens, 0.1s, finish=stop, 1 findings", text)
+        self.assertIn("ERROR   review 2/4 o__r__9 L02: FAILED, 200 input tokens: RuntimeError: HTTP 500: server fell over", text)
+        self.assertIn("WARNING o__r__9 L03: the reply is malformed", text)
+        self.assertIn("WARNING o__r__9 L04: the reply hit the output limit (4096 tokens)", text)
+        self.assertIn("o__r__9 L05: too long, not sent (500 input tokens > 450)", text)
+        self.assertIn("progress: 4/4 calls (100.0%), 1,000 of 1,000 input tokens", text)
+        self.assertIn("review stage finished: 5 cells", text)
+        self.assertIn("1 failed and will be retried by the next run", text)
+        self.assertTrue(reviews[0]["started_at"] <= reviews[0]["finished_at"])
+        self.assertNotIn("started_at", reviews[4])  # never sent
+
+        calls_before = text.count("FAILED")
+        again = run_reviews(cells, reviewer, "RUBRIC", out, max_input_tokens=450)  # only the failed call is retried
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("3 already saved, 1 over the limit of 450 input tokens, 1 to send (200 input tokens)", text)
+        self.assertEqual(text.count("FAILED"), calls_before + 1)
+        self.assertEqual(again[0], reviews[0])  # a saved review is returned unchanged, timestamps included
+
+        references = {"o__r__9": {"project_main_language": "Python", "comments": REFS}}
+        run_judgments(again, references, ExampleJudge(), out)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("judge stage: 3 of 5 cells have a review to score", text)
+        self.assertIn("judge stage finished: 3 cells scored", text)
 
     def test_too_long_cells_are_reviewed_once_the_limit_allows(self):
         cells, calls = discover_cells(self.contexts), []
