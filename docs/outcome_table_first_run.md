@@ -432,4 +432,4 @@ All of it is git-ignored and exists on the laptop and on the cloud server.
 | `coverage.csv` | one row per (PR, level, reference): covered or not |
 | `manifest.json` | the settings, prompt and input hashes of the run, and the judge's identity |
 
-The folder is about 30 MB. The times in the log are the server's clock (China Standard Time).
+The folder is about 40 MB. The times in the log are the server's clock (China Standard Time).
