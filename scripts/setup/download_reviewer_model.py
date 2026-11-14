@@ -24,10 +24,12 @@ Usage, from the project root with the project's environment:
     .venv/bin/python scripts/setup/download_reviewer_model.py            # download and verify
     .venv/bin/python scripts/setup/download_reviewer_model.py --dry-run  # plan only, no download
 
-Re-running resumes file by file: finished files are kept and only the rest are downloaded. A
-file cut off by Ctrl+C or a crash restarts from its beginning (huggingface_hub 1.x and later
-do not reuse partial files; within one run they do resume a dropped connection). Each run's
-full log (DEBUG level) goes to logs/download_reviewer_model_<time>.log.
+Re-running resumes: finished files are kept, and a weight file cut off by Ctrl+C or a crash
+continues from the bytes already on disk. Through a mirror the script downloads the weight
+files itself (huggingface_hub 1.x and later restart a cut-off file from its beginning) and
+replaces a connection that stays slow: from mainland China some connections to the file CDN
+are throttled to a few tens of KB/s and never recover, while a new connection to the same
+file is fast. Each run's full log (DEBUG level) goes to logs/download_reviewer_model_<time>.log.
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ import argparse
 import ast
 import fnmatch
 import hashlib
+import http.client
 import importlib.util
 import json
 import logging
@@ -55,7 +58,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = PROJECT_ROOT / "notebooks" / "outcome_table.ipynb"
@@ -73,6 +76,13 @@ COMMIT_HASH = re.compile(r"^[0-9a-f]{40}$")
 # never reused; older versions resume a plain <etag>.incomplete instead.
 UNIQUE_TEMP = re.compile(r"^[0-9a-f]+\.[0-9a-f]{8}\.incomplete$")
 STALE_SECONDS = 60  # a live download writes continuously; an untouched temp file is an orphan
+USER_AGENT = "cs536-model-download"
+# The script's own downloader for weight files (fetch_weight_file).
+WINDOW_SECONDS = 30.0  # a connection's speed is judged over windows this long
+SLOW_STREAK = 3  # after this many slow connections in a row, the link itself is probably slow ...
+SLOW_PAUSE = 300.0  # ... so keep the next connection this long before judging again
+BACKOFF_SECONDS = 5.0  # first wait after a failed request; doubles up to 120 s
+READ_BYTES = 1 << 18
 
 # The official hub: huggingface.co with every subdomain, and its short name hf.co. It is
 # unreachable from mainland China, so through a mirror this script refuses to contact it.
@@ -324,6 +334,10 @@ def disk_report(path: Path) -> tuple[Path, int]:
 
 # --------------------------------------------------------------------------- network
 
+def backoff(failures: int) -> float:
+    return min(120.0, BACKOFF_SECONDS * 2 ** (failures - 1))
+
+
 def with_retries(what: str, call, retries: int, stop: threading.Event | None = None):
     for attempt in range(1, retries + 1):
         try:
@@ -336,9 +350,9 @@ def with_retries(what: str, call, retries: int, stop: threading.Event | None = N
             if attempt == retries:
                 log.error(f"{what}: attempt {attempt}/{retries} failed: {type(error).__name__}: {error}")
                 raise
-            wait = min(120, 5 * 2 ** (attempt - 1))
+            wait = backoff(attempt)
             log.warning(f"{what}: attempt {attempt}/{retries} failed: {type(error).__name__}: {error}; "
-                        f"retrying in {wait}s")
+                        f"retrying in {wait:g}s")
             if stop is not None and stop.wait(wait):
                 raise RuntimeError("stopped") from error
             if stop is None:
@@ -356,7 +370,7 @@ def trace_redirects(url: str, max_hops: int = 6) -> list[tuple[int | None, str]]
     hops: list[tuple[int | None, str]] = []
     for _ in range(max_hops):
         _guard.check(urlsplit(url).hostname, url, via="probe")
-        request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "cs536-model-download"})
+        request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
         try:
             with opener.open(request, timeout=30) as response:
                 hops.append((response.status, url))
@@ -461,25 +475,32 @@ class Progress:
         self.count, self.done_files = len(files), cached_files
         self.cached, self.finished, self.blobs = cached_bytes, 0, blobs
         self.active: set[str] = set()
+        self.landed: dict[str, int] = {}  # blobs that are complete but not yet linked into the snapshot
         self.lock = threading.Lock()
 
     def start(self, name):
         with self.lock:
             self.active.add(name)
 
+    def land(self, f: RemoteFile):
+        with self.lock:
+            self.landed[f.name] = f.size
+
     def finish(self, f: RemoteFile):
         with self.lock:
             self.active.discard(f.name)
+            self.landed.pop(f.name, None)
             self.finished += f.size
             self.done_files += 1
 
     def fail(self, name):
         with self.lock:
             self.active.discard(name)
+            self.landed.pop(name, None)
 
     def current(self) -> int:
         with self.lock:
-            done = self.cached + self.finished
+            done = self.cached + self.finished + sum(self.landed.values())
         return min(self.total, done + partial_bytes(self.blobs))
 
 
@@ -500,6 +521,154 @@ def monitor(progress: Progress, stop: threading.Event, every: float) -> None:
         last_time, last = now, current
 
 
+# --------------------------------------------------------------------------- weight files
+
+class SlowConnection(Exception):
+    """A connection stayed below the speed floor for a whole window and should be replaced."""
+
+    def __init__(self, speed: float, good_windows: int):
+        super().__init__(f"{speed / 1e3:.0f} KB/s")
+        self.speed, self.good_windows = speed, good_windows
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _guard.check(urlsplit(newurl).hostname, newurl)  # every hop, as for huggingface_hub's client
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def open_range(url: str, offset: int, timeout: float):
+    """GET the URL from byte `offset` on. Redirects are followed (the mirror sends weight files
+    to the file CDN) with the guard checking each hop; proxies come from the environment."""
+    _guard.check(urlsplit(url).hostname, url)
+    request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-", "User-Agent": USER_AGENT,
+                                                   "Accept-Encoding": "identity"})
+    return urllib.request.build_opener(_GuardedRedirect).open(request, timeout=timeout)
+
+
+def copy_range(url: str, out, f: RemoteFile, floor: float, judge_from: float, stop: threading.Event,
+               timeout: float = 60.0) -> None:
+    """Append the rest of the file to `out`, from its current position, over one connection.
+    Raises SlowConnection when a whole window passes below `floor` bytes per second (0: never
+    judged; nothing is judged before the time `judge_from`), and OSError when the connection or
+    the answer is wrong. The bytes written so far stay in `out` either way."""
+    offset = out.tell()
+    with open_range(url, offset, timeout) as response:
+        if response.status == 206:
+            content_range = (response.headers.get("Content-Range") or "").strip()
+            match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+            if not match or int(match[1]) != offset or int(match[3]) != f.size:
+                raise OSError(f"unexpected Content-Range {content_range!r} for byte {offset:,} of {f.size:,}")
+        elif response.status == 200:  # the whole file: the server ignored the Range header
+            length = response.headers.get("Content-Length")
+            if length is not None and int(length) != f.size:
+                raise OSError(f"the server offers {int(length):,} bytes, expected {f.size:,}")
+            if offset:
+                log.warning(f"{f.name}: the server ignored the resume request; starting the file again")
+                out.seek(0)
+                out.truncate()
+        else:
+            raise OSError(f"unexpected HTTP status {response.status}")
+        log.debug(f"{f.name}: HTTP {response.status} from {urlsplit(response.url).hostname} at byte {out.tell():,}")
+        window_start, window_bytes, good_windows = time.monotonic(), 0, 0
+        while True:
+            if stop.is_set():
+                raise RuntimeError("stopped")
+            chunk = response.read1(READ_BYTES)  # returns what has arrived, so a trickle is seen as one
+            if not chunk:
+                break
+            out.write(chunk)
+            window_bytes += len(chunk)
+            now = time.monotonic()
+            if floor and now >= judge_from and now - window_start >= WINDOW_SECONDS:
+                speed = window_bytes / (now - window_start)
+                if speed < floor and out.tell() < f.size:
+                    raise SlowConnection(speed, good_windows)
+                good_windows += 1
+                window_start, window_bytes = now, 0
+    if out.tell() > f.size:
+        received = out.tell()
+        out.seek(0)
+        out.truncate()
+        raise OSError(f"received {received:,} bytes, more than the file's {f.size:,}; starting the file again")
+    if out.tell() < f.size:
+        raise ConnectionError(f"the connection closed at byte {out.tell():,} of {f.size:,}")
+
+
+def lock_part_file(handle, path: Path) -> None:
+    try:
+        import fcntl
+    except ImportError:  # Windows has no flock; nothing else stops two runs writing one file there
+        return
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        raise RuntimeError(f"{path.name} is being written by another download; stop that run first") from error
+
+
+def fetch_weight_file(f: RemoteFile, ctx: dict, retries: int) -> Path:
+    """Download one weight (LFS) file into the cache's blobs folder, where huggingface_hub then
+    only has to link it into the snapshot.
+
+    Two things huggingface_hub's own downloader does not do: the partial file
+    blobs/<sha256>.incomplete is kept and continued by the next run, and a connection whose
+    speed stays below ctx["min_speed"] bytes per second for WINDOW_SECONDS is replaced by a new
+    one that resumes at the same byte. A failed request is retried with a growing wait, up to
+    `retries` times in a row without progress."""
+    blobs, stop, floor = ctx["blobs"], ctx["stop"], ctx["min_speed"]
+    blob, part = blobs / f.sha256, blobs / f"{f.sha256}.incomplete"
+    if file_ok(blob, f.size):
+        log.debug(f"{f.name}: its blob is already in the cache")
+        return blob
+    url = f"{ctx['endpoint']}/{ctx['repo']}/resolve/{ctx['revision']}/{quote(f.name)}"
+    timeout = float(os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT") or 60)
+    blobs.mkdir(parents=True, exist_ok=True)
+    failures = replaced = slow_streak = 0
+    judge_from = 0.0
+    with os.fdopen(os.open(part, os.O_RDWR | os.O_CREAT, 0o644), "r+b", buffering=1 << 20) as out:
+        lock_part_file(out, part)
+        if out.seek(0, os.SEEK_END) > f.size:
+            log.warning(f"{part.name} is larger than the file; starting it again")
+            out.seek(0)
+            out.truncate()
+        if out.tell():
+            log.info(f"{f.name}: resuming at {fmt_bytes(out.tell())} of {fmt_bytes(f.size)}")
+        while out.tell() < f.size:
+            before = out.tell()
+            try:
+                copy_range(url, out, f, floor, judge_from, stop, timeout)
+            except SlowConnection as slow:
+                replaced += 1
+                slow_streak = 1 if slow.good_windows else slow_streak + 1
+                if slow_streak >= SLOW_STREAK:  # probably the link, not one unlucky connection
+                    slow_streak, judge_from = 0, time.monotonic() + SLOW_PAUSE
+                    log.warning(f"{f.name}: {SLOW_STREAK} connections in a row stayed below {floor / 1e3:.0f} KB/s "
+                                f"(last {slow}); keeping the next one for {fmt_duration(SLOW_PAUSE)}. If the whole "
+                                f"link is this slow, pass a lower --min-speed (0 turns the check off)")
+                else:
+                    log.info(f"{f.name}: connection at {slow} is below the {floor / 1e3:.0f} KB/s floor; "
+                             f"replacing it and resuming at {fmt_bytes(out.tell())} (replacement {replaced})")
+            except (OSError, http.client.HTTPException) as error:  # URLError, HTTPError, timeouts, resets
+                if _guard.blocked:
+                    raise OfficialHubBlocked(f"refused to contact {_guard.blocked}") from error
+                failures = 1 if out.tell() > before else failures + 1
+                if failures >= retries:
+                    log.error(f"{f.name}: request {failures}/{retries} in a row failed at {fmt_bytes(out.tell())}: "
+                              f"{type(error).__name__}: {error}")
+                    raise
+                wait = backoff(failures)
+                log.warning(f"{f.name}: {type(error).__name__}: {error} at {fmt_bytes(out.tell())}; "
+                            f"retry {failures}/{retries} in {wait:g}s")
+                if stop.wait(wait):
+                    raise RuntimeError("stopped") from error
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(part, blob)
+    if replaced:
+        log.info(f"{f.name}: finished after replacing {replaced} slow connection{'s' if replaced != 1 else ''}")
+    return blob
+
+
 def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) -> list[str]:
     from huggingface_hub import hf_hub_download
 
@@ -510,6 +679,13 @@ def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) ->
         progress.start(f.name)
         started = time.monotonic()
         log.debug(f"start {f.name} ({fmt_bytes(f.size)}){' (replacing a bad cached copy)' if f.force else ''}")
+        if ctx["direct"] and f.sha256:  # weight file: fetch its blob here; huggingface_hub then links it
+            if f.force:
+                remove_cached(f, ctx["snapshot"])
+                (ctx["blobs"] / f"{f.sha256}.incomplete").unlink(missing_ok=True)
+                f.force = False
+            fetch_weight_file(f, ctx, args.retries)
+            progress.land(f)
 
         def attempt():
             path = hf_hub_download(ctx["repo"], f.name, revision=ctx["revision"], cache_dir=ctx["cache"],
@@ -518,6 +694,12 @@ def download_all(todo: list[RemoteFile], ctx: dict, progress: Progress, args) ->
             if size != f.size:
                 f.force = True  # the next attempt must not trust this copy
                 raise RuntimeError(f"downloaded {size:,} bytes, expected {f.size:,}")
+            if ctx["direct"] and f.sha256 and Path(path).resolve() != (ctx["blobs"] / f.sha256).resolve():
+                # huggingface_hub names blobs by ETag; for weight files that is the sha256. If a mirror
+                # differs, it downloaded the file itself, and the copy fetched here is not used.
+                log.warning(f"{f.name}: huggingface_hub stored it as {Path(path).resolve().name}, not its sha256; "
+                            f"removing the unused copy")
+                (ctx["blobs"] / f.sha256).unlink(missing_ok=True)
             return path
 
         with_retries(f.name, attempt, args.retries, stop)
@@ -719,7 +901,14 @@ def parse_args(argv=None):
                                           "on AutoDL, else ~/.cache/huggingface)")
     parser.add_argument("--profile", default="cloud", help="notebook profile whose reviewer to download (default cloud)")
     parser.add_argument("--workers", type=int, default=8, help="parallel file downloads (default 8)")
-    parser.add_argument("--retries", type=int, default=8, help="attempts per file before giving up (default 8)")
+    parser.add_argument("--retries", type=int, default=8,
+                        help="failed requests in a row, per file, before giving up (default 8)")
+    parser.add_argument("--min-speed", type=float, default=200, metavar="KB/S",
+                        help="replace a weight file's connection when it stays below this speed for "
+                             f"{WINDOW_SECONDS:g} s; the download resumes on a new one (default 200; 0 turns it off)")
+    parser.add_argument("--hub-download", action="store_true",
+                        help="download weight files with huggingface_hub's own downloader instead of this script's: "
+                             "no resume between runs and no replacing of slow connections")
     parser.add_argument("--include", nargs="+", metavar="GLOB",
                         help="download only matching files (testing); the result is not enough for vLLM")
     parser.add_argument("--dry-run", action="store_true", help="show the plan and checks, download nothing")
@@ -825,8 +1014,11 @@ def main(argv=None) -> int:
     if not args.dry_run:
         freed = remove_temp_files(blobs, older_than=STALE_SECONDS)
         if freed:
-            log.info(f"freed {fmt_bytes(freed)} of partial files left by an interrupted run (they cannot be resumed)")
-    resumable = partial_bytes(blobs, resumable_only=True)
+            log.info(f"freed {fmt_bytes(freed)} of huggingface_hub's partial files from an interrupted run "
+                     f"(it cannot resume them)")
+    # Weight files: this script's downloader through a mirror; huggingface_hub's (with Xet) on the official hub.
+    direct = env["mirror"] and not args.hub_download
+    resumable = partial_bytes(blobs, resumable_only=True) if direct else 0
     log.info(f"already cached: {len(selected) - len(todo)} files ({fmt_bytes(cached_bytes)}); to download: "
              f"{len(todo)} files ({fmt_bytes(remaining)})"
              + (f", of which {fmt_bytes(resumable)} can resume from an earlier run" if resumable else ""))
@@ -851,6 +1043,11 @@ def main(argv=None) -> int:
         return 0
 
     # 5. Download.
+    def context(stop: threading.Event) -> dict:
+        return {"repo": repo, "revision": revision, "cache": cache, "token": token, "stop": stop,
+                "endpoint": env["endpoint"], "snapshot": snapshot, "blobs": blobs, "direct": direct,
+                "min_speed": max(args.min_speed, 0) * 1e3}
+
     if todo:
         global _blobs_dir
         _blobs_dir = blobs
@@ -859,9 +1056,14 @@ def main(argv=None) -> int:
         watcher = threading.Thread(target=monitor, args=(progress, stop, args.progress_every), name="progress",
                                    daemon=True)
         watcher.start()
-        ctx = {"repo": repo, "revision": revision, "cache": cache, "token": token, "stop": stop}
+        ctx = context(stop)
         download_started = time.monotonic()
         log.info(f"downloading {len(todo)} files with {args.workers} workers, {args.retries} attempts each")
+        if direct:
+            log.info("weight files: this script's downloader, which resumes partial files"
+                     + (f" and replaces a connection that stays below {args.min_speed:g} KB/s for {WINDOW_SECONDS:g} s"
+                        if args.min_speed else " (slow connections are not replaced: --min-speed 0)")
+                     + "; other files: huggingface_hub")
         try:
             failed = download_all(todo, ctx, progress, args)
         finally:
@@ -886,8 +1088,7 @@ def main(argv=None) -> int:
             remove_cached(f, snapshot)
             f.force = True
         progress = Progress(redo, 0, blobs)
-        ctx = {"repo": repo, "revision": revision, "cache": cache, "token": token, "stop": threading.Event()}
-        failed = download_all(redo, ctx, progress, args)
+        failed = download_all(redo, context(threading.Event()), progress, args)
         problems = verify_all(redo, snapshot, not args.skip_hash, workers) if not failed else {n: "failed" for n in failed}
         if problems:
             log.error(f"still wrong after a fresh download: {', '.join(problems)}")
@@ -938,7 +1139,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         if _blobs_dir is not None:
             remove_temp_files(_blobs_dir, older_than=None)  # os._exit skips the downloads' own cleanup
-        log.warning("interrupted; finished files are kept, and re-running the script downloads the rest")
+        log.warning("interrupted; finished files are kept, and re-running the script continues the rest "
+                    "(weight files downloaded through a mirror resume where they stopped)")
         logging.shutdown()
         os._exit(130)  # running download threads cannot be cancelled mid-file
     except OfficialHubBlocked as error:
