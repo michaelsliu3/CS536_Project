@@ -479,6 +479,12 @@ class RunTests(unittest.TestCase):
         self.assertEqual(self.run_cli("table"), 0)
 
     @unittest.skipUnless(HAVE_SDK, "needs the anthropic package")
+    def test_cells_waiting_for_a_reply_are_not_logged_as_failures(self):
+        self.out.mkdir(parents=True)  # a run folder with no reply in it yet
+        with self.assertNoLogs("review_outcomes", level="WARNING"):
+            self.assertEqual(self.run_cli("table"), 0)
+        self.assertEqual(self.statuses(), ["error", "error", "error", "error", "too_long"])  # still shown as not done
+
     def test_stopping_a_direct_run_never_repeats_an_answered_request(self):
         self.client.interrupt_at = 2  # the run is stopped while the second request is out
         self.assertEqual(self.run_cli("review", "--mode", "direct", "--yes", "--workers", "1"), 130)

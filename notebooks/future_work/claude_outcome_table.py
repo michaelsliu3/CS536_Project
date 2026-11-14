@@ -37,6 +37,7 @@ import argparse
 import hashlib
 import http.server
 import json
+import logging
 import os
 import re
 import shutil
@@ -251,6 +252,15 @@ class ReplyStore:
 
 class PendingReply(LookupError):
     """The request has not been answered yet."""
+
+
+class _NotPending(logging.Filter):
+    """The shared pipeline logs every cell it could not review as FAILED. When the review files are
+    written from the saved replies, a cell without a reply is only waiting for a later run, and
+    report_reviews counts those cells, so their lines are left out."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return PendingReply.__name__ not in record.getMessage()
 
 
 class ClaudeChat:
@@ -1223,8 +1233,13 @@ class Run:
         """Turn the saved replies into the pipeline's review records (reviews/<entry>/<level>.json).
         It sends nothing, so it is safe at any time, also while another process is reviewing."""
         known = {rid: cell.known_paths for rid, cell in self.review_requests().items()}
-        return table.run_reviews(self.cells, ClaudeChat(self.spec, self.store, known), self.rubric, self.out,
-                                 max_input_tokens=self.limit)
+        quiet = _NotPending()
+        table.log.addFilter(quiet)
+        try:
+            return table.run_reviews(self.cells, ClaudeChat(self.spec, self.store, known), self.rubric, self.out,
+                                     max_input_tokens=self.limit)
+        finally:
+            table.log.removeFilter(quiet)
 
     def write_manifest(self, judge_identity=None) -> None:
         manifest = table.read_json(self.out / "manifest.json") or {}
