@@ -26,6 +26,13 @@ REVIEW_REQUEST = (
     "Provide prioritized, actionable findings."
 )
 REVIEW_PROMPT_VERSION = "codex-rubric-4e4767f+one-call-request-v1"
+# Sent once, after a reply that finished without the JSON (src/review_outcomes/retry.py). It is not
+# part of the first call, so it is not in REVIEW_PROMPT_VERSION; the retry policy carries its hash.
+FOLLOW_UP_REQUEST = (
+    "You cannot run commands or open other files; everything available to you is in the request above. "
+    "Give your review now as the JSON object the output format specifies, with no other text. "
+    "If you have no findings, return an empty findings list."
+)
 JUDGE_PROMPT_VERSION = "aacr-file-level-ee9d7fe"
 
 

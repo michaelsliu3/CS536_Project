@@ -8,7 +8,9 @@
 
 Each backend is called with a list of chat messages and returns
 {text, prompt_tokens, completion_tokens, finish_reason, seconds}; `identity` captures every
-setting that changes outputs and goes into the cache key.
+setting that changes outputs and goes into the cache key. A chat backend also takes
+`max_tokens=` for one call, which the reviewer's retry rule uses (retry.py); that call's limit is
+recorded with the retry, not in `identity`.
 """
 from __future__ import annotations
 
@@ -30,8 +32,9 @@ class OpenAIChat:
         self.identity = {"kind": "openai-chat", "model": model, "model_revision": model_revision,
                          "temperature": 0, "max_tokens": max_tokens, "enable_thinking": enable_thinking}
 
-    def __call__(self, messages: list[dict]) -> dict:
-        body = {"model": self.model, "messages": messages, "temperature": 0, "max_tokens": self.max_tokens}
+    def __call__(self, messages: list[dict], max_tokens: int | None = None) -> dict:
+        body = {"model": self.model, "messages": messages, "temperature": 0,
+                "max_tokens": max_tokens or self.max_tokens}
         if self.enable_thinking is not None:  # Qwen chat templates; vLLM/SGLang pass this through
             body["chat_template_kwargs"] = {"enable_thinking": self.enable_thinking}
         headers = {"Content-Type": "application/json"}
@@ -63,7 +66,8 @@ class TransformersChat:
                                  else "mps" if torch.backends.mps.is_available() else "cpu")
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=local_files_only)
         self.model = self._load_model(model_id, local_files_only).to(self.device).eval()
-        self.max_new_tokens, self.enable_thinking = max_new_tokens, enable_thinking
+        self.max_new_tokens = self.max_tokens = max_new_tokens
+        self.enable_thinking = enable_thinking
         revision = getattr(self.model.config, "_commit_hash", None) or _cached_revision(model_id)
         self.identity = {"kind": "transformers", "model": model_id, "model_revision": revision,
                          "do_sample": False, "max_new_tokens": max_new_tokens, "enable_thinking": enable_thinking}
@@ -81,20 +85,21 @@ class TransformersChat:
                 errors.append(f"{name}: {error}")
         raise RuntimeError("could not load a text-generation head: " + " | ".join(errors))
 
-    def __call__(self, messages: list[dict]) -> dict:
+    def __call__(self, messages: list[dict], max_tokens: int | None = None) -> dict:
         import torch
 
+        limit = max_tokens or self.max_new_tokens
         kwargs = {} if self.enable_thinking is None else {"enable_thinking": self.enable_thinking}
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, **kwargs)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         started = time.monotonic()
         with torch.no_grad():
-            output = self.model.generate(**inputs, do_sample=False, max_new_tokens=self.max_new_tokens,
+            output = self.model.generate(**inputs, do_sample=False, max_new_tokens=limit,
                                          pad_token_id=self.tokenizer.eos_token_id)
         new_tokens = output[0, inputs["input_ids"].shape[1]:]
         finished = bool(len(new_tokens)) and int(new_tokens[-1]) == self.tokenizer.eos_token_id
         return {"text": self.tokenizer.decode(new_tokens, skip_special_tokens=True),
-                "finish_reason": "stop" if finished or len(new_tokens) < self.max_new_tokens else "length",
+                "finish_reason": "stop" if finished or len(new_tokens) < limit else "length",
                 "prompt_tokens": int(inputs["input_ids"].shape[1]), "completion_tokens": int(len(new_tokens)),
                 "seconds": round(time.monotonic() - started, 2)}
 

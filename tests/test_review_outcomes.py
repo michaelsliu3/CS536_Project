@@ -1,4 +1,5 @@
 import json
+import logging
 import tempfile
 import unittest
 from unittest import mock
@@ -7,11 +8,13 @@ from pathlib import Path
 from src.review_outcomes.backends import OpenAIChat
 from src.review_outcomes.judge import parse_judge_answer, score_review
 from src.review_outcomes.parse import normalize_path, parse_review
+from src.review_outcomes import retry as retry_rule
 from src.review_outcomes.prompts import (
-    REVIEW_REQUEST, RUBRIC_PATH, judge_prompt, load_rubric, prompt_sha256, review_messages,
+    FOLLOW_UP_REQUEST, REVIEW_REQUEST, RUBRIC_PATH, judge_prompt, load_rubric, prompt_sha256, review_messages,
 )
+from src.review_outcomes.retry import RetryPolicy
 from src.review_outcomes.table import (
-    build_table, discover_cells, run_judgments, run_reviews, summarize_by_level, write_outputs,
+    build_table, discover_cells, plan_reviews, run_judgments, run_reviews, summarize_by_level, write_outputs,
 )
 from src.tracer_context.dataset import append_record
 
@@ -311,6 +314,301 @@ class TableTests(unittest.TestCase):
         self.assertEqual([j.get("reused_from") for j in judgments], [None, "L05_callers1", None])
         rows, _ = build_table(reviews, judgments, self.references)
         self.assertEqual([r["reused_from"] for r in rows], [None, "L05_callers1", None])
+
+
+def reply(text, finish="stop", prompt=1810, completion=50):
+    return {"text": text, "finish_reason": finish, "prompt_tokens": prompt, "completion_tokens": completion, "seconds": 0.1}
+
+
+CUT = reply("Let me trace the callers. So the", "length", completion=4096)  # reasoning that ran out of room
+PROSE = reply("The patch is correct.")                                       # finished, but no JSON
+TOOL = reply("Let me look.\n<tool_call>\n<function=Bash>\n</function>\n</tool_call>")
+GOOD = reply(codex_reply([finding("G1 a real bug", "p.py", 3)]))
+EMPTY = reply(codex_reply([]))
+POLICY = RetryPolicy(longer_max_tokens=16000, follow_up=True, context_window=262144)
+
+
+class ScriptedReviewer:
+    """A reviewer whose replies come from a script keyed by (level, kind of call), where the kind is
+    "first", "longer" (the first request again with a larger limit) or "follow_up". A list is used
+    up one reply per call; an exception is raised. Every call is recorded."""
+
+    max_tokens, identity = 4096, {"kind": "fake", "max_tokens": 4096}
+
+    def __init__(self, script):
+        self.script, self.calls, self.requests = script, [], []
+
+    def __call__(self, messages, max_tokens=None):
+        level = messages[1]["content"].split()[-1]
+        kind = "follow_up" if len(messages) == 4 else "longer" if max_tokens else "first"
+        self.calls.append((level, kind, max_tokens))
+        self.requests.append(messages)
+        answer = self.script[(level, kind)]
+        if isinstance(answer, list):
+            answer = answer.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return dict(answer)
+
+
+class RetryTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.out = self.root / "out"
+        quiet = logging.NullHandler()  # these tests make cut-off and malformed replies on purpose
+        logging.getLogger("review_outcomes").addHandler(quiet)
+        self.addCleanup(logging.getLogger("review_outcomes").removeHandler, quiet)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def cells(self, *levels, name="levels"):
+        """One PR whose levels have the texts "context <level>"; a level may be (name, same-as level)."""
+        named = [level if isinstance(level, tuple) else (level, level) for level in levels]
+        contexts = self.root / f"{name}.jsonl"
+        append_record(contexts, {"id": "o__r__7", "index": 0, "status": "ok", "known_paths": ["p.py"],
+                                 "levels": {n: {"text": f"context {text}", "input_tokens": 100} for n, text in named}})
+        return discover_cells(contexts)
+
+    def saved(self, level):
+        return json.loads((self.out / "reviews" / "o__r__7" / f"{level}.json").read_text(encoding="utf-8"))
+
+    def test_cut_off_reply_is_sent_again_with_a_longer_limit(self):
+        cells = self.cells("L01")
+        reviewer = ScriptedReviewer({("L01", "first"): CUT, ("L01", "longer"): GOOD})
+        record = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)[0]
+        self.assertEqual(reviewer.calls, [("L01", "first", None), ("L01", "longer", 16000)])
+        self.assertEqual(reviewer.requests[1], reviewer.requests[0])  # the same request, only the limit differs
+        self.assertEqual((record["status"], record["truncated"], len(record["parsed"]["findings"])), ("ok", False, 1))
+        self.assertEqual(record["reply"], GOOD)  # the last reply is the one in force
+        self.assertEqual(record["retry"]["policy"], POLICY.identity)
+        self.assertEqual(record["retry"]["first"], {"status": "malformed", "reply": CUT, "truncated": True})
+        step = record["retry"]["steps"][0]
+        self.assertEqual((step["step"], step["max_tokens"], step["status"], step["truncated"], step["reply"]),
+                         ("longer_output", 16000, "ok", False, GOOD))
+        self.assertEqual(retry_rule.steps_taken(record), "longer_output")
+        self.assertEqual(self.saved("L01"), record)
+        # The cache key covers the first call only: it is the key a run without the policy gives.
+        plain = run_reviews(cells, ScriptedReviewer({("L01", "first"): CUT}), "RUBRIC", self.root / "plain")[0]
+        self.assertEqual(record["key"], plain["key"])
+        self.assertNotIn("retry", plain)
+        again = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)  # nothing left to do
+        self.assertEqual((again, len(reviewer.calls)), ([record], 2))
+
+    def test_reply_without_json_gets_one_follow_up(self):
+        cells = self.cells("L01", "L02")
+        reviewer = ScriptedReviewer({("L01", "first"): PROSE, ("L01", "follow_up"): EMPTY,
+                                     ("L02", "first"): TOOL, ("L02", "follow_up"): GOOD})
+        first, second = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual(reviewer.calls, [("L01", "first", None), ("L01", "follow_up", 4096),
+                                          ("L02", "first", None), ("L02", "follow_up", 4096)])
+        request = reviewer.requests[1]  # the conversation so far, the reply, then the fixed message
+        self.assertEqual(request[:2], reviewer.requests[0])
+        self.assertEqual(request[2:], [{"role": "assistant", "content": PROSE["text"]},
+                                       {"role": "user", "content": FOLLOW_UP_REQUEST}])
+        self.assertIn("cannot run commands", FOLLOW_UP_REQUEST)
+        self.assertEqual((first["status"], first["parsed"]["findings"], retry_rule.steps_taken(first)),
+                         ("ok", [], "follow_up"))
+        self.assertEqual((second["status"], len(second["parsed"]["findings"])), ("ok", 1))
+        self.assertEqual(second["retry"]["first"]["reply"], TOOL)
+
+    def test_steps_run_once_each_in_order_and_the_last_reply_decides(self):
+        cells = self.cells("L01", "L02", "L03", "L04")
+        unfinished = reply("Finding 1 is real. Let me write the findings.", completion=9000)
+        still_cut = reply("Still thinking. So the", "length", completion=16000)
+        reviewer = ScriptedReviewer({
+            ("L01", "first"): CUT, ("L01", "longer"): unfinished, ("L01", "follow_up"): GOOD,  # both steps
+            ("L02", "first"): CUT, ("L02", "longer"): still_cut,                                # cut off again
+            ("L03", "first"): PROSE, ("L03", "follow_up"): PROSE,                               # no JSON again
+            ("L04", "first"): GOOD})                                                            # never retried
+        records = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual([retry_rule.steps_taken(r) for r in records],
+                         ["longer_output+follow_up", "longer_output", "follow_up", None])
+        self.assertEqual([(r["status"], r["truncated"]) for r in records],
+                         [("ok", False), ("malformed", True), ("malformed", False), ("ok", False)])
+        self.assertEqual(records[1]["parsed"]["findings"], [])  # still no answer: a review with no findings
+        self.assertNotIn("retry", records[3])
+        follow_up = reviewer.requests[reviewer.calls.index(("L01", "follow_up", 4096))]
+        self.assertEqual(follow_up[2]["content"], unfinished["text"])  # it continues from the longer reply
+        self.assertEqual(len(reviewer.calls), 4 + 2 + 1 + 1)
+        run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)  # a cell that still has no answer is left
+        self.assertEqual(len(reviewer.calls), 8)
+        for record in records:
+            self.assertIsNone(retry_rule.next_step(record, POLICY))
+
+    def test_step_is_skipped_when_the_window_has_no_room(self):
+        cells = self.cells("L01", "L02", "L03")
+        reviewer = ScriptedReviewer({
+            ("L01", "first"): reply("So the", "length", prompt=257_699, completion=4096),  # 4,445 tokens of room
+            ("L02", "first"): reply("Let me write the findings.", prompt=257_708, completion=3689),
+            ("L03", "first"): reply("So the", "length", prompt=249_293, completion=4096), ("L03", "longer"): GOOD})
+        records = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual(reviewer.calls, [("L01", "first", None), ("L02", "first", None), ("L03", "first", None),
+                                          ("L03", "longer", 262_144 - 249_293)])  # the limit is capped by the window
+        self.assertEqual([r["status"] for r in records], ["malformed", "malformed", "ok"])
+        for record, step in zip(records[:2], ("longer_output", "follow_up")):
+            self.assertEqual([s["step"] for s in record["retry"]["steps"]], [step])
+            self.assertIn("no room", record["retry"]["steps"][0]["skipped"])
+            self.assertEqual(record["reply"], record["retry"]["first"]["reply"])  # the first reply stays in force
+            self.assertIsNone(retry_rule.steps_taken(record))
+        run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual(len(reviewer.calls), 4)  # a skipped step is not tried again
+        unlimited = RetryPolicy(longer_max_tokens=16000, follow_up=True, context_window=None)
+        self.assertEqual(retry_rule.step_limit("longer_output", {"reply": CUT}, unlimited, 4096), (16000, None))
+        self.assertEqual(retry_rule.step_limit("follow_up", {"reply": PROSE}, unlimited, None), (None, None))
+
+    def test_replies_saved_before_the_rule_are_retried_without_a_second_first_call(self):
+        from src.review_outcomes import table
+
+        cells = self.cells("L01", "L02", "L03")
+        before = ScriptedReviewer({("L01", "first"): GOOD, ("L02", "first"): CUT, ("L03", "first"): TOOL})
+        old = run_reviews(cells, before, "RUBRIC", self.out)  # the run before the rule existed
+        self.assertEqual([r["status"] for r in old], ["ok", "malformed", "malformed"])
+        untouched = (self.out / "reviews" / "o__r__7" / "L01.json").read_bytes()
+        plan = plan_reviews(cells, before, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual((plan["saved"], plan["send"]["cells"], plan["no_room"]), (3, 0, 0))
+        self.assertEqual(plan["retry"], {"longer_output": {"cells": 1, "input_tokens": 100},
+                                         "follow_up": {"cells": 1, "input_tokens": 100}})
+        self.assertEqual(self.saved("L02"), old[1])  # planning wrote nothing
+
+        after = ScriptedReviewer({("L02", "longer"): GOOD, ("L03", "follow_up"): EMPTY})
+        path = table.start_run_log(self.out)
+        self.addCleanup(lambda: [(table.log.removeHandler(h), h.close()) for h in list(table.log.handlers)])
+        new = run_reviews(cells, after, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual(after.calls, [("L02", "longer", 16000), ("L03", "follow_up", 4096)])
+        self.assertEqual([r["status"] for r in new], ["ok", "ok", "ok"])
+        self.assertEqual(new[0], old[0])
+        self.assertEqual((self.out / "reviews" / "o__r__7" / "L01.json").read_bytes(), untouched)
+        for was, now in zip(old[1:], new[1:]):
+            self.assertEqual((now["key"], now["started_at"], now["finished_at"]),
+                             (was["key"], was["started_at"], was["finished_at"]))
+            self.assertEqual(now["retry"]["first"]["reply"], was["reply"])
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("3 already saved, 0 over the limit of None input tokens, 0 to send (0 input tokens) with "
+                      "concurrency 1; 2 saved replies to retry (1 cut off, 1 finished without the JSON; 0 more have "
+                      "no room in the window); retry policy {'version': 'retry-v1'", text)
+        self.assertIn("retry o__r__7 L02: longer_output with an output limit of 16000: ok, 50 output tokens", text)
+        self.assertIn("retry o__r__7 L03: follow_up with an output limit of 4096: ok", text)
+        self.assertIn("review 1/2 o__r__7 L02: ok, 100 input tokens (prompt 1810), 50 output tokens, 0.1s, "
+                      "finish=stop, 1 findings (after longer_output)", text)
+        self.assertIn("retry rule: 2 of 3 distinct replies took a retry step, 2 got a new reply; of those 2, 2 now "
+                      "have an answer and 0 do not (0 still cut off). Steps: 1 longer output, 1 follow-up, "
+                      "0 skipped for lack of room, 0 failed", text)
+
+    def test_changing_or_removing_the_policy_starts_again_from_the_first_reply(self):
+        cells = self.cells("L01")
+        reviewer = ScriptedReviewer({("L01", "first"): CUT, ("L01", "longer"): [GOOD, EMPTY]})
+        record = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)[0]
+        shorter = RetryPolicy(longer_max_tokens=8000, follow_up=True, context_window=262144)
+        redone = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=shorter)[0]
+        self.assertEqual(reviewer.calls, [("L01", "first", None), ("L01", "longer", 16000), ("L01", "longer", 8000)])
+        self.assertEqual((redone["retry"]["policy"], redone["retry"]["first"]), (shorter.identity, record["retry"]["first"]))
+        self.assertEqual((redone["reply"], [s["max_tokens"] for s in redone["retry"]["steps"]]), (EMPTY, [8000]))
+        plain = run_reviews(cells, reviewer, "RUBRIC", self.out)[0]  # no policy: the first reply, as first saved
+        self.assertEqual(len(reviewer.calls), 3)
+        self.assertEqual((plain["status"], plain["reply"], plain["truncated"], "retry" in plain),
+                         ("malformed", CUT, True, False))
+        self.assertEqual(self.saved("L01"), plain)
+
+    def test_failed_step_keeps_the_first_reply_and_is_tried_again(self):
+        cells = self.cells("L01")
+        reviewer = ScriptedReviewer({("L01", "first"): CUT,
+                                     ("L01", "longer"): [RuntimeError("HTTP 500: server fell over"), GOOD]})
+        failed = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)[0]
+        self.assertEqual((failed["status"], failed["reply"], failed["truncated"]), ("malformed", CUT, True))
+        self.assertEqual(failed["retry"]["steps"][0]["error"], "RuntimeError: HTTP 500: server fell over")
+        self.assertEqual(retry_rule.next_step(failed, POLICY), "longer_output")
+        fixed = run_reviews(cells, reviewer, "RUBRIC", self.out, retry=POLICY)[0]
+        self.assertEqual(reviewer.calls, [("L01", "first", None), ("L01", "longer", 16000), ("L01", "longer", 16000)])
+        self.assertEqual((fixed["status"], [("error" in s, s["step"]) for s in fixed["retry"]["steps"]]),
+                         ("ok", [(False, "longer_output")]))  # the failed attempt is replaced, not kept
+
+    def test_retried_review_reaches_its_copies_the_judge_and_the_table(self):
+        cells = self.cells("L05", ("L06", "L05"), "L07", name="same")  # L06 has the same input as L05
+        references = {"o__r__7": {"project_main_language": "Python", "comments": REFS}}
+        judge_calls = []
+
+        def judge(prompt):
+            judge_calls.append(prompt)
+            return "[3]"
+        judge.identity = {"kind": "fixed"}
+        before = ScriptedReviewer({("L05", "first"): CUT, ("L07", "first"): GOOD})
+        old = run_reviews(cells, before, "RUBRIC", self.out)
+        old_judgments = run_judgments(old, references, judge, self.out)
+        self.assertEqual(len(judge_calls), 1)  # only L07 has a finding to judge
+
+        after = ScriptedReviewer({("L05", "longer"): GOOD})
+        new = run_reviews(cells, after, "RUBRIC", self.out, retry=POLICY)
+        self.assertEqual(after.calls, [("L05", "longer", 16000)])  # once for the two identical levels
+        self.assertEqual([(r["status"], r.get("reused_from"), retry_rule.steps_taken(r)) for r in new],
+                         [("ok", None, "longer_output"), ("ok", "L05", "longer_output"), ("ok", None, None)])
+        self.assertEqual(self.saved("L06")["retry"], new[0]["retry"])
+        judgments = run_judgments(new, references, judge, self.out)
+        self.assertEqual(len(judge_calls), 2)  # the retried review is judged afresh, its copy and L07 are not
+        self.assertNotEqual(judgments[0]["key"], old_judgments[0]["key"])  # same review key, another answer
+        self.assertEqual(new[0]["key"], old[0]["key"])
+        self.assertEqual(judgments[2], old_judgments[2])
+        self.assertIsNone(retry_rule.answer_id(new[2]))
+        rows, _ = build_table(new, judgments, references)
+        self.assertEqual([(row["retry"], row["review_status"], row["findings"]) for row in rows],
+                         [("longer_output", "ok", 1), ("longer_output", "ok", 1), (None, "ok", 1)])
+
+    def test_backend_takes_an_output_limit_for_one_call(self):
+        sent = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+                                   "usage": {"prompt_tokens": 7, "completion_tokens": 1}}).encode("utf-8")
+
+        def urlopen(request, timeout=None):
+            sent.append(json.loads(request.data.decode("utf-8")))
+            return Response()
+
+        chat = OpenAIChat("http://localhost:8000/v1", "Qwen/Qwen3.8-27B", max_tokens=4096)
+        identity = dict(chat.identity)
+        with mock.patch("urllib.request.urlopen", urlopen):
+            chat([{"role": "user", "content": "hi"}])
+            chat([{"role": "user", "content": "hi"}], max_tokens=16000)
+        self.assertEqual([body["max_tokens"] for body in sent], [4096, 16000])
+        self.assertEqual(sent[0]["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertEqual((chat.identity, chat.max_tokens), (identity, 4096))  # the cache key does not move
+
+    def test_policy_comes_from_the_notebook_profile(self):
+        import importlib.util
+        import sys
+
+        from src.review_outcomes.profiles import read_notebook_profile
+
+        self.assertEqual(RetryPolicy.from_spec(read_notebook_profile("cloud")["reviewer"]), POLICY)
+        self.assertIsNone(RetryPolicy.from_spec(read_notebook_profile("local-smoke")["reviewer"]))
+        self.assertEqual(POLICY.identity["version"], "retry-v1")
+        self.assertNotEqual(POLICY.identity, RetryPolicy(16000, False, 262144).identity)
+        self.assertIsNone(retry_rule.next_step({"status": "malformed", "truncated": True, "reply": CUT}, None))
+        self.assertIsNone(retry_rule.next_step({"status": "error"}, POLICY))
+        self.assertIsNone(retry_rule.next_step({"status": "malformed", "truncated": False, "reply": PROSE},
+                                               RetryPolicy(longer_max_tokens=16000)))  # no follow-up in this policy
+
+        path = Path(__file__).resolve().parents[1] / "scripts" / "outcome" / "run_reviews.py"
+        spec = importlib.util.spec_from_file_location("run_reviews_for_retry", path)
+        script = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = script
+        spec.loader.exec_module(script)
+        cells = self.cells("L01", "L02")
+        run_reviews(cells, ScriptedReviewer({("L01", "first"): CUT, ("L02", "first"): PROSE}), "RUBRIC", self.out)
+        plan = plan_reviews(cells, ScriptedReviewer({}), "RUBRIC", self.out, retry=POLICY)
+        text = script.describe_plan(plan, POLICY, self.out)
+        self.assertIn("2 cells from 1 PRs, 2 distinct inputs", text)
+        self.assertIn("cut off, to send again with an output limit of up to 16000: 1 (100 input tokens)", text)
+        self.assertIn("finished without the JSON, to get the follow-up message: 1 (100 input tokens)", text)
+        self.assertIn("no retry policy in this profile", script.describe_plan(plan, None, self.out))
 
 
 if __name__ == "__main__":

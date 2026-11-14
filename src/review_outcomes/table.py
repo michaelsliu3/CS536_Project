@@ -4,6 +4,7 @@
 Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/):
   manifest.json                         run settings, prompt and dataset hashes
   reviews/<entry>/<level>.json          prompt hashes, backend identity, raw reply, parsed findings
+                                        (and every reply of a retried cell, under "retry": see retry.py)
   judgments/<entry>/<level>.json        AACR judge records per generated comment, per-reference flags
   table.csv / table.json                one row per (entry, level); table.json is one JSON array
   coverage.csv                          one row per (entry, level, reference): covered or not
@@ -28,9 +29,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from src.review_outcomes import retry as retry_rule
 from src.review_outcomes.judge import score_review
 from src.review_outcomes.parse import PARSER_VERSION, parse_review
 from src.review_outcomes.prompts import JUDGE_PROMPT_VERSION, REVIEW_PROMPT_VERSION, prompt_sha256, review_messages
+from src.review_outcomes.retry import RetryPolicy
 
 
 log = logging.getLogger("review_outcomes")
@@ -100,7 +103,8 @@ class _ReviewProgress:
             findings = len((record.get("parsed") or {}).get("findings", []))
             log.info(f"review {count}/{self.calls} {where}: {status}, {record.get('input_tokens'):,} input tokens "
                      f"(prompt {reply.get('prompt_tokens')}), {reply.get('completion_tokens')} output tokens, "
-                     f"{reply.get('seconds')}s, finish={reply.get('finish_reason')}, {findings} findings")
+                     f"{reply.get('seconds')}s, finish={reply.get('finish_reason')}, {findings} findings"
+                     + (f" (after {retry_rule.steps_taken(record)})" if retry_rule.steps_taken(record) else ""))
             if record.get("truncated"):
                 log.warning(f"{where}: the reply hit the output limit ({reply.get('completion_tokens')} tokens) "
                             f"and was cut off; parsed as {status}")
@@ -171,44 +175,117 @@ def discover_cells(contexts_path: Path, entries=None, levels=None) -> list[Cell]
     return cells
 
 
+class _ReviewFiles:
+    """Where each cell's review is saved, its cache key, and the saved record a run can build on."""
+
+    def __init__(self, reviewer, rubric: str, out_dir: Path, max_input_tokens: int | None, force: bool,
+                 retry: RetryPolicy | None):
+        self.reviewer, self.out_dir, self.max_input_tokens = reviewer, Path(out_dir), max_input_tokens
+        self.force, self.retry, self.prompt_hash = force, retry, prompt_sha256(rubric)
+
+    def key(self, cell: Cell) -> str:
+        # The first call only. The retry policy is not in it, so adding or changing the policy keeps
+        # every cell whose first reply needs no retry; a retried record names its policy itself.
+        return _key({"input": sha256_text(cell.text), "prompt": self.prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
+                     "backend": self.reviewer.identity, "parser": PARSER_VERSION})
+
+    def path(self, cell: Cell) -> Path:
+        return self.out_dir / "reviews" / cell.entry / f"{cell.level}.json"
+
+    def too_long(self, cell: Cell) -> bool:
+        return self.max_input_tokens is not None and (cell.input_tokens or 0) > self.max_input_tokens
+
+    def parser(self, cell: Cell) -> Callable[[str], dict]:
+        return lambda text: parse_review(text, cell.known_paths)
+
+    def load(self, cell: Cell, key: str) -> tuple[dict | None, bool]:
+        """(the saved record to build on, whether it differs from the file), or (None, False).
+
+        Errors are retried; too_long is re-checked against this run's limit (no model call), so
+        raising max_input_tokens later reviews the cells that now fit. Retries made under another
+        retry policy are undone, which leaves the first reply for this run's policy to act on.
+        """
+        saved = read_json(self.path(cell))
+        if self.force or not saved or saved.get("key") != key or saved.get("status") in ("error", "too_long"):
+            return None, False
+        record = retry_rule.align(saved, self.retry, self.parser(cell))
+        return record, record is not saved
+
+
+def _plan(files: _ReviewFiles, cells: list[Cell]) -> tuple[list[str], dict[str, Cell], dict]:
+    """Each cell's key, the first cell of every distinct input, and what a run has to do."""
+    keys = [files.key(cell) for cell in cells]
+    first: dict[str, Cell] = {}
+    for cell, key in zip(cells, keys):
+        first.setdefault(key, cell)
+    send, saved, no_room = [], 0, []
+    due: dict[str, list[Cell]] = {retry_rule.LONGER_OUTPUT: [], retry_rule.FOLLOW_UP: []}
+    first_limit = getattr(files.reviewer, "max_tokens", None)
+    for key, cell in first.items():
+        record, _ = files.load(cell, key)
+        if record is None:
+            if not files.too_long(cell):
+                send.append(cell)
+            continue
+        saved += 1
+        step = retry_rule.next_step(record, files.retry)
+        if step:
+            _, why = retry_rule.step_limit(step, record, files.retry, first_limit)
+            (no_room if why else due[step]).append(cell)
+    tokens = lambda group: sum(cell.input_tokens or 0 for cell in group)  # noqa: E731
+    return keys, first, {
+        "cells": len(cells), "entries": len({c.entry for c in cells}), "distinct": len(first), "saved": saved,
+        "too_long": sum(files.too_long(c) for c in first.values()),
+        "send": {"cells": len(send), "input_tokens": tokens(send)},
+        "retry": {step: {"cells": len(group), "input_tokens": tokens(group)} for step, group in due.items()},
+        "no_room": len(no_room)}
+
+
+def plan_reviews(cells: list[Cell], reviewer, rubric: str, out_dir: Path, max_input_tokens: int | None = None,
+                 force: bool = False, retry: RetryPolicy | None = None) -> dict:
+    """What run_reviews would do with these arguments, without calling the model or writing a file:
+    the cells to send, the saved replies due each retry step (with their input tokens), and the
+    replies due a step that has no room in the model's window."""
+    return _plan(_ReviewFiles(reviewer, rubric, out_dir, max_input_tokens, force, retry), cells)[2]
+
+
 def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubric: str, out_dir: Path,
                 max_input_tokens: int | None = None, concurrency: int = 1, force: bool = False,
-                progress: Callable | None = None) -> list[dict]:
+                progress: Callable | None = None, retry: RetryPolicy | None = None) -> list[dict]:
     """Review each cell once; reuse records whose cache key matches. Cells with the same input
     (a level identical to its parent) are reviewed once and the record is copied to the others
-    with `reused_from`. Returns all records, in cell order."""
-    out_dir, prompt_hash = Path(out_dir), prompt_sha256(rubric)
+    with `reused_from`. With a `retry` policy, a reply that was cut off or finished without the
+    JSON gets the policy's steps (retry.py), whether it arrives in this run or was saved by an
+    earlier one. Returns all records, in cell order."""
+    out_dir = Path(out_dir)
+    files = _ReviewFiles(reviewer, rubric, out_dir, max_input_tokens, force, retry)
 
-    def key_of(cell: Cell) -> str:
-        return _key({"input": sha256_text(cell.text), "prompt": prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
-                     "backend": reviewer.identity, "parser": PARSER_VERSION})
-
-    def path_of(cell: Cell) -> Path:
-        return out_dir / "reviews" / cell.entry / f"{cell.level}.json"
-
-    def reusable(cell: Cell, key: str) -> dict | None:
-        # Errors are retried; too_long is re-checked against this run's limit (no model call),
-        # so raising max_input_tokens later reviews the cells that now fit.
-        saved = read_json(path_of(cell))
-        if not force and saved and saved.get("key") == key and saved.get("status") not in ("error", "too_long"):
-            return saved
-        return None
-
-    def too_long(cell: Cell) -> bool:
-        return max_input_tokens is not None and (cell.input_tokens or 0) > max_input_tokens
+    def report_step(entry: dict, record: dict) -> None:
+        where = f"retry {record['entry']} {record['level']}: {entry['step']}"
+        if "skipped" in entry:
+            log.warning(f"{where} skipped: {entry['skipped']}")
+        elif "error" in entry:
+            log.error(f"{where} FAILED: {entry['error']} (the first reply stays; the next run tries the step again)")
+        else:
+            reply = entry["reply"]
+            log.info(f"{where} with an output limit of {entry['max_tokens']}: {entry['status']}, "
+                     f"{reply.get('completion_tokens')} output tokens, {reply.get('seconds')}s, "
+                     f"finish={reply.get('finish_reason')}, {len(record['parsed']['findings'])} findings")
 
     def one(cell: Cell) -> dict:
-        context, key = cell.text, key_of(cell)
-        saved = reusable(cell, key)
-        if saved:
-            return saved
-        record = {"key": key, "entry": cell.entry, "level": cell.level, "input_sha256": sha256_text(context),
-                  "input_tokens": cell.input_tokens, "prompt_sha256": prompt_hash,
-                  "prompt_version": REVIEW_PROMPT_VERSION, "backend": reviewer.identity, "parser": PARSER_VERSION}
-        if too_long(cell):
-            record.update(status="too_long", error=f"{cell.input_tokens} input tokens > {max_input_tokens}")
-            log.info(f"{cell.entry} {cell.level}: too long, not sent ({record['error']})")
-        else:
+        key = files.key(cell)
+        record, changed = files.load(cell, key)
+        called = False
+        if record is None:
+            context = cell.text
+            record = {"key": key, "entry": cell.entry, "level": cell.level, "input_sha256": sha256_text(context),
+                      "input_tokens": cell.input_tokens, "prompt_sha256": files.prompt_hash,
+                      "prompt_version": REVIEW_PROMPT_VERSION, "backend": reviewer.identity, "parser": PARSER_VERSION}
+            if files.too_long(cell):
+                record.update(status="too_long", error=f"{cell.input_tokens} input tokens > {max_input_tokens}")
+                log.info(f"{cell.entry} {cell.level}: too long, not sent ({record['error']})")
+                write_json(files.path(cell), record)
+                return record
             record["started_at"] = _now()
             log.debug(f"sending {cell.entry} {cell.level} ({cell.input_tokens} input tokens)")
             try:
@@ -219,21 +296,35 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
             except Exception as error:  # noqa: BLE001 - recorded; retried on the next run
                 record.update(status="error", error=f"{type(error).__name__}: {error}"[:2000])
             record["finished_at"] = _now()
+            called = changed = True
+        step = retry_rule.next_step(record, retry)
+        if step:
+            sends = retry_rule.step_limit(step, record, retry, getattr(reviewer, "max_tokens", None))[1] is None
+            if called and sends:  # the first reply arrived in this run: say why another call follows
+                log.info(f"{cell.entry} {cell.level}: the first reply "
+                         + ("was cut off at the output limit" if record.get("truncated") else "finished without the JSON")
+                         + f" ({record['reply'].get('completion_tokens')} output tokens); retrying")
+            record = retry_rule.run_steps(record, review_messages(cell.text, rubric), reviewer, retry,
+                                          files.parser(cell), report_step)
+            called, changed = called or sends, True
+        if called:
             tracker.record(record)
-        write_json(path_of(cell), record)
+        if changed:
+            write_json(files.path(cell), record)
         return record
 
-    keys = [key_of(cell) for cell in cells]
-    first: dict[str, Cell] = {}
-    for cell, key in zip(cells, keys):
-        first.setdefault(key, cell)
-    saved_already = sum(1 for key, cell in first.items() if reusable(cell, key))
-    to_send = [cell for key, cell in first.items() if not too_long(cell) and not reusable(cell, key)]
-    tracker = _ReviewProgress(len(to_send), sum(cell.input_tokens or 0 for cell in to_send))
-    log.info(f"review stage: {len(cells)} cells from {len({c.entry for c in cells})} entries, {len(first)} distinct inputs; "
-             f"{saved_already} already saved, {sum(too_long(c) for c in first.values())} over the limit of "
-             f"{max_input_tokens} input tokens, {len(to_send)} to send ({tracker.tokens:,} input tokens) with "
-             f"concurrency {max(1, concurrency)}; reviewer {reviewer.identity}; output {out_dir}")
+    keys, first, plan = _plan(files, cells)
+    due = plan["retry"]
+    tracker = _ReviewProgress(plan["send"]["cells"] + sum(group["cells"] for group in due.values()),
+                              plan["send"]["input_tokens"] + sum(group["input_tokens"] for group in due.values()))
+    retry_note = "" if retry is None else (
+        f"; {sum(group['cells'] for group in due.values())} saved replies to retry "
+        f"({due[retry_rule.LONGER_OUTPUT]['cells']} cut off, {due[retry_rule.FOLLOW_UP]['cells']} finished without the "
+        f"JSON; {plan['no_room']} more have no room in the window); retry policy {retry.identity}")
+    log.info(f"review stage: {len(cells)} cells from {plan['entries']} entries, {len(first)} distinct inputs; "
+             f"{plan['saved']} already saved, {plan['too_long']} over the limit of "
+             f"{max_input_tokens} input tokens, {plan['send']['cells']} to send ({plan['send']['input_tokens']:,} input "
+             f"tokens) with concurrency {max(1, concurrency)}{retry_note}; reviewer {reviewer.identity}; output {out_dir}")
     done = {}
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         for key, record in zip(first, pool.map(one, first.values())):
@@ -257,7 +348,23 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
     log.info(f"review stage finished: {len(results)} cells, statuses {dict(sorted(statuses.items()))}, "
              f"{tracker.done} model calls in {_duration(time.monotonic() - tracker.started)}"
              + (f"; {statuses['error']} failed and will be retried by the next run" if statuses.get("error") else ""))
+    if retry is not None:
+        log.info(_retry_summary(list(done.values())))
     return results
+
+
+def _retry_summary(records: list[dict]) -> str:
+    """One line on where the retry rule stands for these distinct replies."""
+    retried = [r for r in records if r.get("retry")]
+    steps = [step for r in retried for step in r["retry"]["steps"]]
+    count = lambda name, field: sum(1 for s in steps if s["step"] == name and field in s)  # noqa: E731
+    answered = sum(1 for r in retried if retry_rule.steps_taken(r))
+    return (f"retry rule: {len(retried)} of {len(records)} distinct replies took a retry step, {answered} got a new "
+            f"reply; of those {len(retried)}, {sum(r['status'] == 'ok' for r in retried)} now have an answer and "
+            f"{sum(r['status'] != 'ok' for r in retried)} do not ({sum(bool(r.get('truncated')) for r in retried)} "
+            f"still cut off). Steps: {count(retry_rule.LONGER_OUTPUT, 'reply')} longer output, "
+            f"{count(retry_rule.FOLLOW_UP, 'reply')} follow-up, "
+            f"{sum(1 for s in steps if 'skipped' in s)} skipped for lack of room, {sum(1 for s in steps if 'error' in s)} failed")
 
 
 def references_by_entry(dataset_path: Path) -> dict[str, dict]:
@@ -283,7 +390,9 @@ def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Calla
         if review.get("status") not in ("ok", "malformed", "empty_output"):
             continue
         comments = references[review["entry"]]["comments"]
-        key = _key({"review": review["key"], "references": _key(comments),
+        # A retried review's key covers its first call only, so its answer in force is named too.
+        answer = retry_rule.answer_id(review)
+        key = _key({"review": review["key"], **({"answer": answer} if answer else {}), "references": _key(comments),
                     "judge": getattr(judge, "identity", repr(judge)), "judge_prompt": JUDGE_PROMPT_VERSION})
         path = out_dir / "judgments" / review["entry"] / f"{review['level']}.json"
         if key in judged:
@@ -340,7 +449,8 @@ def build_table(reviews: list[dict], judgments: list[dict], references: dict[str
         reply, parsed = review.get("reply") or {}, review.get("parsed") or {}
         row = {"entry": review["entry"], "level": review["level"], "language": record.get("project_main_language"),
                "input_tokens": review.get("input_tokens"), "review_status": review.get("status"),
-               "truncated": review.get("truncated"), "findings": len(parsed.get("findings", [])),
+               "truncated": review.get("truncated"), "retry": retry_rule.steps_taken(review),
+               "findings": len(parsed.get("findings", [])),
                "invalid_findings": parsed.get("invalid_findings"), "output_tokens": reply.get("completion_tokens"),
                "review_seconds": reply.get("seconds"), "reused_from": review.get("reused_from")}
         if judgment:

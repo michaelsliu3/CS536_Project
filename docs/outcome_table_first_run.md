@@ -1,6 +1,6 @@
 # Outcome table, first reviewer run (November 14, 2026)
 
-**Status: the review stage is complete for all 185 PRs and 10 context levels. The judge stage has not run, so no score and no table exists yet. 13.7% of the cells hold a reply the parser could not read, and the smallest level is affected most. A retry rule for those cells was decided on November 14 (Section 7); it has not been run.**
+**Status: the review stage is complete for all 185 PRs and 10 context levels. The judge stage has not run, so no score and no table exists yet. 13.7% of the cells hold a reply the parser could not read, and the smallest level is affected most. A retry rule for those cells was decided and implemented on November 14 (Section 7); it has not been run.**
 
 This document records what the first full run of the frozen reviewer produced, what went wrong in it and why, and what is still open. Every number below was computed from the saved review files and the run log.
 
@@ -143,11 +143,28 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 
 ## 7. Decision: a retry rule for replies without an answer
 
-**Decided November 14, 2026. Not yet implemented or run.** The rule becomes part of the reviewer's definition:
+**Decided and implemented November 14, 2026 (`src/review_outcomes/retry.py`). Not yet run on the server.** The rule is part of the reviewer's definition:
 
-1. **A reply that is cut off at the output limit is sent again with a larger limit** (16,000 tokens instead of 4,096). This covers the 181 cut-off replies, including the 10 whose draft parsed.
-2. **A reply that finished without the JSON gets one follow-up message** in the same conversation, saying that no command can be run and that the JSON is due now. This covers the 54 replies that finished without it.
+1. **A reply that is cut off at the output limit is sent again with a larger limit** (16,000 tokens instead of 4,096). This applies to the 181 cut-off replies, including the 10 whose draft parsed.
+2. **A reply that finished without the JSON gets one follow-up message** in the same conversation, saying that no command can be run and that the JSON is due now. This applies to the 54 replies that finished without it.
 3. **A reply that still has no JSON after that counts as a review with no findings,** as now.
+
+**How the steps combine:**
+
+- **Each step runs at most once per cell,** the longer limit first. If the longer reply finishes without the JSON, the follow-up continues from it.
+- **The last reply decides the cell.** Every reply is kept in the cell's file.
+- **A step needs room in the window.** The window holds the prompt and the reply together. A step that would gain fewer than 1,024 tokens of room is skipped and recorded.
+
+**What a run would do with the saved reviews** (`scripts/outcome/run_reviews.py --dry-run`, and a rehearsal on a copy of the files with a stand-in reviewer):
+
+| | Replies | Input tokens |
+|---|---|---|
+| Sent again with a longer limit (176 with 16,000 tokens, 1 with 12,851) | 177 | 6.25 million |
+| Given the follow-up message | 53 | 0.40 million |
+| Skipped, no room in the window | 5 | none |
+| Left alone (finished with their JSON) | 1,334 | none |
+
+The five skipped replies are all at `L10_all`, with prompts of about 257,700 tokens: four were cut off (`FreeCAD__FreeCAD__21257`, `elastic__elasticsearch__133365`, `facebook__react__33059`, `valkey-io__valkey__1485`) and one finished without the JSON (`elastic__elasticsearch__118183`). They stay without an answer.
 
 **Why this rule and not a new run with other settings:**
 
@@ -157,11 +174,11 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 
 **Known limits of the rule:**
 
-- **Inputs near the cap have no room.** Five cut-off replies have more than 240,000 input tokens, and one reply that finished without JSON has 255,998. The window leaves them little or no space for a longer reply or a follow-up.
+- **Inputs near the cap have no room.** These are the five skipped replies above.
 - **A retried reply is a new generation.** It may reason differently from the first attempt.
-- **Neither step has been tried.** How many cells the rule recovers is unknown until it runs.
+- **Neither step has been tried on the model.** The code is tested with stand-in replies only. How many cells the rule recovers is unknown until it runs.
 
-The cost is small: the cut-off replies total about 7.3 million input tokens and the others about 0.7 million, against 59.5 million for the full run.
+The cost is small: about 6.7 million input tokens, against 59.5 million for the full run.
 
 ## 8. Still open
 

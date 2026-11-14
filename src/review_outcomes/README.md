@@ -14,6 +14,12 @@ Selector training and evaluation then only look up rows. Driver:
 
 - **Reviewer prompt:** OpenAI Codex's `/review` rubric, verbatim, as the system message. The user message is a one-sentence request plus the level's `context.md` (see [`configs/review_prompts/`](../../configs/review_prompts/README.md)). The rubric asks for JSON findings with a title, body, priority, confidence, and path plus line range. Each finding becomes one generated comment (`note` = title + body).
 - **Parsing:** bare, fenced, or prose-wrapped JSON is accepted. Anything else is `malformed`, scored as an empty review, and reported. A reply cut off at the output limit is marked `truncated`. Paths are made repository-relative using the files named in the trace, never the reference comments.
+- **Retry rule** (`retry.py`; on when the profile's reviewer has a `retry` entry, as `cloud` does): a cell is one reviewer call, with two exceptions.
+  - **Cut off:** a reply cut off at the output limit is sent again with a larger limit (16,000 tokens for `cloud`).
+  - **No JSON:** a reply that finished without the JSON gets one follow-up message in the same conversation, asking for it.
+  - **Order and end:** each step runs at most once per cell, the longer limit first. The last reply decides the cell, so one that still has no JSON is an empty review.
+  - **Room:** the model's window holds the prompt and the reply together. A step that would gain fewer than 1,024 tokens of room is skipped and recorded.
+  - **Saved cells:** the rule also acts on replies an earlier run saved. A reply that finished with its JSON never triggers it, so that cell's file and cache key do not change. A retried cell keeps every reply under `retry` in its file, and `table.csv` names the steps in its `retry` column.
 - **Judge:** a port of AACR's `evaluation/judge.py` with the same file grouping, prompt (checked byte-identical), answer parsing, and no credit for repeats. AACR counts a failed judge call as no match; here it is recorded and retried on the next run.
 - **Backends:**
   - `OpenAIChat` (any OpenAI-compatible server, such as `vllm serve`) for Qwen3.8-27B on the cloud GPU;
@@ -21,11 +27,12 @@ Selector training and evaluation then only look up rows. Driver:
   - `KeywordOverlapJudge`, a stand-in for pipeline tests only.
 
   All decode greedily.
-- **Resuming:** each review and judgment carries a cache key over everything that changes its output: the input hash, prompt hash and version, model and settings, parser, references and judge. Re-running reuses matches, redoes changes, and retries errors. Cells skipped as too long are re-checked against the current `max_input_tokens`, so raising it reviews the cells that now fit. The server address is not part of the key, so moving the server keeps the saved cells; the manifest records it.
+- **Resuming:** each review and judgment carries a cache key over everything that changes its output: the input hash, prompt hash and version, model and settings, parser, references and judge. Re-running reuses matches, redoes changes, and retries errors. The retry policy is not in a review's key: a retried record names its policy, and changing the policy redoes that cell's retry steps from its saved first reply. Cells skipped as too long are re-checked against the current `max_input_tokens`, so raising it reviews the cells that now fit. The server address is not part of the key, so moving the server keeps the saved cells; the manifest records it.
 - **Identical levels are reviewed once:** a level whose input is identical to another's (the dataset marks `same_as_parent`) gets a copy of that review and its judgment, with `reused_from`, instead of another reviewer and judge call. Greedy decoding would give the same review anyway.
 
 **Status:**
-- **Run so far:** only pipeline tests with `Qwen/Qwen3.5-0.8B`:
+- **First reviewer run (November 14, 2026):** Qwen3.8-27B reviewed all 1,850 cells; 254 hold a reply without a readable answer. Results, causes and the retry decision are in [`docs/outcome_table_first_run.md`](../../docs/outcome_table_first_run.md). The retry rule has not been run on them yet, and no judge has run.
+- **Pipeline tests** with `Qwen/Qwen3.5-0.8B`:
   - smoke tests on vllm#17425 `L01`–`L02`, then on cline#5177 `L01`–`L02` read from the dataset file;
   - the committed 2-PR sample, with the notebook's `sample-local` profile (0.8B reviewer and judge, levels up to 100k tokens). Its output is in `data/aacr_sample/outcomes/` (a demonstration of the layout, not results).
 - **Open:** the judge model is undecided (roadmap Section 8.5.3).
