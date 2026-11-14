@@ -1,6 +1,6 @@
 # Outcome table, first reviewer run (November 14, 2026)
 
-**Status: the review stage is complete for all 185 PRs and 10 context levels. The judge stage has not run, so no score and no table exists yet. 13.7% of the cells hold a reply the parser could not read, and the smallest level is affected most. A retry rule for those cells was decided and implemented on November 14 (Section 7); it has not been run.**
+**Status: the review stage is complete for all 185 PRs and 10 context levels. The first pass left 13.7% of the cells with a reply the parser could not read; a retry rule decided, implemented and run on November 14 brought that to 1.7% (Sections 7 and 8). The judge model is chosen but the judge stage has not run, so no score and no table exists yet.**
 
 This document records what the first full run of the frozen reviewer produced, what went wrong in it and why, and what is still open. Every number below was computed from the saved review files and the run log.
 
@@ -139,11 +139,11 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 
 - **Judge stage:** not run. The judge model was decided on November 14: `Qwen/Qwen3.8-27B`, the reviewer's model on the same server, with `scripts/outcome/run_judgments.py` to run it. It has not been checked against a second judge or a human audit.
 - **Table:** not built; it is assembled from the judgments.
-- **Malformed cells:** nothing has been re-run or repaired.
+- **Malformed cells:** repaired by the retry rule except for 31 (Section 8).
 
 ## 7. Decision: a retry rule for replies without an answer
 
-**Decided and implemented November 14, 2026 (`src/review_outcomes/retry.py`). Not yet run on the server.** The rule is part of the reviewer's definition:
+**Decided, implemented (`src/review_outcomes/retry.py`) and run on November 14, 2026; Section 8 has the result.** The rule is part of the reviewer's definition:
 
 1. **A reply that is cut off at the output limit is sent again with a larger limit** (16,000 tokens instead of 4,096). This applies to the 181 cut-off replies, including the 10 whose draft parsed.
 2. **A reply that finished without the JSON gets one follow-up message** in the same conversation, saying that no command can be run and that the JSON is due now. This applies to the 54 replies that finished without it.
@@ -155,7 +155,7 @@ The mean number of findings per usable cell says nothing yet about quality. Only
 - **The last reply decides the cell.** Every reply is kept in the cell's file.
 - **A step needs room in the window.** The window holds the prompt and the reply together. A step that would gain fewer than 1,024 tokens of room is skipped and recorded.
 
-**What a run would do with the saved reviews** (`scripts/outcome/run_reviews.py --dry-run`, and a rehearsal on a copy of the files with a stand-in reviewer):
+**What the rule had to do with the saved reviews** (`scripts/outcome/run_reviews.py --dry-run` before the run):
 
 | | Replies | Input tokens |
 |---|---|---|
@@ -176,17 +176,55 @@ The five skipped replies are all at `L10_all`, with prompts of about 257,700 tok
 
 - **Inputs near the cap have no room.** These are the five skipped replies above.
 - **A retried reply is a new generation.** It may reason differently from the first attempt.
-- **Neither step has been tried on the model.** The code is tested with stand-in replies only. How many cells the rule recovers is unknown until it runs.
+- **A follow-up can act as a second review.** See Section 8.
 
-The cost is small: about 6.7 million input tokens, against 59.5 million for the full run.
+## 8. Result of the retry run
 
-## 8. Still open
+The rule ran on the same server and model in two parts: a trial on 28 replies from 9 PRs (19m53s), then the other 202 (2h23m). No call failed. A dry run afterwards shows nothing left to retry.
+
+| Cell status | Before | After |
+|---|---|---|
+| Usable review (`ok`) | 1,586 (85.7%) | 1,809 (97.8%) |
+| Malformed | 254 (13.7%) | 31 (1.7%) |
+| Too long to send | 10 | 10 |
+
+**By kind of first reply** (distinct replies):
+
+| First reply | Retried | Now with an answer | Still without |
+|---|---|---|---|
+| Cut off at 4,096 tokens | 181 | 164 | 17 |
+| Finished without the JSON, prose | 38 | 37 | 1 |
+| Finished without the JSON, tool call | 16 | 4 | 12 |
+
+The steps taken were 177 longer-limit calls and 75 follow-ups: 53 on a first reply, and 22 on a longer reply that again finished without the JSON.
+
+**The 30 replies still without an answer** (31 cells):
+
+- **12 were cut off again** after using all 16,000 tokens.
+- **13 answered with a tool call:** 12 that began as tool calls and repeated one after the follow-up, and 1 that began as a cut-off.
+- **5 were skipped** for lack of room in the window (Section 7).
+
+**Per level, malformed cells after the retry:**
+
+| `L01_min` | `L02` | `L03` | `L04` | `L05` | `L06` | `L07` | `L08` | `L09` | `L10_all` |
+|---|---|---|---|---|---|---|---|---|---|
+| 15 | 2 | 1 | 0 | 2 | 0 | 0 | 2 | 3 | 6 |
+
+`L01_min` went from 60 to 15, so the bias of Section 4 is much smaller but not gone. Its remaining cells are mostly the tool calls, which occur almost only at that level. The 6 at `L10_all` include the 5 skipped replies.
+
+**Observations:**
+
+- **The longer limit was needed.** In the trial, seven of the recovered replies were longer than the old 4,096-token limit, the longest about 11,500 tokens.
+- **The follow-up does not stop tool calls.** Told that no command can be run, the model asked to read a file instead.
+- **The follow-up can change a verdict.** Six first replies said only that the patch was correct. After the follow-up, three of them returned findings. For such a reply the follow-up is a second review, not a reformatting of the first.
+
+## 9. Still open
 
 1. **How well the judge agrees** with a second judge from another model family and with a human check.
-2. **Whether the retry rule recovers enough cells,** and what to do with those it does not.
+2. **What to do with the 31 cells still without an answer.** They count as reviews with no findings, and 15 of them are at `L01_min`.
 3. **Whether the parser should read the last JSON object in a reply instead of the first** (Section 5).
 
-## 9. Where the files are
+## 10. Where the files are
 
 All of it is git-ignored and exists on the laptop and on the cloud server.
 
@@ -195,6 +233,7 @@ All of it is git-ignored and exists on the laptop and on the cloud server.
 | `reviews/<PR>/<level>.json` | one file per cell: status, raw reply, parsed findings, token counts, timings (1,850 files) |
 | `logs/reviews_20261114-181507.log` | the full run's log: one line per call, a progress line every five minutes |
 | `logs/reviews_20261114-175742.log` | the three-PR timing run |
+| `logs/reviews_20261115-005717.log`, `logs/reviews_20261115-011901.log` | the retry trial and the retry run |
 | `manifest.json` | the settings, prompt and input hashes of the run |
 
 The folder is 18 MB. The times in the log are the server's clock (China Standard Time).

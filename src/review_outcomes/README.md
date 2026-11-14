@@ -31,7 +31,7 @@ Selector training and evaluation then only look up rows. Driver:
 - **Identical levels are reviewed once:** a level whose input is identical to another's (the dataset marks `same_as_parent`) gets a copy of that review and its judgment, with `reused_from`, instead of another reviewer and judge call. Greedy decoding would give the same review anyway.
 
 **Status:**
-- **First reviewer run (November 14, 2026):** Qwen3.8-27B reviewed all 1,850 cells; 254 hold a reply without a readable answer. Results, causes and the retry decision are in [`docs/outcome_table_first_run.md`](../../docs/outcome_table_first_run.md). The retry rule has not been run on them yet, and no judge has run.
+- **First reviewer run (November 14, 2026):** Qwen3.8-27B reviewed all 1,850 cells; 254 held a reply without a readable answer, and the retry rule brought that to 31. Results and causes are in [`docs/outcome_table_first_run.md`](../../docs/outcome_table_first_run.md). No judge has run.
 - **Pipeline tests** with `Qwen/Qwen3.5-0.8B`:
   - smoke tests on vllm#17425 `L01`–`L02`, then on cline#5177 `L01`–`L02` read from the dataset file;
   - the committed 2-PR sample, with the notebook's `sample-local` profile (0.8B reviewer and judge, levels up to 100k tokens). Its output is in `data/aacr_sample/outcomes/` (a demonstration of the layout, not results).
