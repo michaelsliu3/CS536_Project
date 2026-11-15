@@ -1,6 +1,6 @@
 # Per-hunk review test (branch `per-hunk-review`, started November 15, 2026)
 
-**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that (Section 13) and the five PRs were reviewed again on November 16 (Section 14): the fall is gone, every level now reaches 42 to 58% recall at 13 to 17% precision, and the levels cannot be told apart at this size, because the same input run twice differs by about as much as the levels do. Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
+**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that (Section 13) and the five PRs were reviewed again later that day (Section 14): the fall is gone, every level now reaches 42 to 58% recall at 13 to 17% precision, and the levels cannot be told apart at this size, because the same input run twice differs by about as much as the levels do. With the reviewer's thinking on, two levels covered 24 and 27 of 38 references at 10 to 12% precision, for about ten times the output and 8.5 times the review time (Section 15). Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
 
 This document records why the test exists, what was decided and when, what was built, what was checked, and what is still open.
 
@@ -30,7 +30,8 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 | November 15, later | Decided that the per-hunk test keeps a data folder of its own, `data/aacr_hunk/`, and the original context levels stay as they are. A guard was added so a per-hunk build can never write into the per-PR file. 209 tests pass, 23 of them new. |
 | November 15, later | The branch was pushed. The five-PR build was reviewed and judged on the cloud server (Section 12). |
 | November 15, later | After that test: the other hunks were taken out of the chain, context blocks name the lines the PR changes in them, a summary level was added at the end, and only findings that quote the hunk under review count (Section 13). The five PRs were rebuilt. |
-| November 16 | Second test: the five PRs reviewed and judged again with the changed levels and counting rule (Section 14). |
+| November 15, later | Second test: the five PRs reviewed and judged again with the changed levels and counting rule (Section 14). The cloud server's clock is 13 hours ahead and showed November 16. |
+| November 15, later | Two levels run again with the reviewer's thinking on (Section 15). A look at why the levels do not differ and at what recall and precision measure (Section 16). Pull request 7 opened for this branch. |
 | Not yet | A review run, a judge run, and the comparison with the per-PR table. |
 
 ## 3. What one review covers
@@ -435,7 +436,7 @@ What to look at in the results:
 2. How many findings are set aside as not on the hunk, per level.
 3. Whether `H11_pr_summary` covers references that `H10_all` misses, and whether the list brings the off-hunk findings back.
 
-## 14. Second test on the five PRs (November 16, 2026)
+## 14. Second test on the five PRs (November 15, 2026)
 
 **What was run.** The same five PRs, 78 hunks and 38 reference comments as the first test, with the levels and the counting rule of Section 13. Reviewer, judge, prompt and settings are unchanged. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2/` on the laptop and on the server.
 
@@ -505,4 +506,88 @@ Two patterns are worth checking on more data, and neither is a finding yet:
 - **Settled:** one hunk per call with the paper's prompt gives recall of 42 to 58% on these PRs at every level, against 5 to 16% per PR. Showing the other hunks as a diff was the cause of the first test's fall, and the changes of Section 13 remove it.
 - **Not settled:** whether any context level is better than another for a hunk. Five PRs and one run per cell cannot show it. That needs more PRs, and a measure of the run-to-run noise (the same cells run two or three times) to know how large a difference must be.
 - **Unchanged limits:** the judge is the reviewer's own model and is not validated; the references are the v1 set; the prompt and the hunk-by-hunk calling were changed together.
+
+## 15. Thinking on, two levels (November 15, 2026)
+
+**What was run.** The second test's five PRs at `H01_min` and `H03_file` only, with the reviewer's thinking on (profile `cloud-hunk-think`, run with `--levels H01_min H03_file`). The output limit was raised from 4,096 to 16,000 tokens so that thinking does not cut replies off. Inputs, prompt, counting rule and judge (thinking off) are those of the second test. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b-think_aacr-hunk_v2/`.
+
+Two levels were run, not eleven, to keep the test short: 156 cells and 154 calls.
+
+### 15.1 Results
+
+"Off" columns are the two thinking-off runs of the same level: the second test, then the first test.
+
+| Measure | `H01_min`, thinking on | `H01_min`, off | `H03_file`, thinking on | `H03_file`, off |
+|---|---|---|---|---|
+| References covered, of 38 | 24 (63.2%) | 21, 18 | 27 (71.1%) | 22, 24 |
+| Precision | 10.4% | 16.7%, 13.6% | 11.8% | 17.4%, 17.5% |
+| Findings counted | 201 | 114, 110 | 195 | 115, 120 |
+| Findings set aside (not on the hunk) | 6 | 2 | 98 | 18 |
+| Hunks with no finding | 8 | 0, 0 | 8 | 2, 1 |
+| Most findings on one hunk | 12 | 5, 5 | 10 | 6, 6 |
+| Output tokens | 273,633 | 30,884 | 444,738 | 37,657 |
+
+- **Recall is higher at both levels,** by 3 to 6 references over the thinking-off runs. That is at the edge of the run-to-run difference of about three (Section 14.3), but it goes the same way at both levels and exceeds both earlier runs each time.
+- **The reviewer writes almost twice as many findings,** and precision falls from 14 to 17% to 10 to 12%. More findings give more chances to match, so part of the recall gain may come from volume alone.
+- **Findings spread out.** Eight hunks get no finding, where thinking-off runs almost always wrote one, and some hunks get up to 12.
+- **With file context, 98 findings were set aside** as not about the hunk under review, against 18 with thinking off. The thinking reviewer comments much more on the surrounding code. The counting rule keeps these out of the score.
+- **References covered with thinking on that neither thinking-off run covered:** 7 at `H01_min` and 4 at `H03_file`. The other way round: 5 and 2.
+- **By context label at `H03_file`:** Diff Level 13 of 21, File Level 10 of 13, Repo Level 4 of 4.
+
+### 15.2 Cost
+
+Measured from the saved call times of the two levels, 78 calls each, eight calls in parallel.
+
+| Level | Thinking off | Thinking on | Slower by |
+|---|---|---|---|
+| `H01_min` | 20 s per call, 3.2 min in all | 146 s per call, 23.8 min in all | 7 times |
+| `H03_file` | 25 s per call, 4.1 min in all | 238 s per call, 38.6 min in all | 9 times |
+| Both | 7.3 min | 62.4 min | 8.5 times |
+
+- **The run's own log says 1 h 08 min** for the thinking-on review, which includes two retried replies and the start.
+- **The cause is output, not input.** The server writes about 175 tokens per second over the eight parallel calls with or without thinking. With thinking on a call writes about 4,600 tokens (its reasoning, then the review) against about 440.
+- **Two replies were cut off** at the 16,000-token limit and completed by the retry step. None was cut off with thinking off.
+- **Memory use is unchanged.**
+
+Scaled up, assuming the same slowdown holds at the wider levels (measured at two levels only):
+
+| Run | Thinking off | Thinking on (estimate) |
+|---|---|---|
+| Five PRs, all eleven levels | 36 min (measured) | about 5 hours |
+| Whole benchmark, all levels | about a day (estimate) | a week or more |
+
+### 15.3 Reading
+
+Thinking raises recall on this sample and lowers precision, and it costs about 8.5 times the review time. Whether the recall gain is more than extra volume cannot be said from one run of two levels on five PRs. It is not adopted. If it is tested further, the comparison that matters is recall at equal numbers of findings, or the severity-weighted score proposed on the branch `review-score`.
+
+## 16. Why the levels do not differ, and what the measures miss (November 15, 2026)
+
+Checks made on the second test's saved results, with no new model calls.
+
+### 16.1 Why recall does not rise with the level
+
+1. **Run-to-run noise is as large as the level differences.** Two runs of identical `H01_min` inputs disagree on 5 of the 38 references. Neighbouring levels disagree on 1 to 7.
+2. **Most references need no context to be found.** By AACR's context label, `H01_min` covers 12 of the 21 Diff Level references, 5 of the 13 File Level ones and all 4 Repo Level ones. Of the 11 references covered at no level, 7 are Diff Level.
+3. **The reviewer writes a fixed number of findings, so context replaces findings.** It writes 106 to 117 counted findings at every level, about 1.5 per hunk. The share of findings that name code which only the context shows is 0% at `H01_min`, 17% at `H02_function`, 41% at `H03_file` and 61% at `H10_all`. (A word match: names written in code style in the finding, present in the level's context and absent from the hunk and the PR text. It shows the context is used, not that the remark is right.) A finding about the hunk is exchanged for one about the wider code, and the references mostly describe problems visible in the hunk.
+4. **References are dense where they exist.** The 38 references sit on 17 of the 78 hunks; two hunks hold 7 each. Those 17 hunks get 32 to 41 findings in total, so recall is capped: at most 28 to 34 references could be covered even if every finding matched a different one.
+
+Context does help in single cases. Two references, both written by people and labelled File Level, are missed at `H01_min` and covered from `H02_function` on in both tests.
+
+By pattern over the ten nested levels: 11 references are covered at every level, 11 at none, 3 are gained at some level and kept, 5 are lost at some level and stay lost, and 8 go back and forth. Neighbouring levels often have identical inputs and share one reply, so a pattern that holds over several levels is weaker evidence than it looks.
+
+### 16.2 What recall and precision do not measure
+
+- **Recall** is agreement with a list, decided by an unvalidated judge. Of six matches read at `H03_file`, five were clearly the same problem and one was loose.
+- **Precision** counts every unmatched finding as wrong. Of nine unmatched findings read at `H01_min`, four were plausible real points (two of them substantive), three were speculative requests to check something that the hunk cannot answer, and two complained that the rest of the PR was not shown. This is one reader's judgement of a small sample.
+- **61 of the 78 hunks hold no reference,** so every finding on them (about 75 per level) counts against precision by construction.
+- **A rough word count** suggests context reduces one kind of noise: findings that say the shown code is incomplete fall from 17% at `H01_min` to 12% at `H10_all` and 4% at `H11_pr_summary`.
+
+So 13 to 17% precision is a lower bound on how many findings are right, not a measurement of it.
+
+### 16.3 What follows
+
+- **Repeat cells** and use the rate over runs, not one run, wherever levels are compared or a selector is trained.
+- **More PRs,** so that groups such as File Level references are large enough to compare.
+- **A measure that can show what context does:** rate each finding as valid, speculative or wrong, and weight references by severity. The design is on the branch `review-score` (`docs/review_score_design.md` there).
+- **The five PRs were picked by hand** when the code was first checked, for a spread of languages. They are not a random sample, and one of them holds 23 of the 38 references. The 30-PR set is to be drawn at random with a fixed seed, with these five added and marked.
 
