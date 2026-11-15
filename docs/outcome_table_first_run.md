@@ -1,6 +1,6 @@
 # Outcome table, first reviewer run and first table (November 14, 2026)
 
-**Status: the outcome table exists. Qwen3.8-27B reviewed all 185 PRs at 10 context levels, a retry rule repaired most replies that had no answer (Sections 7 and 8), 41 cells are left out (Section 9), and the same model judged every review (Section 10). The first result is that recall is about 6 to 7% at every level, so the levels barely differ in aggregate. The judge has not been checked against a second judge or a human audit, so every score here is provisional.**
+**Status: the outcome table exists. Qwen3.8-27B reviewed all 185 PRs at 10 context levels, a retry rule repaired most replies that had no answer (Sections 7 and 8), 41 cells are left out (Section 9), and the same model judged every review (Section 10). The first result is that recall is about 6 to 7% at every level, so the levels barely differ in aggregate. The judge has not been checked against a second judge or a human audit, so every score here is provisional. Three checks made afterwards on the same day are in Section 11: the reviewer comments on few files, the AACR-Bench paper prints the prompt it used for plain LLMs, and AACR-Bench now has a smaller v2 reference set. No decision has been taken on any of them.**
 
 This document records what the first full run of the frozen reviewer produced, what went wrong in it and why, and what is still open. Every number below was computed from the saved review files and the run log.
 
@@ -409,14 +409,177 @@ The rows above cover different PRs per level. On the 158 PRs where all ten level
 - **`L01_min` is slightly flattered** by the 15 PRs left out of it (Section 9.5). On the 158 PRs with every level usable it still has the highest recall.
 - **The first JSON object is read** when a reply contains more than one (Section 5).
 
-## 11. Still open
+## 11. Checks made after the first table (November 14)
+
+Three read-only checks were made on November 14, after the table existed, to see how the reviewer's prompt could change. None used the GPU and none changed the pipeline. No decision has been taken on any of them.
+
+The counts in this section came from one-off scripts that are not in the repository. Each subsection says what was counted, so it can be redone.
+
+### 11.1 The reviewer comments on few files
+
+Counted over the 1,809 usable reviews and their saved judgments.
+
+**Findings per review:**
+
+| Findings in the review | Reviews | Share |
+|---|---|---|
+| None | 765 | 42.3% |
+| One | 747 | 41.3% |
+| Two | 164 | 9.1% |
+| Three or more | 133 | 7.4% |
+
+**Files reached.** The judge compares a generated comment only with the reference comments on the same file. A reference can therefore be covered only if the reviewer wrote a finding in its file. A finding's file and a reference's file were compared as exact paths.
+
+| | Count | Share |
+|---|---|---|
+| Files that hold reference comments, counted once per usable cell | 6,088 | |
+| Of those, files where the reviewer wrote a finding | 1,144 | 18.8% |
+| Reference slots in a file with a finding | 3,909 of 13,883 | 28.2% |
+| Reference slots covered | 879 | 22.5% of those in a file with a finding, 6.3% of all |
+
+- **72% of the reference slots are in a file where the reviewer wrote nothing,** so they cannot be covered whatever the findings say.
+- **The share reached falls with more context:** 32.7% of reference slots at `L01_min`, 27.0% at `L10_all`, and 24.9% at `L08_depth2`, the lowest.
+
+**Priority and confidence of the findings.** A finding counts here when the judge matched it to at least one reference. That is 847 of the 1,567 findings. Section 10.2 reports 820 because AACR's precision counts a finding only when it covers a reference that no earlier finding of the same review covered.
+
+| Priority the reviewer gave | Findings | Matched a reference |
+|---|---|---|
+| P0 | 89 | 59.6% |
+| P1 | 770 | 56.5% |
+| P2 | 639 | 50.4% |
+| P3 | 69 | 53.6% |
+
+| Confidence the reviewer stated | Findings | Matched a reference |
+|---|---|---|
+| Under 0.6 | 39 | 30.8% |
+| 0.6 to under 0.8 | 178 | 39.9% |
+| 0.8 to under 0.9 | 315 | 43.8% |
+| 0.9 to under 0.95 | 309 | 57.9% |
+| 0.95 and above | 726 | 61.6% |
+
+- **Low-priority findings match about as often as high-priority ones,** and the reviewer writes few of them: 69 of 1,567 are P3.
+- **The stated confidence carries information.** The matched share doubles from the lowest group to the highest.
+
+**What the tool calls asked for.** All 16 first replies that ended in a tool call (Section 3.1) asked to read or search source code: 11 shell commands (`sed`, `grep`, `find`), 3 calls to a `Grep` tool and 2 to a `Read` tool. None asked for a project instruction file.
+
+**Format.** 1,756 of the 1,809 usable replies contain a code fence, and 1,774 do not start with the JSON object, although the rubric says not to wrap the JSON in fences or prose. The parser reads them anyway.
+
+**What this means.** Recall is limited first by how few files the reviewer comments on, and then by how few findings it writes in a file. These are counts from one run with an unchecked judge (Section 10.5).
+
+### 11.2 The prompt the AACR-Bench paper uses for plain LLMs
+
+**Where it is.** The paper ([arXiv 2601.19494v3](https://arxiv.org/html/2601.19494v3)) prints it in its appendix: [Figure 16](https://arxiv.org/html/2601.19494v3#A3.F16) is the version without code context and Figure 17 the version with it. Both were read on November 14. The paper calls these the prompts for non-agent methods.
+
+**The repository has no such prompt.** At commit `c648685` its harness runs three tools and nothing else:
+
+- **OpenCodeReview** (`ocr review --from <base> --to <head>`), Alibaba's review tool, which takes any OpenAI- or Anthropic-compatible model through environment variables.
+- **Claude Code,** with `/code-review <base>...<head>`.
+- **Codex,** with `/review <base>...<head>`.
+
+The only prompt text the harness adds is an instruction to report each finding through an MCP tool (roadmap Section 8.5.1).
+
+**What the paper's prompt contains,** in order:
+
+1. A one-sentence role: an expert code reviewer who gives constructive feedback.
+2. The PR's title and description.
+3. One diff hunk.
+4. In Figure 17 only, a section of relevant code context.
+5. The instructions: give feedback on each issue, with the output tags below.
+6. Four areas to focus on: code defects, performance issues, security vulnerabilities, and maintainability and readability.
+7. One example comment, about a missing docstring.
+8. The output rules: reply with only the end tag when the change has no issue.
+
+- **Output format:** tags, not JSON. Each comment quotes the smallest piece of the hunk it is about (`<diff>`), names the side (`<side>`), and gives the comment (`<note>`). `<notesplit />` separates comments and `<end />` ends the reply. No line number is asked for.
+- **No confidence bar:** nothing tells the reviewer to hold back a doubtful issue.
+
+**How the paper runs it.** The paper states that the method under evaluation goes through the diff hunks of a PR and writes comments for each hunk. For non-agent methods that is one call per hunk. Methods with retrieval index the code of the reviewed version to fetch the context. The published results for this prompt are 24.25% to 47.24% recall at 5.10% to 11.30% precision.
+
+**The agent rows use another prompt.** Claude Code gets an agent definition (Figure 18) and a request (Figure 19). The definition tells it not to flag an issue it is not certain of. Those rows score 2.99% to 10.10% recall at 9.90% to 39.90% precision.
+
+**Compared with our reviewer's prompt** (Section 1; roadmap Section 8.5.2):
+
+| | The paper's prompt | Ours |
+|---|---|---|
+| One call covers | One diff hunk, with the PR's title and description | The whole PR |
+| What to report | Every issue, in four named areas including maintainability | Findings the author would definitely fix; trivial style is excluded |
+| Where the instructions sit | After the diff and the context | Before them, in the system message and the first line of the request |
+| How a finding is located | By quoting the code | By a file path and a line range |
+| Output | Tags | JSON |
+
+**Cost of reviewing per hunk.** The diffs the reviewer sees have 4,136 hunks over the 185 built PRs (22.4 per PR on average, median 10, at most 246). Ten levels would be about 41,000 calls, against 1,569 in the first run, and the level's context would be sent again with every hunk.
+
+The data set's `stats.hunks` field is a different count and must not be used for this: 6,028 runs of changed lines with no surrounding lines (32.6 per PR, median 19), which the tracer uses to find the changed symbols. The reviewer's diff shows three unchanged lines around each change, as GitHub does, so neighbouring runs merge into one hunk. An earlier version of this paragraph used the 6,028 figure; it was corrected on November 15.
+
+**Not decided:** whether to change the reviewer's prompt, and whether a change keeps one call per PR.
+
+### 11.3 AACR-Bench now has a v2 reference set
+
+**What was found.** On November 14 the AACR-Bench repository was at commit `c6486859e14b686b3c2aa0176ac8376cc9b72e07` (committed November 11, UTC). That is three commits after `ee9d7fe`, the commit the roadmap's facts come from (read November 8). The three commits:
+
+- moved the existing data to `dataset/v1/`;
+- added `dataset/v2/positive_samples.json`, sha256 `2e83975a…` according to its meta file. There is no v2 file of negative samples.
+
+**Our data is v1.** `data/aacr/positive_samples.json` has sha256 `02c8561f…`, the value in the repository's v1 meta file.
+
+**What the repository says about v2.** Its meta file describes it as a subset of the v1 positive samples. The English and Chinese READMEs name the v2 folder and do not say how the subset was chosen or which set results should be reported on. The main README still shows the data set as v1.0.
+
+**What v2 keeps.** Every v2 PR is a v1 PR, and every v2 comment is identical to a v1 comment (same file, lines and text).
+
+| | v1 | v2 | Removed |
+|---|---|---|---|
+| PRs | 196 | 151 | 45 |
+| Reference comments | 1,506 | 944 | 562 |
+| Written by a human | 392 | 219 | 173 |
+| Written by a model | 1,114 | 725 | 389 |
+| Code Defect | 710 | 606 | 104 |
+| Maintainability and Readability | 626 | 196 | 430 |
+| Performance | 117 | 103 | 14 |
+| Security Vulnerability | 53 | 39 | 14 |
+| Diff Level | 754 | 419 | 335 |
+| File Level | 518 | 352 | 166 |
+| Repo Level | 234 | 173 | 61 |
+| Comments per PR, mean | 7.7 | 6.3 | |
+
+- **Half of the removed comments** (281) are on the 45 removed PRs. The other 281 were removed from PRs that stay.
+- **Most of what was removed is maintainability:** 430 of the 562. Maintainability falls from 42% of the references to 21%.
+
+**The saved table, scored on v2.** No model was called. The v2 file was read from the repository and not stored locally.
+
+- **PRs:** 142 of the 184 usable PRs are in v2, with 1,396 usable cells.
+- **Recall:** a v2 reference counts as covered when the saved judgment covered it.
+- **Precision:** AACR's rule from Section 11.1, applied to the v2 references only.
+
+| Level | Usable cells | Recall, v1 references | Precision, v1 references | Recall, v2 references | Precision, v2 references |
+|---|---|---|---|---|---|
+| `L01_min` | 131 | 7.5% | 52.9% | 8.8% | 47.9% |
+| `L02_function` | 141 | 5.8% | 57.0% | 7.0% | 53.3% |
+| `L03_file` | 141 | 5.9% | 50.8% | 6.8% | 45.9% |
+| `L04_callees1` | 142 | 5.8% | 48.0% | 6.7% | 44.0% |
+| `L05_callers1` | 141 | 6.9% | 58.7% | 8.0% | 54.5% |
+| `L06_tests1` | 142 | 5.9% | 56.1% | 7.4% | 54.4% |
+| `L07_agent` | 142 | 7.2% | 59.3% | 8.8% | 56.9% |
+| `L08_depth2` | 140 | 6.4% | 58.0% | 7.4% | 52.7% |
+| `L09_depth2_docs` | 139 | 6.8% | 58.1% | 8.2% | 54.7% |
+| `L10_all` | 137 | 5.6% | 55.7% | 6.4% | 50.0% |
+| All levels | 1,396 | 6.4% | 55.3% | 7.6% | 51.3% |
+
+Both pairs of columns cover the same 142 PRs. These PRs have about 8.0 v1 references each and 6.2 v2 references.
+
+- **v2 does not change the picture.** Recall is 1.2 points higher and precision 4.0 points lower. Recall still does not rise with the level: `L01_min` and `L07_agent` are highest and `L10_all` is lowest.
+- **Limit:** this is a re-scoring, not a new judge run. The judge saw the v1 list of references on each file, and a judge shown only the v2 list could answer differently.
+
+**Not decided:** which reference set the project scores against.
+
+## 12. Still open
 
 1. **How well the judge agrees** with a second judge from another model family and with a human check.
 2. **Whether the differences between levels within a PR are real or noise.** This needs repeated reviews of some cells.
 3. **How the selector stage handles a PR with a missing level** (Section 9.5).
 4. **Whether the parser should read the last JSON object in a reply instead of the first** (Section 5).
+5. **Whether to change the reviewer's prompt, and how** (Sections 11.1 and 11.2). Any change is a new prompt version and means reviewing every cell again, so a small pilot should come first.
+6. **Which AACR-Bench reference set to score against,** v1 or v2 (Section 11.3).
 
-## 12. Where the files are
+## 13. Where the files are
 
 All of it is git-ignored and exists on the laptop and on the cloud server.
 

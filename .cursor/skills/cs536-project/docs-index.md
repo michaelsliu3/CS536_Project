@@ -11,7 +11,7 @@ also be read; distinguish official guidance from historical handoffs.
 | `docs/MLII_fall2026_project_kickoff.pdf` | Course values, allowed project types, compute/data rules, grading, proposal/midpoint/final requirements, team rules |
 | `docs/initial_investigation_context.md` | Historical investigation, professor feedback, decisions, and handoff context; verify historical observations against current sources |
 | `docs/context_selection_proposal_detailed.docx` | Current proposal: learned per-diff context selection, ContextCRBench, frozen Qwen reviewer, accuracy-cost evaluation, leakage rules, timeline, success criteria |
-| `docs/outcome_table_first_run.md` | Results of the first full reviewer run (Nov 14, 2026): 1,850 cells reviewed by Qwen3.8-27B, 13.7% malformed replies and why, per-level counts, open decisions; the judge stage and the table do not exist yet |
+| `docs/outcome_table_first_run.md` | First outcome table (Nov 14, 2026): 1,850 cells reviewed by Qwen3.8-27B, the malformed replies and their cause, the retry rule and its result, the 41 cells left out, the judge run, and the first per-level results (recall about 6 to 7% at every level; judge not yet validated). Section 11 records three later checks: how few files the reviewer comments on, the AACR-Bench paper's own prompt for plain LLMs, and AACR-Bench's v2 reference set with the table re-scored on it |
 
 Re-list `docs/` if the folder may have changed. Prefer the newest dated proposal, report, or instructor note when sources disagree.
 

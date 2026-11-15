@@ -2,7 +2,7 @@
 
 **Revised November 7, 2026; status updated November 9. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
 
-**Update, November 14, 2026:** The reviewer stage of the outcome table has run once in full: Qwen3.8-27B reviewed all 185 PRs at all 10 levels (1,850 cells) in 5h48m. 13.7% of the cells held a reply the parser could not read, concentrated at `L01_min`; a retry rule run the same day brought that to 1.7%. The same model then judged every review, so the first table exists: recall is about 6 to 7% at every level and the levels barely differ in aggregate. The judge is not yet checked against a second judge or a human audit. Details and open decisions are in [outcome_table_first_run.md](outcome_table_first_run.md). The status line above and the sections below predate this run.
+**Update, November 14, 2026:** The reviewer stage of the outcome table has run once in full: Qwen3.8-27B reviewed all 185 PRs at all 10 levels (1,850 cells) in 5h48m. 13.7% of the cells held a reply the parser could not read, concentrated at `L01_min`; a retry rule run the same day brought that to 1.7%. The same model then judged every review, so the first table exists: recall is about 6 to 7% at every level and the levels barely differ in aggregate. The judge is not yet checked against a second judge or a human audit. Three checks followed the same day, with no decision yet: the reviewer comments in only 19% of the files that hold reference comments; the AACR-Bench paper prints the prompt it used for plain LLMs, which reviews one diff hunk per call and asks for every issue; and AACR-Bench now has a v2 reference set, a 944-comment subset of the 1,506 in v1, on which the saved table scores 7.6% recall. Details and open decisions are in [outcome_table_first_run.md](outcome_table_first_run.md) (the checks are its Section 11). The status line above and the sections below predate this run.
 
 **Update, November 12, 2026:** Section 4.7 adds three suggested alternative datasets (DeepSWE, FrontierCode, CyberGym), with one real sample of each and the preprocessing each would need. None of them replaces AACR-Bench.
 
@@ -959,6 +959,11 @@ AACR-Bench has two separate parts:
 2. **The evaluation harness runs the test.** To benchmark a reviewer, it runs that reviewer on each PR to write new comments, then a judge LLM scores them against the answer key. Its built-in reviewers run Claude Code's `/code-review <base>...<head>` and Codex's `/review <base>...<head>` in a repository checkout (or the OCR tool). An added instruction reports each finding through an MCP tool as `file`, `line`, `summary` and `failure_scenario`.
 
 In our design, the Qwen reviewer is the system under test: it writes the comments, and AACR's answer key and judge score them.
+
+**Update, November 14, 2026.** Two facts were added after the first outcome table. Details are in [outcome_table_first_run.md](outcome_table_first_run.md), Sections 11.2 and 11.3.
+
+- **AACR-Bench now has two reference sets.** By commit `c648685` (November 11) the data above became `dataset/v1/`, and a `dataset/v2/positive_samples.json` was added: 151 of the 196 PRs and 944 of the 1,506 comments, all taken unchanged from v1. Most of the removed comments are Maintainability and Readability (430 of 562). The project's data and every count in this section are v1. Which set to score against is open.
+- **The paper has a prompt for plain LLMs; the repository does not.** The harness above only runs tools. The paper's appendix (Figures 16 and 17) prints the prompt used for its non-agent rows: one call per diff hunk, with the PR's title and description, asking for every issue in four named areas. It differs from the reviewer prompt chosen in Section 8.5.2, and whether to change ours is open.
 
 **Who wrote the reference comments** (counted from `positive_samples.json`):
 
