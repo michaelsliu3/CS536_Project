@@ -74,6 +74,7 @@ def main(argv=None) -> int:
     parser.add_argument("--profile", default=os.environ.get("OUTCOME_PROFILE", "cloud"), help="notebook profile (default cloud)")
     parser.add_argument("--first", type=int, help="only the first N PRs of the context file")
     parser.add_argument("--entries", nargs="+", metavar="ID", help="only these PRs")
+    parser.add_argument("--levels", nargs="+", metavar="LEVEL", help="only these levels (default: the profile's)")
     parser.add_argument("--concurrency", type=int, help="reviews judged at a time (default: the profile's)")
     parser.add_argument("--dry-run", action="store_true", help="print what a run would judge and stop; calls no model, writes nothing")
     args = parser.parse_args(argv)
@@ -86,7 +87,7 @@ def main(argv=None) -> int:
     contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
     judge = backends.judge_caller(make_chat(spec))
     concurrency = args.concurrency or spec.get("concurrency", 1)
-    all_cells = table.discover_cells(contexts, config["entries"], config["levels"])
+    all_cells = table.discover_cells(contexts, config["entries"], (args.levels or config["levels"]))
     cells = select_cells(all_cells, args.first, args.entries)
     reviews, missing = load_reviews(out, cells)
     references = table.references_by_entry(dataset, cells)

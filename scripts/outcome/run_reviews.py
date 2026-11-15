@@ -89,6 +89,7 @@ def main(argv=None) -> int:
     parser.add_argument("--profile", default=os.environ.get("OUTCOME_PROFILE", "cloud"), help="notebook profile (default cloud)")
     parser.add_argument("--first", type=int, help="only the first N PRs of the context file (to time a run)")
     parser.add_argument("--entries", nargs="+", metavar="ID", help="only these PRs")
+    parser.add_argument("--levels", nargs="+", metavar="LEVEL", help="only these levels (default: the profile's)")
     parser.add_argument("--concurrency", type=int, help="requests in flight (default: the profile's)")
     parser.add_argument("--dry-run", action="store_true",
                         help="print what a run would send (new cells and retry steps) and stop; calls no model, writes nothing")
@@ -103,7 +104,7 @@ def main(argv=None) -> int:
     reviewer = make_reviewer(spec)
     retry = RetryPolicy.from_spec(spec, prompt.follow_up)
     if args.dry_run:
-        cells = select_cells(table.discover_cells(contexts, config["entries"], config["levels"]), args.first, args.entries)
+        cells = select_cells(table.discover_cells(contexts, config["entries"], (args.levels or config["levels"])), args.first, args.entries)
         plan = table.plan_reviews(cells, reviewer, prompt, out, max_input_tokens=spec["max_input_tokens"], retry=retry)
         print(describe_plan(plan, retry, out))
         return 0
@@ -111,7 +112,7 @@ def main(argv=None) -> int:
     commit = subprocess.run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     log.info(f"profile {args.profile}, run folder {out}, code commit {commit[:7]}, server {spec['base_url']}")
 
-    all_cells = table.discover_cells(contexts, config["entries"], config["levels"])
+    all_cells = table.discover_cells(contexts, config["entries"], (args.levels or config["levels"]))
     cells = select_cells(all_cells, args.first, args.entries)
     limit = spec["max_input_tokens"]
     if len(cells) != len(all_cells):
