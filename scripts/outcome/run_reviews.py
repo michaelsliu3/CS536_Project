@@ -2,7 +2,9 @@
 notebooks/outcome_table.ipynb, so a long run can sit in `screen` and survive a dropped connection.
 
 It reads the profile from the notebook, reviews each (PR, level) cell once with the reviewer
-server, and saves each reply as it arrives under <out_root>/<run_name>/reviews/. Re-running
+server, and saves each reply as it arrives under <out_root>/<run_name>/reviews/. A profile whose
+context file was built per diff hunk (`cloud-hunk`) has one cell per (hunk, level); `--first` and
+`--entries` still choose PRs, and the profile's "prompt" entry names the reviewer prompt. Re-running
 resumes: saved cells are reused and failed calls are retried. When the profile's reviewer has a
 "retry" entry, a reply that was cut off or finished without the JSON gets the retry steps of
 src/review_outcomes/retry.py, including replies saved by an earlier run. Every line also goes to
@@ -32,7 +34,7 @@ from src.review_outcomes.parse import PARSER_VERSION  # noqa: E402
 from src.review_outcomes.profiles import read_notebook_profile  # noqa: E402
 from src.review_outcomes.retry import RetryPolicy  # noqa: E402
 from src.review_outcomes.prompts import (  # noqa: E402
-    JUDGE_PROMPT_VERSION, REVIEW_PROMPT_VERSION, REVIEW_REQUEST, RUBRIC_SHA256, load_rubric, prompt_sha256,
+    JUDGE_PROMPT_VERSION, REVIEW_REQUEST, RUBRIC_SHA256, load_review_prompt,
 )
 from src.tracer_context.aacr import file_sha256  # noqa: E402
 
@@ -50,7 +52,8 @@ def make_reviewer(spec: dict):
 def describe_plan(plan: dict, retry: RetryPolicy | None, out: Path) -> str:
     """The dry run's report: what a run would do for these cells."""
     lines = [f"run folder {out}",
-             f"{plan['cells']} cells from {plan['entries']} PRs, {plan['distinct']} distinct inputs",
+             f"{plan['cells']} cells from {plan['prs']} PRs, {plan['distinct']} distinct inputs"
+             + (f" ({plan['hunks']} diff hunks, one review each per level)" if plan["hunks"] else ""),
              f"  already saved: {plan['saved']}",
              f"  too long to send: {plan['too_long']}",
              f"  to send for the first time: {plan['send']['cells']} ({plan['send']['input_tokens']:,} input tokens)"]
@@ -68,8 +71,9 @@ def describe_plan(plan: dict, retry: RetryPolicy | None, out: Path) -> str:
 
 
 def select_cells(cells: list, first: int | None, entries: list[str] | None) -> list:
-    """The cells of the chosen PRs: the first `first` in dataset order, or the named ones."""
-    order = list(dict.fromkeys(cell.entry for cell in cells))
+    """The cells of the chosen PRs: the first `first` in dataset order, or the named ones. A
+    per-hunk cell is chosen by its PR."""
+    order = list(dict.fromkeys(cell.group for cell in cells))
     if entries:
         unknown = sorted(set(entries) - set(order))
         if unknown:
@@ -77,7 +81,7 @@ def select_cells(cells: list, first: int | None, entries: list[str] | None) -> l
         chosen = set(entries)
     else:
         chosen = set(order[:first] if first else order)
-    return [cell for cell in cells if cell.entry in chosen]
+    return [cell for cell in cells if cell.group in chosen]
 
 
 def main(argv=None) -> int:
@@ -95,12 +99,12 @@ def main(argv=None) -> int:
     out = PROJECT_ROOT / config["out_root"] / config["run_name"]
     contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
     concurrency = args.concurrency or spec["concurrency"]
-    rubric = load_rubric()
+    prompt = load_review_prompt(config.get("prompt", "codex"))  # refuses to run if a pinned prompt file was edited
     reviewer = make_reviewer(spec)
-    retry = RetryPolicy.from_spec(spec)
+    retry = RetryPolicy.from_spec(spec, prompt.follow_up)
     if args.dry_run:
         cells = select_cells(table.discover_cells(contexts, config["entries"], config["levels"]), args.first, args.entries)
-        plan = table.plan_reviews(cells, reviewer, rubric, out, max_input_tokens=spec["max_input_tokens"], retry=retry)
+        plan = table.plan_reviews(cells, reviewer, prompt, out, max_input_tokens=spec["max_input_tokens"], retry=retry)
         print(describe_plan(plan, retry, out))
         return 0
     log_path = table.start_run_log(out, console_level=logging.INFO)
@@ -111,12 +115,13 @@ def main(argv=None) -> int:
     cells = select_cells(all_cells, args.first, args.entries)
     limit = spec["max_input_tokens"]
     if len(cells) != len(all_cells):
-        log.info(f"limited to {len({c.entry for c in cells})} of {len({c.entry for c in all_cells})} PRs: "
-                 f"{', '.join(dict.fromkeys(c.entry for c in cells))}")
+        log.info(f"limited to {len({c.group for c in cells})} of {len({c.group for c in all_cells})} PRs: "
+                 f"{', '.join(dict.fromkeys(c.group for c in cells))}")
     table.write_json(out / "manifest.json", {
         "profile": args.profile, "config": config, "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "code_commit": commit, "rubric_sha256": RUBRIC_SHA256, "review_request": REVIEW_REQUEST,
-        "prompt_sha256": prompt_sha256(rubric), "review_prompt_version": REVIEW_PROMPT_VERSION,
+        "code_commit": commit, "prompt_name": prompt.name,
+        **({"rubric_sha256": RUBRIC_SHA256, "review_request": REVIEW_REQUEST} if prompt.name == "codex" else {}),
+        "prompt_sha256": prompt.sha256, "review_prompt_version": prompt.version,
         "judge_prompt_version": JUDGE_PROMPT_VERSION, "parser_version": PARSER_VERSION,
         "reviewer_identity": reviewer.identity, "dataset": str(dataset.relative_to(PROJECT_ROOT)),
         "dataset_sha256": file_sha256(dataset), "contexts": str(contexts.relative_to(PROJECT_ROOT)),
@@ -125,7 +130,7 @@ def main(argv=None) -> int:
     })
 
     started, started_at = time.monotonic(), table._now()
-    reviews = table.run_reviews(cells, reviewer, rubric, out, max_input_tokens=limit, concurrency=concurrency,
+    reviews = table.run_reviews(cells, reviewer, prompt, out, max_input_tokens=limit, concurrency=concurrency,
                                 retry=retry)
     seconds = time.monotonic() - started
 

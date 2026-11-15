@@ -7,15 +7,19 @@ from pathlib import Path
 
 from src.review_outcomes.backends import OpenAIChat
 from src.review_outcomes.judge import parse_judge_answer, score_review
-from src.review_outcomes.parse import normalize_path, parse_review
+from src.review_outcomes.parse import locate_snippet, normalize_path, parse_review, parse_tagged_review
 from src.review_outcomes import retry as retry_rule
 from src.review_outcomes.prompts import (
-    FOLLOW_UP_REQUEST, REVIEW_REQUEST, RUBRIC_PATH, judge_prompt, load_rubric, prompt_sha256, review_messages,
+    AACR_FOLLOW_UP_REQUEST, AACR_NO_CONTEXT_PATH, AACR_PROMPT_VERSION, AACR_WITH_CONTEXT_PATH, FOLLOW_UP_REQUEST,
+    REVIEW_PROMPT_VERSION, REVIEW_REQUEST, RUBRIC_PATH, ReviewInput, aacr_prompt, as_prompt, judge_prompt,
+    load_review_prompt, load_rubric, prompt_sha256, review_messages,
 )
 from src.review_outcomes.retry import RetryPolicy
 from src.review_outcomes.table import (
-    build_table, discover_cells, plan_reviews, run_judgments, run_reviews, summarize_by_level, write_outputs,
+    build_hunk_tables, build_table, discover_cells, plan_reviews, references_by_entry, run_judgments, run_reviews,
+    summarize_by_level, write_outputs,
 )
+from src.tracer_context.build import CONTEXT_HEADING, SEPARATOR, input_sections, render_diff, split_input
 from src.tracer_context.dataset import append_record
 
 # The roadmap's Section 8.5.3 example: vllm#17425's reference layout, with short notes.
@@ -664,6 +668,314 @@ class JudgeStageTests(unittest.TestCase):
             self.assertEqual([j.get("reused_from") for j in judgments], [None, None, None, "L00", "L01", "L02"])
             again = run_judgments(reviews, references, judge, Path(tmp), concurrency=4)
             self.assertEqual((len(calls), again), (3, judgments))
+
+
+
+HUNK_P = "\n".join(["diff --git a/p.py b/p.py", "index 1..2 100644", "--- a/p.py", "+++ b/p.py",
+                    "@@ -247,3 +247,4 @@ def warn(d):", " a = 1", "-b = 2", "+b = warning_once(d)", "+c = 3", " d = 4"])
+HUNK_W = "\n".join(["diff --git a/w.py b/w.py", "index 3..4 100644", "--- a/w.py", "+++ b/w.py",
+                    "@@ -717,3 +717,3 @@", " x = 0", "-old", "+new long warning string", " y = 1"])
+
+
+def tagged(*comments, end=True):
+    """A reply in the paper's tags: each comment is (quoted snippet, side, note)."""
+    parts = [f"<diff>\n{snippet}\n</diff>\n<side>{side}</side>\n<note>\n{note}\n</note>\n<notesplit />"
+             for snippet, side, note in comments]
+    return "\n".join(parts + (["<end />"] if end else []))
+
+
+def hunk_level(hunk, parent=None, context="", tokens=10, same=False):
+    """One stored level of a per-hunk record, with the text the builder would write."""
+    pr, diff = "## Pull request\n\nTitle: Fix it\n\nWhy it is needed.", render_diff(hunk)
+    text = SEPARATOR.join([pr, diff] + ([f"{CONTEXT_HEADING}{SEPARATOR}{context}"] if context else []))
+    return {"parent": parent, "text": None if same else text, "input_tokens": tokens, "same_as_parent": same,
+            "sections": input_sections(pr, diff, "", context)}
+
+
+class AacrPromptTests(unittest.TestCase):
+    def test_paper_prompt_is_pinned_and_filled_slot_by_slot(self):
+        prompt = load_review_prompt("aacr-hunk")
+        self.assertEqual((prompt.name, prompt.version, prompt.reply_format, prompt.follow_up),
+                         ("aacr-hunk", AACR_PROMPT_VERSION, "aacr-tags", AACR_FOLLOW_UP_REQUEST))
+        # The two files have the lengths of the paper's Figures 16 and 17, which differ by the context section.
+        plain = AACR_NO_CONTEXT_PATH.read_text(encoding="utf-8").rstrip("\n")
+        rich = AACR_WITH_CONTEXT_PATH.read_text(encoding="utf-8").rstrip("\n")
+        self.assertEqual((len(plain), len(rich)), (1881, 1923))
+        self.assertEqual(rich.replace("## Relevant Code Context\n\n{{ contexts }}\n\n", ""), plain)
+
+        messages = prompt.messages("the level's whole text is not used", ReviewInput("Fix it", "Why.", "THE HUNK", ""))
+        self.assertEqual([m["role"] for m in messages], ["user"])  # one message, as in the paper
+        text = messages[0]["content"]
+        self.assertTrue(text.startswith("You are an expert code reviewer. Your task is to review"))
+        self.assertIn("**Title:** Fix it\n\n**Description:** Why.\n\n## Code Changes to Review\n\n```diff\nTHE HUNK\n```\n\n## Instructions", text)
+        self.assertNotIn("Relevant Code Context", text)  # Figure 16: no context section
+        self.assertTrue(text.endswith("Now provide your review:"))
+        self.assertEqual(text, plain.replace("{{ pr_title }}", "Fix it").replace("{{ pr_description }}", "Why.")
+                         .replace("{{ diff_hunk }}", "THE HUNK"))  # nothing but the slots is changed
+
+        with_context = prompt.messages("", ReviewInput("T", "has {{ contexts }} in it", "H", "### changed: f\nCODE"))[0]["content"]
+        self.assertIn("```diff\nH\n```\n\n## Relevant Code Context\n\n### changed: f\nCODE\n\n## Instructions", with_context)
+        self.assertIn("has {{ contexts }} in it", with_context)  # slot-like text in the input is left alone
+        with self.assertRaisesRegex(ValueError, "in parts"):
+            prompt.messages("only the whole text")
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "prompt.md"
+            copy.write_text("{{ pr_title }} {{ pr_description }}\n", encoding="utf-8")  # no slot for the diff
+            with self.assertRaisesRegex(ValueError, "slots"):
+                aacr_prompt(no_context=copy)
+
+    def test_codex_prompt_object_is_the_prompt_used_so_far(self):
+        rubric = load_rubric()
+        prompt = load_review_prompt("codex")
+        self.assertEqual(prompt.messages("CTX"), review_messages("CTX", rubric))
+        self.assertEqual((prompt.sha256, prompt.version, prompt.reply_format, prompt.follow_up),
+                         (prompt_sha256(rubric), REVIEW_PROMPT_VERSION, "codex-json", FOLLOW_UP_REQUEST))
+        self.assertIs(as_prompt(prompt), prompt)
+        self.assertEqual(as_prompt("RUBRIC").messages("CTX"), review_messages("CTX", "RUBRIC"))  # a rubric text still works
+        with self.assertRaises(ValueError):
+            load_review_prompt("no-such-prompt")
+        # The retry policy's identity is unchanged for the Codex prompt, and differs for the paper's.
+        spec = {"retry": {"longer_max_tokens": 16_000, "follow_up": True, "context_window": 262_144}}
+        self.assertEqual(RetryPolicy.from_spec(spec, prompt.follow_up).identity, RetryPolicy.from_spec(spec).identity)
+        self.assertNotEqual(RetryPolicy.from_spec(spec, AACR_FOLLOW_UP_REQUEST).identity, RetryPolicy.from_spec(spec).identity)
+
+    def test_per_hunk_json_findings_are_placed_in_the_hunks_file(self):
+        reply = codex_reply([finding("in the file", "b/p.py", 5), finding("named another file", "lib/other.py", 9)])
+        plain = parse_review(reply, ["p.py"])
+        self.assertEqual([f["path"] for f in plain["findings"]], ["p.py", "lib/other.py"])
+        self.assertNotIn("reported_path", plain["findings"][0])
+        placed = parse_review(reply, ["p.py"], path="p.py")
+        self.assertEqual([(f["path"], f["reported_path"], f["raw_path"]) for f in placed["findings"]],
+                         [("p.py", "p.py", "b/p.py"), ("p.py", "lib/other.py", "lib/other.py")])
+
+    def test_level_text_is_taken_apart_for_the_slots(self):
+        level = hunk_level(HUNK_P, context="### changed: p.warn  [p.py:240-250]\n```python\ndef warn(d): ...\n```")
+        parts = split_input(level["text"], level["sections"])
+        self.assertEqual(parts, {"pr_title": "Fix it", "pr_description": "Why it is needed.", "diff": HUNK_P,
+                                 "contexts": "### changed: p.warn  [p.py:240-250]\n```python\ndef warn(d): ...\n```"})
+        self.assertEqual(split_input(hunk_level(HUNK_P)["text"], hunk_level(HUNK_P)["sections"])["contexts"], "")
+        # The PR's other hunks come first in the context, one heading level down.
+        pr, diff, other = "## Pull request\n\nTitle: T\n\n(no description)", render_diff(HUNK_P), "## Other changes in this pull request\n\nDIFF"
+        text = SEPARATOR.join([pr, diff, other, f"{CONTEXT_HEADING}{SEPARATOR}BLOCK"])
+        self.assertEqual(split_input(text, input_sections(pr, diff, other, "BLOCK"))["contexts"],
+                         "### Other changes in this pull request\n\nDIFF\n\nBLOCK")
+
+
+class TagParserTests(unittest.TestCase):
+    def test_reply_in_the_papers_tags_is_read_note_by_note(self):
+        reply = tagged(("+b = warning_once(d)", "right", "G1 dict is unhashable"), ("-b = 2", "left", "the old value was fine"),
+                       ("+ no such line", "right", "quotes something that is not there"))
+        parsed = parse_tagged_review(reply, path="p.py", diff=HUNK_P)
+        self.assertEqual((parsed["status"], parsed["overall"], parsed["invalid_findings"]), ("ok", {"ended": True}, 0))
+        self.assertEqual([(f["note"], f["path"], f["from_line"], f["to_line"], f["side"], f["located"]) for f in parsed["findings"]], [
+            ("G1 dict is unhashable", "p.py", 248, 248, "right", True),
+            ("the old value was fine", "p.py", 248, 248, "left", True),
+            ("quotes something that is not there", "p.py", None, None, "right", False)])
+        self.assertEqual((parsed["findings"][0]["snippet"], parsed["findings"][0]["priority"]), ("+b = warning_once(d)", None))
+        # Without a path (a whole-PR diff) the file comes from where the snippet is found.
+        both = HUNK_P + "\n" + HUNK_W
+        self.assertEqual(parse_tagged_review(tagged(("+new long warning string", "right", "too long")), diff=both)["findings"][0]["path"], "w.py")
+
+    def test_no_findings_missing_tags_and_loose_formatting(self):
+        self.assertEqual(parse_tagged_review("<end />")["findings"], [])
+        self.assertEqual(parse_tagged_review("<think>fine</think>\n<end/>")["status"], "ok")
+        self.assertEqual(parse_tagged_review("The change looks fine to me.")["status"], "malformed")  # the retry rule asks again
+        self.assertEqual(parse_tagged_review("  ")["status"], "empty_output")
+        cut_off = parse_tagged_review(tagged(("+c = 3", "right", "magic number"), end=False), path="p.py", diff=HUNK_P)
+        self.assertEqual((cut_off["status"], cut_off["overall"], len(cut_off["findings"])), ("ok", {"ended": False}, 1))
+        # Two comments without the separator, a comment without a quote, an empty note, a quote without a comment.
+        loose = ("<diff>+c = 3</diff><side>right</side><note>one</note>\n<diff>-b = 2</diff><side>LEFT</side><note>two</note>\n"
+                 "<note>three, about the hunk as a whole</note>\n<note>  </note>\n<diff>+c = 3</diff><side>right</side>\n<end />")
+        parsed = parse_tagged_review(loose, path="p.py", diff=HUNK_P)
+        self.assertEqual([(f["note"], f["side"], f["from_line"]) for f in parsed["findings"]],
+                         [("one", "right", 249), ("two", "left", 248), ("three, about the hunk as a whole", "right", None)])
+        self.assertEqual(parsed["invalid_findings"], 2)
+
+    def test_quoted_snippets_are_found_in_the_diff(self):
+        self.assertEqual(locate_snippet(HUNK_P, "+b = warning_once(d)\n+c = 3"), ("p.py", 248, 249))
+        self.assertEqual(locate_snippet(HUNK_P, "b = warning_once(d)"), ("p.py", 248, 248))          # markers are optional
+        self.assertEqual(locate_snippet(HUNK_P, "+ b = warning_once(d)\n+ c = 3"), ("p.py", 248, 249))  # the example's "+ " style
+        self.assertEqual(locate_snippet(HUNK_P, " a = 1\n+b = warning_once(d)"), ("p.py", 247, 248))  # the removed line is skipped
+        self.assertEqual(locate_snippet(HUNK_P, "-b = 2", "left"), ("p.py", 248, 248))
+        self.assertEqual(locate_snippet(HUNK_P, "+c = 3\n+made up"), ("p.py", 249, 249))              # falls back to the first line
+        self.assertIsNone(locate_snippet(HUNK_P, "nothing like it"))
+        self.assertIsNone(locate_snippet(HUNK_P, "  \n"))
+
+
+class HunkRunTests(unittest.TestCase):
+    """A per-hunk run: one cell per (diff hunk, level), judged against the PR's references."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.contexts = self.root / "context_levels.jsonl"
+        append_record(self.contexts, {
+            "id": "o__r__1", "index": 0, "status": "ok", "language": "Python", "known_paths": ["p.py", "w.py"],
+            "hunks": [
+                {"id": "o__r__1__h0001", "index": 1, "file": "p.py", "new_start": 247, "new_count": 4,
+                 "old_start": 247, "old_count": 3,
+                 "levels": {"H01_min": hunk_level(HUNK_P),
+                            "H02_function": hunk_level(HUNK_P, "H01_min", same=True)}},  # stored without a second copy
+                {"id": "o__r__1__h0002", "index": 2, "file": "w.py", "new_start": 717, "new_count": 3,
+                 "old_start": 717, "old_count": 3,
+                 "levels": {"H01_min": hunk_level(HUNK_W),
+                            "H02_function": hunk_level(HUNK_W, "H01_min", context="### changed: w.f\nBODY", tokens=20)}}]})
+        self.dataset = self.root / "positive_samples.json"
+        self.dataset.write_text(json.dumps([{"githubPrUrl": "https://github.com/o/r/pull/1",
+                                             "project_main_language": "Python", "comments": REFS}]), encoding="utf-8")
+        self.calls = []
+
+        def reviewer(messages, max_tokens=None):
+            text = messages[0]["content"]
+            self.calls.append(text)
+            if "a/p.py" in text:  # the second comment quotes a line that is not in the hunk
+                reply = tagged(("+b = warning_once(d)", "right", "G1 dict passed to cached warning_once"),
+                               ("+ something else", "right", "G2 same unhashable problem"))
+            elif "## Relevant Code Context" in text:
+                reply = "<end />"
+            else:
+                reply = tagged(("+new long warning string", "right", "G4 split the long warning string"))
+            return {"text": reply, "finish_reason": "stop", "prompt_tokens": 10, "completion_tokens": 5, "seconds": 0.1}
+        reviewer.identity = {"kind": "fake"}
+        self.reviewer = reviewer
+
+        def judge(prompt):  # G1 and G2 both match p.py's third reference; G4 matches w.py's first
+            return "[3]" if "G1" in prompt or "G2" in prompt else "[1]"
+        judge.identity = {"kind": "fixed"}
+        self.judge = judge
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_cells_reviews_judgments_and_both_tables(self):
+        cells = discover_cells(self.contexts)
+        self.assertEqual([(c.entry, c.level, c.pr, c.file, c.span) for c in cells], [
+            ("o__r__1__h0001", "H01_min", "o__r__1", "p.py", (247, 250, 247, 249)),
+            ("o__r__1__h0001", "H02_function", "o__r__1", "p.py", (247, 250, 247, 249)),
+            ("o__r__1__h0002", "H01_min", "o__r__1", "w.py", (717, 719, 717, 719)),
+            ("o__r__1__h0002", "H02_function", "o__r__1", "w.py", (717, 719, 717, 719))])
+        self.assertEqual(cells[1].text, cells[0].text)  # the parent's text, filled in
+        self.assertEqual(cells[0].parts, ReviewInput("Fix it", "Why it is needed.", HUNK_P, ""))
+        self.assertEqual(cells[3].parts.contexts, "### changed: w.f\nBODY")
+        self.assertEqual({c.group for c in cells}, {"o__r__1"})
+        self.assertEqual(len(discover_cells(self.contexts, entries=["o__r__1"])), 4)  # by PR
+        self.assertEqual([c.entry for c in discover_cells(self.contexts, entries=["o__r__1__h0002"], levels=["H01_min"])],
+                         ["o__r__1__h0002"])  # or by hunk
+
+        out = self.root / "out"
+        prompt = load_review_prompt("aacr-hunk")
+        reviews = run_reviews(cells, self.reviewer, prompt, out)
+        self.assertEqual(len(self.calls), 3)  # hunk 1's two levels have the same input
+        self.assertTrue(self.calls[0].startswith("You are an expert code reviewer. Your task is to review"))
+        self.assertIn(f"**Title:** Fix it\n\n**Description:** Why it is needed.\n\n## Code Changes to Review\n\n```diff\n{HUNK_P}\n```", self.calls[0])
+        self.assertNotIn("Relevant Code Context", self.calls[0])                              # Figure 16
+        self.assertIn("## Relevant Code Context\n\n### changed: w.f\nBODY\n\n## Instructions", self.calls[2])  # Figure 17
+        self.assertEqual([(r["status"], r.get("reused_from")) for r in reviews],
+                         [("ok", None), ("ok", "H01_min"), ("ok", None), ("ok", None)])
+        first = reviews[0]
+        self.assertEqual((first["pr"], first["file"], first["prompt_version"], first["parser"]),
+                         ("o__r__1", "p.py", AACR_PROMPT_VERSION, "aacr-tags-v1"))
+        self.assertEqual([(f["path"], f["from_line"], f["located"]) for f in first["parsed"]["findings"]],
+                         [("p.py", 248, True), ("p.py", None, False)])
+        self.assertTrue((out / "reviews" / "o__r__1__h0002" / "H02_function.json").is_file())
+        run_reviews(cells, self.reviewer, prompt, out)
+        self.assertEqual(len(self.calls), 3)  # a second run reuses every saved review
+        # The same cells under the Codex prompt are other reviews.
+        self.assertEqual(plan_reviews(cells, self.reviewer, "RUBRIC", out)["send"]["cells"], 3)
+
+        references = references_by_entry(self.dataset, cells)
+        self.assertIs(references["o__r__1__h0002"], references["o__r__1"])
+        judgments = run_judgments(reviews, references, self.judge, out)
+        self.assertEqual([(j["entry"], j["level"], j["generated"], j["covered_indices"]) for j in judgments], [
+            ("o__r__1__h0001", "H01_min", 2, [7]), ("o__r__1__h0001", "H02_function", 2, [7]),
+            ("o__r__1__h0002", "H01_min", 1, [2]), ("o__r__1__h0002", "H02_function", 0, [])])
+
+        rows, hunk_rows, coverage = build_hunk_tables(cells, reviews, judgments, references)
+        self.assertEqual([(r["entry"], r["level"]) for r in rows], [("o__r__1", "H01_min"), ("o__r__1", "H02_function")])
+        low, high = rows
+        # H01: three findings in two hunks; G2 repeats G1's reference, so two count as matched.
+        self.assertEqual((low["hunks"], low["hunks_reviewed"], low["hunks_ok"], low["review_status"]), (2, 2, 2, "ok"))
+        self.assertEqual((low["input_tokens"], low["findings"], low["generated"], low["matched_generated"], low["covered"],
+                          low["expected"]), (20, 3, 3, 2, 2, 8))
+        self.assertEqual((low["recall"], low["precision"], low["human_covered"], low["human_expected"]), (0.25, 0.6667, 1, 1))
+        self.assertEqual((high["generated"], high["covered"], high["input_tokens"]), (2, 1, 30))
+        self.assertEqual(len(coverage), 16)
+        self.assertEqual([c["reference"] for c in coverage if c["level"] == "H01_min" and c["covered"]], [2, 7])
+
+        self.assertEqual(len(hunk_rows), 4)
+        one = hunk_rows[0]
+        self.assertEqual((one["entry"], one["pr"], one["file"], one["new_start"], one["new_end"]),
+                         ("o__r__1__h0001", "o__r__1", "p.py", 247, 250))
+        # Two of p.py's three references sit on lines 247-250; the review covers one of them.
+        self.assertEqual((one["findings"], one["findings_matched"], one["references_on_hunk"],
+                          one["references_on_hunk_covered"], one["references_covered"]), (2, 2, 2, 1, 1))
+        self.assertEqual((hunk_rows[2]["references_on_hunk"], hunk_rows[2]["references_on_hunk_covered"]), (2, 1))
+        self.assertEqual(hunk_rows[3]["findings"], 0)
+
+        write_outputs(out, rows, coverage, hunk_rows)
+        self.assertTrue(all((out / name).is_file() for name in ("table.csv", "table.json", "coverage.csv", "hunk_table.csv")))
+        self.assertEqual(json.loads((out / "table.json").read_text(encoding="utf-8")), rows)
+        summary = summarize_by_level(rows)
+        self.assertEqual([(s["level"], s["recall_pooled"], s["statuses"]) for s in summary],
+                         [("H01_min", 0.25, {"ok": 1}), ("H02_function", 0.125, {"ok": 1})])
+
+    def test_a_reply_without_tags_gets_the_follow_up_that_asks_for_them(self):
+        cells = discover_cells(self.contexts, entries=["o__r__1__h0002"], levels=["H01_min"])
+        prompt = load_review_prompt("aacr-hunk")
+        replies = iter(["I looked at the change and it seems fine.", "<end />"])
+        seen = []
+
+        def reviewer(messages, max_tokens=None):
+            seen.append(messages)
+            return {"text": next(replies), "finish_reason": "stop", "prompt_tokens": 10, "completion_tokens": 5, "seconds": 0.1}
+        reviewer.identity, reviewer.max_tokens = {"kind": "fake"}, 4096
+        policy = RetryPolicy.from_spec({"retry": {"follow_up": True}}, prompt.follow_up)
+        record = run_reviews(cells, reviewer, prompt, self.root / "out", retry=policy)[0]
+        self.assertEqual((record["status"], record["parsed"]["findings"], retry_rule.steps_taken(record)), ("ok", [], "follow_up"))
+        self.assertEqual(record["retry"]["first"]["status"], "malformed")
+        self.assertEqual([m["role"] for m in seen[1]], ["user", "assistant", "user"])
+        self.assertEqual(seen[1][-1]["content"], AACR_FOLLOW_UP_REQUEST)
+        self.assertIn("<end />", AACR_FOLLOW_UP_REQUEST)
+        self.assertNotIn("JSON", AACR_FOLLOW_UP_REQUEST)
+
+    def test_a_pr_with_an_unreviewed_hunk_is_marked_incomplete(self):
+        cells = discover_cells(self.contexts, levels=["H01_min"])
+        out = self.root / "out"
+        reviews = run_reviews(cells, self.reviewer, load_review_prompt("aacr-hunk"), out)
+        references = references_by_entry(self.dataset, cells)
+        judgments = run_judgments(reviews, references, self.judge, out)
+        rows, hunk_rows, _ = build_hunk_tables(cells, reviews[:1], judgments[:1], references)
+        self.assertEqual((rows[0]["review_status"], rows[0]["hunks"], rows[0]["hunks_reviewed"], rows[0]["hunks_ok"]),
+                         ("incomplete", 2, 1, 1))
+        self.assertEqual(json.loads(rows[0]["hunk_statuses"]), {"missing": 1, "ok": 1})
+        self.assertEqual((hunk_rows[1]["review_status"], hunk_rows[1]["findings"]), ("missing", 0))
+        self.assertNotIn("findings_matched", hunk_rows[1])
+        with self.assertRaisesRegex(ValueError, "per-hunk"):  # per-PR cells belong to build_table
+            from src.review_outcomes.table import Cell
+            build_hunk_tables([Cell("o__r__1", "L01_min", "text", 1)], [], [], references)
+
+    def test_scripts_choose_per_hunk_cells_by_pr_and_read_the_profile(self):
+        import importlib.util
+        import sys
+
+        from src.review_outcomes.profiles import read_notebook_profile
+
+        path = Path(__file__).resolve().parents[1] / "scripts" / "outcome" / "run_reviews.py"
+        spec = importlib.util.spec_from_file_location("run_reviews", path)
+        script = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = script
+        spec.loader.exec_module(script)
+        cells = discover_cells(self.contexts)
+        self.assertEqual(len(script.select_cells(cells, 1, None)), 4)        # the first PR: all its hunks
+        self.assertEqual(len(script.select_cells(cells, None, ["o__r__1"])), 4)
+        with self.assertRaises(SystemExit):
+            script.select_cells(cells, None, ["o__r__1__h0001"])               # runs are chosen by PR
+        profile = read_notebook_profile("cloud-hunk")
+        self.assertEqual((profile["prompt"], profile["contexts"]), ("aacr-hunk", "data/aacr_hunk/context_levels.jsonl"))
+        self.assertEqual(load_review_prompt(profile["prompt"]).reply_format, "aacr-tags")
+        self.assertNotIn("prompt", read_notebook_profile("cloud"))  # the per-PR run keeps the Codex prompt
+        self.assertEqual(profile["reviewer"], read_notebook_profile("cloud")["reviewer"])
+        self.assertEqual(profile["judge"], read_notebook_profile("cloud")["judge"])
 
 
 if __name__ == "__main__":
