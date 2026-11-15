@@ -1,6 +1,6 @@
 # Per-hunk review test (branch `per-hunk-review`, started November 15, 2026)
 
-**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that the same day (Section 13) and the five PRs were rebuilt; the changed levels have not been reviewed yet. Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
+**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that (Section 13) and the five PRs were reviewed again on November 16 (Section 14): the fall is gone, every level now reaches 42 to 58% recall at 13 to 17% precision, and the levels cannot be told apart at this size, because the same input run twice differs by about as much as the levels do. Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
 
 This document records why the test exists, what was decided and when, what was built, what was checked, and what is still open.
 
@@ -29,7 +29,8 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 | November 15, later | The first prompt was our own wording of the paper's instructions, with a JSON reply. It was replaced by the paper's exact text and tag format, with a parser for the tags. |
 | November 15, later | Decided that the per-hunk test keeps a data folder of its own, `data/aacr_hunk/`, and the original context levels stay as they are. A guard was added so a per-hunk build can never write into the per-PR file. 209 tests pass, 23 of them new. |
 | November 15, later | The branch was pushed. The five-PR build was reviewed and judged on the cloud server (Section 12). |
-| November 15, later | After that test: the other hunks were taken out of the chain, context blocks name the lines the PR changes in them, a summary level was added at the end, and only findings that quote the hunk under review count (Section 13). The five PRs were rebuilt. No review has run on the new levels. |
+| November 15, later | After that test: the other hunks were taken out of the chain, context blocks name the lines the PR changes in them, a summary level was added at the end, and only findings that quote the hunk under review count (Section 13). The five PRs were rebuilt. |
+| November 16 | Second test: the five PRs reviewed and judged again with the changed levels and counting rule (Section 14). |
 | Not yet | A review run, a judge run, and the comparison with the per-PR table. |
 
 ## 3. What one review covers
@@ -229,7 +230,7 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 ## 10. Not done, and open
 
 1. **Only five PRs have been reviewed** (Section 12). They hold 38 reference comments, 23 of them in one PR, so the numbers are a first reading and not a result.
-2. **The changed levels have not been reviewed.** The design change the first test called for is made (Section 13), and the five PRs are rebuilt, but no review has run on the new levels.
+2. **The levels cannot be told apart on five PRs** (Section 14.3). Two runs of the same input differ by about three covered references, as much as the levels differ. A larger set, or repeated runs, is needed before any level effect can be claimed.
 3. **No priority or confidence** in the paper's reply format. A variant that adds them would allow filtering afterwards, at the cost of no longer being the paper's prompt.
 4. **Two causes are still changed together** (the prompt and one hunk per call). Running this prompt once per PR would separate them. The parser can already find a quoted snippet's file in a whole-PR diff, but the per-PR context file would have to be rebuilt so that its levels record their parts, and that variant has not been run or tested end to end.
 5. **How often the reviewer's quotes are found in the hunk:** 92 to 98% at the first three levels, 7 to 14% from `H04_pr_diff` on (Section 12.3). Findings whose quote is not found have no line numbers.
@@ -378,7 +379,7 @@ References covered, of those of each kind.
 
 ## 13. Changes after the first test (November 15, 2026)
 
-**Status: built and tested on the laptop; the five PRs are rebuilt. No review has run on the changed levels.**
+**Status: built, tested and run. The results are in Section 14.**
 
 The first test showed that a reviewer given the PR's other hunks as a diff reviews those instead of its own hunk (Section 12.3). Four things were changed for that.
 
@@ -433,4 +434,75 @@ What to look at in the results:
 1. Whether `H04_callees1` to `H10_all` now keep or raise the recall of `H03_file` (24 of 38 in the first test), instead of falling.
 2. How many findings are set aside as not on the hunk, per level.
 3. Whether `H11_pr_summary` covers references that `H10_all` misses, and whether the list brings the off-hunk findings back.
+
+## 14. Second test on the five PRs (November 16, 2026)
+
+**What was run.** The same five PRs, 78 hunks and 38 reference comments as the first test, with the levels and the counting rule of Section 13. Reviewer, judge, prompt and settings are unchanged. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2/` on the laptop and on the server.
+
+### 14.1 The run itself
+
+| Measure | Second test | First test |
+|---|---|---|
+| Cells, all usable | 858 | 858 |
+| Model calls for the review | 601 | 601 |
+| Input tokens | 4,118,505 | 5,245,646 |
+| Review time | 36 min | 1 h 11 min |
+| Replies that needed a retry step | 0 | 9 |
+| Judge | 601 calls, 6 min 16 s, 0 errors | 601 calls, 12 min 33 s, 0 errors |
+
+### 14.2 Recall and precision
+
+Counted as in Section 12.2. "Set aside" is the number of findings that did not quote the hunk under review and were therefore not counted.
+
+| Level | Recall | Precision | Findings counted | Set aside | First test at the same context |
+|---|---|---|---|---|---|
+| `H01_min` | 21 of 38 (55.3%) | 16.7% | 114 | 2 | 18 of 38, 13.6% |
+| `H02_function` | 19 of 38 (50.0%) | 14.8% | 115 | 15 | 20 of 38, 13.6% |
+| `H03_file` | 22 of 38 (57.9%) | 17.4% | 115 | 18 | 24 of 38, 17.5% |
+| `H04_callees1` | 19 of 38 (50.0%) | 14.9% | 114 | 16 | 17 of 38, 4.0% (with the other hunks) |
+| `H05_callers1` | 20 of 38 (52.6%) | 15.5% | 116 | 20 | 14 of 38, 3.4% |
+| `H06_tests1` | 21 of 38 (55.3%) | 16.2% | 117 | 21 | 15 of 38, 3.7% |
+| `H07_agent` | 17 of 38 (44.7%) | 13.9% | 108 | 11 | 17 of 38, 4.1% |
+| `H08_depth2` | 17 of 38 (44.7%) | 14.2% | 106 | 16 | 16 of 38, 4.0% |
+| `H09_depth2_docs` | 16 of 38 (42.1%) | 13.2% | 106 | 16 | 15 of 38, 3.6% |
+| `H10_all` | 16 of 38 (42.1%) | 13.0% | 108 | 23 | 15 of 38, 3.8% |
+| `H11_pr_summary` | 19 of 38 (50.0%) | 15.1% | 106 | 34 | (no such level) |
+
+- **The fall is gone.** Every level writes 106 to 117 counted findings, where the first test wrote 373 to 403 from its level 4 on. Precision stays at 13 to 17% at every level instead of dropping to about 4%.
+- **The per-PR run on these PRs covered 2 to 6 of 38** (Section 12.2). Every level here covers 16 to 22.
+- **The summary level did not bring the problem back.** It has the most findings set aside (34), but its counted findings and precision are like the others'. It covers 5 references that `H10_all` misses and misses 2 that `H10_all` covers, which is within the noise of Section 14.3.
+- **28 of the 38 references are covered at some level, and 10 at every level.**
+- **Almost all recall comes from a hunk reviewing its own lines:** the stricter count of Section 12.6 is within 2 of the PR count at every level (for example 22 of 22 at `H03_file`).
+
+By PR, references covered at `H01_min` to `H11_pr_summary`:
+
+| PR | References | Covered |
+|---|---|---|
+| `CherryHQ__cherry-studio__5637` | 23 | 11, 10, 10, 7, 8, 8, 6, 6, 6, 6, 8 |
+| `timescale__timescaledb__7915` | 6 | 4, 2, 5, 5, 5, 5, 4, 4, 4, 4, 4 |
+| `gofr-dev__gofr__1617` | 5 | 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4 |
+| `browser-use__browser-use__857` | 2 | 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2 |
+| `cline__cline__5177` | 2 | 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1 |
+
+By context label, at `H01_min`, `H03_file`, `H06_tests1` and `H10_all`: Diff Level 12, 11, 8, 8 of 21; File Level 5, 7, 9, 5 of 13; Repo Level 4, 4, 4, 3 of 4.
+
+### 14.3 The levels cannot be told apart yet
+
+`H01_min` has the same 78 inputs in both tests, so the two tests are two runs of the same thing at that level.
+
+- **32 of the 78 replies are word for word the same.** The other 46 differ, although the temperature is 0. The model server does not give repeatable replies when calls run in parallel (noted for the first run).
+- **Covered references: 18 in the first test, 21 in the second, 17 in common.** The counting rule set aside 2 findings, so it does not explain the difference.
+
+So one run moves by about three covered references with nothing changed. The levels differ by 16 to 22, a spread of six. No difference between two levels in the table above is larger than what two runs of one level can show.
+
+Two patterns are worth checking on more data, and neither is a finding yet:
+
+- **Recall is lower from `H07_agent` on** (16 or 17, against 19 to 22 before it). It comes from one PR, `CherryHQ__cherry-studio__5637`, which goes from 10 or 11 covered to 6. The inputs grow most at that level (from 322,150 to 701,613 tokens over the 78 hunks).
+- **`H03_file` is the best level in both tests** (24 and 22).
+
+### 14.4 What this test settles, and what it does not
+
+- **Settled:** one hunk per call with the paper's prompt gives recall of 42 to 58% on these PRs at every level, against 5 to 16% per PR. Showing the other hunks as a diff was the cause of the first test's fall, and the changes of Section 13 remove it.
+- **Not settled:** whether any context level is better than another for a hunk. Five PRs and one run per cell cannot show it. That needs more PRs, and a measure of the run-to-run noise (the same cells run two or three times) to know how large a difference must be.
+- **Unchanged limits:** the judge is the reviewer's own model and is not validated; the references are the v1 set; the prompt and the hunk-by-hunk calling were changed together.
 
