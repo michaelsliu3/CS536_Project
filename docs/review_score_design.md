@@ -1,6 +1,6 @@
 # Review score design (branch `review-score`, started November 15, 2026)
 
-**Status: design only. The score's equation and its starting values were agreed on November 15, 2026. Nothing here is built, no comment has been labelled, and no model has been called for it; the work has not been started. The branch `review-score` was created from `per-hunk-review` to hold it.**
+**Status: the equation and its starting values were agreed on November 15, 2026, and the code for the pilot is written and tested (Section 11). No comment has been labelled and no model has been called for it yet. The branch `review-score` was created from `per-hunk-review` to hold it.**
 
 This document records why a new score is wanted, which signals it uses, how it is computed, which numbers in it are choices, and how those choices are meant to be made and checked.
 
@@ -23,6 +23,8 @@ What a developer wants from a review is different: it should find the problems t
 |---|---|
 | November 15 | Two per-hunk tests showed the limits above. The score was proposed and the branch `review-score` created. Decided that membership in AACR-Bench's v2 set is not used as a signal of a comment's value. |
 | November 15, later | The equation of Section 4 and the starting values of Section 5 were agreed. The work itself is not to be started yet. |
+| November 15, later | Decided that Qwen3.8-27B labels the references and rates the findings (Section 6.3). |
+| November 15, later | Work started. `per-hunk-review` merged into this branch. The labelling, rating and scoring code written with tests (Section 11). |
 
 ## 3. Signals
 
@@ -150,22 +152,23 @@ The label is for the problem if the comment is right. Whether the comment is rig
 
 ### 6.3 Who labels
 
-| Labeller | Cost | For | Against |
-|---|---|---|---|
-| Claude, through the script route that uses the plan's included usage | No API bill | Stronger than the reviewer, and a different model | That route has not been run yet |
-| Qwen3.8-27B on the cloud server | Free while the server is on | Already working | The same model as the reviewer and the judge |
+**Decided on November 15, 2026: Qwen3.8-27B does both jobs,** on the cloud server. It labels the reference comments by severity, and it rates the reviewer's unmatched findings (valid, speculative or wrong, with a severity). No Claude model is used for either.
 
-**Proposed:** both label every reference. Where they agree the label stands. The disagreements are a short list for a person to settle.
+| Job | What the model is given | Known weakness of using the reviewer's own model |
+|---|---|---|
+| Severity of the reference comments | The comment and the code it is about | 162 references were written by another Qwen model (Qwen-Coder-480B), and it may rate those higher. One set of labels serves every level and run, so a bias moves all of them alike |
+| Validity of the reviewer's findings | The finding, the hunk and the level's context | The findings were written by this same model. A misreading that produced a wrong finding is likely to be repeated when rating it, so the share of valid findings may come out too high. Comparisons between levels are affected less than the absolute numbers |
 
-The same rubric and labeller rate the reviewer's unmatched findings, which needs the finding, the hunk and the level's context.
+The option not taken was a Claude model through the plan's included usage: stronger and independent of the reviewer, at no API bill, but that route has never been run. It stays available as a check on a sample (Section 7).
 
 ## 7. How the labels are checked
 
 A label from a model changes the score, so it is treated like the judge: an input that must be validated.
 
 - **Agreement with a person.** A developer labels about 50 references without seeing the model's labels. The agreement is reported next to every score.
-- **Agreement between the two labellers,** per tier.
-- **A model favouring its own kind.** 190 references were written by a Claude model and 162 by a Qwen model. The share of each tier is compared per source model and for the references written by people.
+- **A second opinion on a sample, if the first checks raise doubt.** A different model labels or rates a few hundred items, and the agreement with Qwen is reported. This is optional and not planned for the pilot.
+- **A model favouring its own kind.** 162 references were written by a Qwen model. The share of each tier is compared per source model and for the references written by people.
+- **The rater's leniency toward its own findings.** A developer rates a sample of unmatched findings without seeing the model's ratings, and the agreement is reported. Every table that uses the ratings says that the rater is the reviewer's own model.
 - **Sense checks from the other signals.** Blocking labels should be more common among Code Defect and Security Vulnerability than among Maintainability. References that were acted on should not sit mostly in a tier the labels call unimportant without an explanation.
 - **Results that use no labeller.** The same comparison is reported by category alone and on the references written by people alone.
 
@@ -182,13 +185,13 @@ A label from a model changes the score, so it is treated like the judge: an inpu
 
 ## 9. Order of work
 
-Nothing below has been started.
+Steps 1 and 2 are prepared: the code exists (Section 11), and no model has been called.
 
 1. Agree on the rubric and the starting values (this document). The equation and the starting values are agreed; the rubric's wording has not been reviewed line by line.
-2. Pilot: label the 38 references of the five PRs, have them checked by a developer, and re-score the two finished per-hunk tests per tier. This needs no GPU, because the judge's matches are saved.
+2. Pilot: Qwen3.8-27B labels the 38 references of the five PRs, a developer checks them, and the finished per-hunk tests are re-scored per tier. The labelling needs the cloud server; the re-scoring does not, because the judge's matches are saved.
 3. Rate the validity and severity of the findings of those tests.
 4. A developer labels about 50 references; agreement is measured.
-5. Label all references with both labellers.
+5. Label all references with Qwen3.8-27B.
 6. Compute "acted on" for the references written by people.
 7. The preference check of Section 5.1.
 8. Use the score as the selector's reward, with token cost subtracted.
@@ -196,7 +199,47 @@ Nothing below has been started.
 ## 10. Open decisions
 
 1. Whether the three questions of Section 5.1 are answered before the pilot, to confirm the agreed starting values.
-2. Whether both models label, or one.
+2. Whether the labeller and the rater run with thinking on. Thinking made the reviewer about 8.5 times slower; for 1,506 short labelling calls that is hours, not days.
 3. Whether the judge is changed to grade matches.
 4. Where the label file lives. It is small and every score depends on it, so committing it to the repository is proposed; `data/` is git-ignored today.
 5. Whether a speculative finding costs as much as a wrong one.
+
+## 11. What is built
+
+| Path | Content |
+|---|---|
+| `src/review_outcomes/severity.py` | The rubric text, the two prompts, reading a reply, `label_references` and `rate_findings` |
+| `src/review_outcomes/score.py` | The score: `Params`, the five weightings, `score_rows` (per PR and level), `summarize` (per level) |
+| `scripts/outcome/label_severity.py` | Labels the reference comments of a per-hunk profile's PRs |
+| `scripts/outcome/rate_findings.py` | Rates the findings of a run that the judge matched to no reference |
+| `scripts/outcome/score_runs.py` | Scores a finished run from its saved files; calls no model |
+| `tests/test_review_score.py` | Nine tests, including the worked example of Section 4 |
+
+**How the pieces behave.**
+
+- **The code shown to the labeller** is the input of the hunk the comment sits on, at `H03_file` (the PR's title and description, the hunk, and its file). On the five PRs all 38 references sit on a hunk; the prompts are 4,000 to 30,000 characters.
+- **Not shown to the labeller:** the comment's author and source model. A test checks this.
+- **A reply that cannot be read is recorded as an error,** never as a guessed tier, and is sent again by the next run.
+- **Saved once.** Labels go to `data/aacr_hunk/labels/severity_<model>.jsonl`, with `_think` in the name when thinking is on. Ratings go to the run folder, `ratings/<hunk>/<level>.json`. A later run keeps what was made with the same prompt and model settings.
+- **Only unmatched findings are rated,** and identical inputs once. The second per-hunk test has 972 unmatched findings over its eleven levels, 682 of them distinct; its `H01_min` and `H03_file` have 174.
+- **Without ratings** the scoring script reports recall per tier and weighted recall under the five weightings. With ratings it adds the valid findings outside the references, the noise and the score.
+- **A reference without a label is left out of every sum** and counted, so a partly labelled file cannot pass as complete.
+
+**How to run the pilot** (the first two need the model server):
+
+```bash
+OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/label_severity.py
+```
+
+```bash
+OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/rate_findings.py
+```
+
+```bash
+.venv/bin/python scripts/outcome/score_runs.py data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2 --labels data/aacr_hunk/labels/severity_qwen3.8-27b.jsonl
+```
+
+Both model scripts take `--dry-run`, which prints what would be sent, and `--thinking`.
+
+**Not built:** the category and evidence multipliers have parameters but no command-line switch; "acted on" is not computed; the judge still answers yes or no; the preference check does not exist.
+
