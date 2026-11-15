@@ -300,6 +300,16 @@ def pack_hunks(data: dict, repo: Path, configs: dict, counters: dict, pr: dict |
     return hunks, checks
 
 
+def check_unit(records: Iterable[dict], unit: str) -> None:
+    """Raise ValueError if a record was built for the other unit, so a per-hunk build can never
+    replace the per-PR records of a file (or the other way round)."""
+    wrong = sorted(r["id"] for r in records if r.get("status") == "ok" and ("hunks" in r) != (unit == "hunk"))
+    if wrong:
+        other = "per-hunk" if unit == "pr" else "per-PR"
+        raise ValueError(f"this file holds {other} records ({len(wrong)}, e.g. {wrong[0]}); a "
+                         f"{'per-PR' if unit == 'pr' else 'per-hunk'} build must not write into it")
+
+
 def hunk_units(records: Iterable[dict]) -> list[dict]:
     """One record-like dict per hunk of FORMAT_HUNK records, in dataset and diff order, for code
     that reads a record's `levels`: id (the hunk's), pr_id, index (the PR's), hunk (its

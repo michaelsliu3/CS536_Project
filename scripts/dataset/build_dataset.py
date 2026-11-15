@@ -57,8 +57,8 @@ def parse_args():
     parser.add_argument("root", type=Path, help="Dataset folder (created if missing), e.g. data/aacr")
     parser.add_argument("--unit", choices=dataset.UNITS, default="pr",
                         help="What one review covers: the whole PR (default), or one diff hunk. With `hunk` the "
-                             "levels of configs/levels_hunk/ are packed for every hunk of every PR; use a root of "
-                             "its own, e.g. data/aacr_hunk")
+                             "levels of configs/levels_hunk/ are packed for every hunk of every PR. It needs a folder "
+                             "of its own, e.g. data/aacr_hunk: a folder that holds per-PR records is refused")
     parser.add_argument("--config", type=Path, action="append",
                         help="Level config, repeatable, parents first (default: configs/levels/*.yaml, sorted; "
                              "configs/levels_hunk/*.yaml with --unit hunk)")
@@ -179,6 +179,10 @@ def main() -> int:
                 return dataset.build_key(configs, tool_version, tokenizers, entry["record"], args.unit)
 
             existing = dataset.load_records(out_path, status=None)
+            try:  # a per-hunk build pointed at the per-PR folder (or the other way round) must not replace its records
+                dataset.check_unit(existing.values(), args.unit)
+            except ValueError as error:
+                raise pipeline.SetupError(f"{out_path}: {error}; give this build a folder of its own") from None
             built = sum(dataset.is_current(existing.get(e["id"]), key_of(e)) for e in selected)
             failed_before = sum(existing.get(e["id"], {}).get("status") == "failed" for e in selected)
             to_build = len(selected) if args.force else len(selected) - built

@@ -240,7 +240,9 @@ existing cache reuses the stored graph and is not a real rebuild.
 ## Per-hunk levels (a test, on the branch `per-hunk-review`)
 
 `scripts/dataset/build_dataset.py ROOT --unit hunk` packs a set of levels for every diff hunk of
-every PR, where the default packs one set per PR. Use a root of its own, such as `data/aacr_hunk`.
+every PR, where the default packs one set per PR. It needs a folder of its own, `data/aacr_hunk`: a
+build refuses a folder whose file holds the other unit's records, so the per-PR data in `data/aacr`
+cannot be replaced.
 The reasons, the checks and the open points are in
 [`docs/per_hunk_review_test.md`](../../docs/per_hunk_review_test.md).
 

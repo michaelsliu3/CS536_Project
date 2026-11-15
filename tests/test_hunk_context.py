@@ -8,7 +8,7 @@ from pathlib import Path
 from src.tracer_context.build import (
     CONTEXT_HEADING, OTHER_HEADING, build_context, nesting_check, split_input, validate_config,
 )
-from src.tracer_context.dataset import FORMAT, FORMAT_HUNK, build_key, hunk_units, pack_hunks
+from src.tracer_context.dataset import FORMAT, FORMAT_HUNK, build_key, check_unit, hunk_units, pack_hunks
 from src.tracer_context.hunks import HunkTracer, hunk_id, hunk_seeds, restrict_trace, split_diff
 from src.tracer_context.runtime import load_level_configs
 
@@ -361,6 +361,18 @@ class HunkDatasetTests(RepoTestCase):
         self.assertNotEqual(build_key(*args), build_key(*args, unit="hunk"))
         self.assertEqual(build_key(*args), build_key(*args, unit="pr"))
         self.assertNotEqual(FORMAT, FORMAT_HUNK)
+
+    def test_a_build_refuses_a_file_that_holds_the_other_units_records(self):
+        per_pr = {"id": "o__r__1", "status": "ok", "levels": {}}
+        per_hunk = {"id": "o__r__2", "status": "ok", "hunks": []}
+        failed = {"id": "o__r__3", "status": "failed"}  # a failed record has neither; it is retried either way
+        check_unit([per_pr, failed], "pr")
+        check_unit([per_hunk, failed], "hunk")
+        check_unit([], "hunk")
+        with self.assertRaisesRegex(ValueError, "per-PR records"):
+            check_unit([per_pr, failed], "hunk")  # a per-hunk build pointed at the per-PR file
+        with self.assertRaisesRegex(ValueError, "per-hunk records"):
+            check_unit([per_hunk], "pr")
 
 
 if __name__ == "__main__":

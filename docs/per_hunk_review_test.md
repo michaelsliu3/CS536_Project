@@ -26,7 +26,8 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 |---|---|
 | November 14 | First outcome table. Three checks afterwards: the reviewer comments on few files, the paper prints its prompt for plain LLMs, AACR-Bench has a v2 reference set. |
 | November 15 | The decision above. Branch `per-hunk-review` created from master at `6112480`. Tracer, levels, prompt and outcome-table code written. Five PRs built per hunk on the laptop as a check. |
-| November 15, later | The first prompt was our own wording of the paper's instructions, with a JSON reply. It was replaced by the paper's exact text and tag format, with a parser for the tags. 208 tests pass, 22 of them new. |
+| November 15, later | The first prompt was our own wording of the paper's instructions, with a JSON reply. It was replaced by the paper's exact text and tag format, with a parser for the tags. |
+| November 15, later | Decided that the per-hunk test keeps a data folder of its own, `data/aacr_hunk/`, and the original context levels stay as they are. A guard was added so a per-hunk build can never write into the per-PR file. 209 tests pass, 23 of them new. |
 | Not yet | A review run, a judge run, and the comparison with the per-PR table. |
 
 ## 3. What one review covers
@@ -83,7 +84,10 @@ A per-PR review sees the whole diff. A per-hunk review does not, so the rest of 
 
 ### 4.4 What the per-PR pipeline keeps
 
-The two new config keys (`input.other_hunks`, `packing.other_hunks_max_tokens`) are optional. A config without them is unchanged, and so is its hash. The extra links are collected only when a per-hunk build asks for them.
+- **A data folder of its own.** Everything of this test lives in `data/aacr_hunk/`: its copy of the AACR file, its context levels, its logs and its outcome runs. `data/aacr/`, with the per-PR levels and the first run, is not written to.
+- **A guard.** A build refuses a folder whose context file holds the other unit's records. So `--unit hunk` pointed at `data/aacr` stops before writing anything, and the original `data/aacr/context_levels.jsonl` cannot be replaced by mistake. On November 15 that file still had the hash the first run recorded (`b06dee5e…`).
+- **Configs:** the two new keys (`input.other_hunks`, `packing.other_hunks_max_tokens`) are optional. A config without them is unchanged, and so is its hash.
+- **Trace:** the extra links are collected only when a per-hunk build asks for them.
 
 ## 5. The reviewer prompt
 
@@ -130,7 +134,7 @@ Each level records where its parts sit in its text, so the slots are filled by p
 
 ## 7. What was checked on November 15
 
-- **Tests:** 208 pass. The 22 new ones cover splitting a diff, repeating a trace from one hunk, the other-changes section, the per-hunk data set record, the paper's prompt and its slots, the tag parser, the follow-up message, and the per-hunk outcome tables.
+- **Tests:** 209 pass. The 23 new ones cover splitting a diff, repeating a trace from one hunk, the other-changes section, the per-hunk data set record, the paper's prompt and its slots, the tag parser, the follow-up message, the per-hunk outcome tables, and the guard between the two kinds of build.
 - **Per-PR pipeline untouched:** the ten per-PR configs have the hashes stored in the data set, and 199 of 199 sampled saved reviews keep their cache key on this branch.
 - **Five PRs built per hunk** (`data/aacr_hunk/`, git-ignored), in four languages:
 
@@ -178,7 +182,7 @@ Measured on the five PRs, with the review script's dry run:
 
 ## 9. How to run it
 
-Build the per-hunk levels (laptop or server; no GPU). The root must be its own folder:
+Build the per-hunk levels (laptop or server; no GPU). The folder must be its own; `data/aacr` is refused:
 
 ```bash
 .venv/bin/python scripts/dataset/build_dataset.py data/aacr_hunk --unit hunk
@@ -230,4 +234,5 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 | `src/review_outcomes/table.py` | Per-hunk cells, `build_hunk_tables` |
 | `notebooks/outcome_table.ipynb` | The `cloud-hunk` profile |
 | `tests/test_hunk_context.py`, `tests/test_review_outcomes.py` | The new tests |
-| `data/aacr_hunk/` (git-ignored) | The five-PR per-hunk build |
+| `data/aacr_hunk/` (git-ignored) | This test's data: the five-PR per-hunk build, and later its outcome runs |
+| `data/aacr/` (git-ignored) | The original per-PR levels and the first run, unchanged |

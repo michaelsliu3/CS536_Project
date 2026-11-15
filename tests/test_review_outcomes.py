@@ -976,6 +976,11 @@ class HunkRunTests(unittest.TestCase):
         self.assertNotIn("prompt", read_notebook_profile("cloud"))  # the per-PR run keeps the Codex prompt
         self.assertEqual(profile["reviewer"], read_notebook_profile("cloud")["reviewer"])
         self.assertEqual(profile["judge"], read_notebook_profile("cloud")["judge"])
+        # The per-hunk test has a data folder of its own; the per-PR run's folder is not shared.
+        per_pr = read_notebook_profile("cloud")
+        self.assertEqual((per_pr["contexts"], per_pr["out_root"]), ("data/aacr/context_levels.jsonl", "data/aacr/outcomes"))
+        self.assertEqual(profile["out_root"], "data/aacr_hunk/outcomes")
+        self.assertNotEqual(profile["run_name"], per_pr["run_name"])
 
 
 if __name__ == "__main__":
