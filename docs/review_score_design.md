@@ -139,7 +139,7 @@ The label is for the problem if the comment is right. Whether the comment is rig
 
 ### 6.3 Who labels
 
-**Decided on November 15, 2026: Qwen3.8-27B labels the reference comments, with thinking on** (Section 12.1), on the cloud server. No Claude model is used.
+**Decided on November 15, 2026: Qwen3.8-27B labels the reference comments, with thinking on** (Section 12.1), on the cloud server. No Claude model is used. The reviewer and the judge run with thinking off; the settings of all steps are listed in Section 18 of [per_hunk_review_test.md](per_hunk_review_test.md).
 
 - **Known weakness:** 162 references were written by another Qwen model (Qwen-Coder-480B), and the labeller may rate those higher. One set of labels serves every level and run, so a bias moves all of them alike.
 - **The option not taken** was a Claude model through the plan's included usage: stronger and independent of the reviewer, at no API bill, but that route has never been run. It stays available as a check on a sample (Section 7).
