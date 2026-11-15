@@ -39,3 +39,6 @@ checkpoints/*
 .lavish/
 docs/1st_meeting_transcript/
 docs/professor_meeting_transcript/
+
+# Working notes, scripts and caches behind the research reports; kept locally
+research_notes/
