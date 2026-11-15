@@ -90,6 +90,8 @@ def main(argv=None) -> int:
     parser.add_argument("--first", type=int, help="only the first N PRs of the context file (to time a run)")
     parser.add_argument("--entries", nargs="+", metavar="ID", help="only these PRs")
     parser.add_argument("--levels", nargs="+", metavar="LEVEL", help="only these levels (default: the profile's)")
+    parser.add_argument("--run-suffix", default="", metavar="TEXT",
+                        help="added to the profile's run name, e.g. _r2: a repeat of a run in a folder of its own")
     parser.add_argument("--concurrency", type=int, help="requests in flight (default: the profile's)")
     parser.add_argument("--dry-run", action="store_true",
                         help="print what a run would send (new cells and retry steps) and stop; calls no model, writes nothing")
@@ -97,7 +99,7 @@ def main(argv=None) -> int:
 
     config = read_notebook_profile(args.profile)
     spec = config["reviewer"]
-    out = PROJECT_ROOT / config["out_root"] / config["run_name"]
+    out = PROJECT_ROOT / config["out_root"] / (config["run_name"] + args.run_suffix)
     contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
     concurrency = args.concurrency or spec["concurrency"]
     prompt = load_review_prompt(config.get("prompt", "codex"))  # refuses to run if a pinned prompt file was edited
