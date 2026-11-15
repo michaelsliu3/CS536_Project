@@ -1,0 +1,7 @@
+# H04 pr-diff: + the PR's other hunks, shown as a diff after this hunk. A per-PR review sees
+# them for free; a per-hunk review does not. They are taken nearest first (the same file, then
+# the other files) up to 16,000 tokens, which holds the whole diff of 175 of the 185 built PRs.
+inherit: H03_file.yaml
+level: {name: H04_pr_diff, parent: H03_file}
+input: {other_hunks: true}
+packing: {other_hunks_max_tokens: 16000}

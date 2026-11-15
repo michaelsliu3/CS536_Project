@@ -1,0 +1,6 @@
+# H05 callees-1: + definitions of what this hunk's code calls directly.
+inherit: H04_pr_diff.yaml
+level: {name: H05_callees1, parent: H04_pr_diff}
+selection:
+  limits:
+    callee: {max_hop: 1, max_items: 40}

@@ -1,0 +1,7 @@
+# H10 depth-2-docs: + documentation sections and tests up to two hops away.
+inherit: H09_depth2.yaml
+level: {name: H10_depth2_docs, parent: H09_depth2}
+selection:
+  limits:
+    doc: {max_hop: 2, max_items: 10}
+    test: {max_hop: 2, max_items: 25}

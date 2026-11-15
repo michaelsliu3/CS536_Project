@@ -1,0 +1,7 @@
+# H02 function: + the full function or class this hunk changes.
+inherit: H01_min.yaml
+level: {name: H02_function, parent: H01_min}
+selection:
+  limits:
+    changed: {max_hop: 0, max_items: null}
+packing: {token_budget: null}   # no per-level budget from here on: only the input cap (base config)

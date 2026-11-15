@@ -77,6 +77,23 @@ def _query(tool: _Tool, project: str, cypher: str) -> list[list[str]]:
     return result.get("rows", [])
 
 
+def _inbound(tool: _Tool, project: str, names: list[str], warnings: list[str]) -> list[list[str]]:
+    """[source, link type, target] for every link into `names`. An answer the tool cuts short is
+    asked again for half the names; one symbol with more links than the tool returns keeps what
+    came back and is recorded as a warning."""
+    result = tool.call("query_graph", {
+        "project": project, "max_rows": 99998, "max_output_tokens": 1_000_000, "format": "json",
+        "query": f"MATCH (a)-[r]->(b) WHERE b.qualified_name IN {_cypher_list(names)} "
+                 "RETURN a.qualified_name, type(r), b.qualified_name"})
+    if result.get("has_more") or result.get("truncated"):
+        if len(names) > 1:
+            half = len(names) // 2
+            return _inbound(tool, project, names[:half], warnings) + _inbound(tool, project, names[half:], warnings)
+        warnings.append(f"per-symbol links: the links into {names[0]} were cut short by the tool; "
+                        "a hunk's callers may be incomplete")
+    return result.get("rows", [])
+
+
 def _cypher_list(names) -> str:
     return "[" + ", ".join(json.dumps(n) for n in names) + "]"
 
@@ -125,9 +142,15 @@ def text_hits(repo: Path, seeds: list[dict]) -> dict:
                    "hits": [list(h) for h in sorted(found[name])[:_MAX_HITS_KEPT]]} for name in sorted(names)}
 
 
-def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path) -> dict:
+def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path,
+          per_seed_edges: bool = False) -> dict:
     """Index `repo` into a fresh `cache_dir` and return the trace dict (names without the
-    tool's path-derived project prefix, so traces compare across machines)."""
+    tool's path-derived project prefix, so traces compare across machines).
+
+    The tool walks from all changed symbols at once and reports each caller's nearest one only.
+    With `per_seed_edges`, the trace also keeps every link among the traced symbols
+    (`call_edges`, `caller_edges`), so the walk can be repeated from the changed symbols of one
+    diff hunk (src/tracer_context/hunks.py). Nothing else in the trace changes."""
     repo = repo.resolve()
     binary = binary.resolve()
     if not binary.is_file():
@@ -207,13 +230,28 @@ def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path
         callee_names = {r["qn"] for r in callees["impacted"]}
         sources = {s["qn"] for s in seeds} | {r["qn"] for r in callees["impacted"]
                                               if int(r["hop"]) < callees_cfg["depth"] and r["qn"].startswith(prefix)}
-        callee_edges = set()
+        callee_edges, call_edges, caller_edges = set(), set(), set()
+        seed_names = {s["qn"] for s in seeds}
         for batch in _batches(sources):
             for a, b in _query(tool, project, f"MATCH (a)-[r:CALLS]->(b) WHERE a.qualified_name IN "
                                               f"{_cypher_list(batch)} RETURN a.qualified_name, b.qualified_name"):
                 if b in callee_names:
                     callee_edges.add((strip(a), strip(b)))
+                if per_seed_edges and a != b and (b in callee_names or b in seed_names):
+                    call_edges.add((strip(a), strip(b)))  # also between two changed symbols
         lap("callee_links")
+
+        if per_seed_edges and edge_types:
+            # Every followed link into a changed symbol or a caller short of the walk's depth, from
+            # a changed symbol or a traced caller.
+            members = seed_names | {r["qn"] for r in callers["impacted"]}
+            targets = seed_names | {r["qn"] for r in callers["impacted"]
+                                    if int(r["hop"]) < callers_cfg["depth"] and r["qn"].startswith(prefix)}
+            for batch in _batches(targets):
+                for a, kind, b in _inbound(tool, project, batch, warnings):
+                    if kind in edge_types and a in members and a != b:
+                        caller_edges.add((strip(a), kind, strip(b)))
+            lap("seed_links")
     finally:
         tool.run("daemon", "stop", check=False)
 
@@ -225,7 +263,10 @@ def trace(repo: Path, base: str, tracer_cfg: dict, binary: Path, cache_dir: Path
     stripped_seeds = sorted(({**s, "qn": strip(s["qn"])} for s in seeds), key=lambda s: (s["file"], s["start"], s["qn"]))
     hits = text_hits(repo, stripped_seeds)
     lap("text_search")
+    per_seed = {"call_edges": sorted([list(e) for e in call_edges]),
+                "caller_edges": sorted([list(e) for e in caller_edges])} if per_seed_edges else {}
     return {
+        **per_seed,
         "format": TRACE_FORMAT,
         "tool_version": version,
         "repo": str(repo),

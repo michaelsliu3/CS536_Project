@@ -55,8 +55,13 @@ OUTPUT_NAME = pipeline.OUTPUT_FILE
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", type=Path, help="Dataset folder (created if missing), e.g. data/aacr")
+    parser.add_argument("--unit", choices=dataset.UNITS, default="pr",
+                        help="What one review covers: the whole PR (default), or one diff hunk. With `hunk` the "
+                             "levels of configs/levels_hunk/ are packed for every hunk of every PR; use a root of "
+                             "its own, e.g. data/aacr_hunk")
     parser.add_argument("--config", type=Path, action="append",
-                        help="Level config, repeatable, parents first (default: configs/levels/*.yaml, sorted)")
+                        help="Level config, repeatable, parents first (default: configs/levels/*.yaml, sorted; "
+                             "configs/levels_hunk/*.yaml with --unit hunk)")
     parser.add_argument("--entries", help="Only these entry IDs (owner__repo__number) or 0-based positions, comma-separated")
     parser.add_argument("--languages", help="Only these main languages, comma-separated (e.g. Go,TypeScript)")
     parser.add_argument("--limit", type=int, help="At most this many of the selected entries")
@@ -109,7 +114,8 @@ def setup(args, root: Path, log) -> dict:
 
     from src.tracer_context.runtime import load_level_configs  # imports need the packages above
 
-    config_paths = args.config or sorted((PROJECT_ROOT / "configs" / "levels").glob("*.yaml"))
+    default_dir = "levels" if args.unit == "pr" else "levels_hunk"
+    config_paths = args.config or sorted((PROJECT_ROOT / "configs" / default_dir).glob("*.yaml"))
     state["configs"] = check("level configs", lambda: load_level_configs(config_paths))
     if state["configs"]:
         log.info(f"        {len(state['configs'])} levels: {', '.join(state['configs'])}")
@@ -138,7 +144,7 @@ def main() -> int:
         signal.signal(sig, _raise_interrupt)
     code_commit = subprocess.run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
                                  capture_output=True, text=True).stdout.strip()
-    log.info(f"build_dataset: root {root}")
+    log.info(f"build_dataset: root {root}" + ("" if args.unit == "pr" else f", one set of levels per diff {args.unit}"))
     log.info(f"log file {log_path}; code {code_commit or '?'}; Python {platform.python_version()} on "
              f"{platform.system()} {platform.machine()}")
     log.debug(f"arguments: {vars(args)}")
@@ -170,7 +176,7 @@ def main() -> int:
                 raise pipeline.SetupError("no entries match --entries/--languages/--limit")
 
             def key_of(entry):
-                return dataset.build_key(configs, tool_version, tokenizers, entry["record"])
+                return dataset.build_key(configs, tool_version, tokenizers, entry["record"], args.unit)
 
             existing = dataset.load_records(out_path, status=None)
             built = sum(dataset.is_current(existing.get(e["id"]), key_of(e)) for e in selected)
@@ -191,7 +197,7 @@ def main() -> int:
                 return dataset.process_entry(entry, configs, counters, binary=binary, tool_version=tool_version,
                                              repos_dir=work / "repos", scratch_dir=work / "tmp", key=key_of(entry),
                                              fetch_depth=args.fetch_depth, max_depth=args.max_depth,
-                                             extra_build=extra_build)
+                                             extra_build=extra_build, unit=args.unit)
 
             def before_repo(name, group):
                 free = pipeline.free_gb(root)

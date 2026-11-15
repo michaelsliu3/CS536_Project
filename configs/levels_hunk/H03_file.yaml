@@ -1,0 +1,6 @@
+# H03 file: + the file this hunk is in (windows around the hunk for files over 400 lines).
+inherit: H02_function.yaml
+level: {name: H03_file, parent: H02_function}
+selection:
+  limits:
+    file: {max_hop: 0, max_items: null}
