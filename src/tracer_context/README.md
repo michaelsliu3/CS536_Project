@@ -246,10 +246,15 @@ cannot be replaced.
 The reasons, the checks and the open points are in
 [`docs/per_hunk_review_test.md`](../../docs/per_hunk_review_test.md).
 
-- **Levels:** `configs/levels_hunk/H01_min.yaml` … `H11_all.yaml`. They mirror the ten levels
-  above, each starting from one hunk, and add `H04_pr_diff`, which shows the PR's other hunks
-  (`input.other_hunks`, up to `packing.other_hunks_max_tokens`). Both keys are optional, so the
-  per-PR configs and their hashes are unchanged.
+- **Levels:** `configs/levels_hunk/H01_min.yaml` … `H10_all.yaml` mirror the ten levels above
+  one to one, each starting from one hunk. `H11_pr_summary` adds a list of the PR's other
+  changes with no code (`input.other_hunks` with `input.other_hunks_form: summary`, up to
+  `packing.other_hunks_max_tokens`).
+- **What else the PR changes:** from `H02_function` on (`input.mark_changed`), a context
+  block's header names the lines the PR changes in it outside the hunk under review. The hunk's
+  trace carries them as `other_changed`.
+- **Optional keys:** the four keys above are optional, so the per-PR configs and their hashes
+  are unchanged.
 - **One trace per PR:** `cbm.trace(..., per_seed_edges=True)` also keeps every link among the
   traced symbols (`call_edges`, `caller_edges`). `hunks.HunkTracer` repeats the walk from one
   hunk's changed symbols over those links and hands `build_context` a trace of the usual shape.

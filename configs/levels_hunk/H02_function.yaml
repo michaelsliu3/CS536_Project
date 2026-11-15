@@ -4,4 +4,7 @@ level: {name: H02_function, parent: H01_min}
 selection:
   limits:
     changed: {max_hop: 0, max_items: null}
+# The context blocks hold the code after the change. From here on a block's header names the
+# lines the PR changes in it outside this hunk, so the reviewer can tell what else is new.
+input: {mark_changed: true}
 packing: {token_budget: null}   # no per-level budget from here on: only the input cap (base config)

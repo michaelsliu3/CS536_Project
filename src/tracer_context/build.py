@@ -78,8 +78,11 @@ SCHEMA = {
 
 # Keys a config may leave out, by section. They exist for the per-hunk levels (configs/levels_hunk/);
 # a config without them is unchanged, and so is its hash.
+OTHER_FORMS = ("diff", "summary")
 OPTIONAL = {
-    "config.input": {"other_hunks": bool},                    # show the PR's other hunks after the diff
+    "config.input": {"other_hunks": bool,          # show the PR's other hunks after the diff
+                     "other_hunks_form": str,      # "diff" (default): their diff lines; "summary": where they are
+                     "mark_changed": bool},        # say on a context block which of its lines the PR also changes
     "config.packing": {"other_hunks_max_tokens": _OPT_INT},   # room for them; null = no limit of their own
 }
 
@@ -185,6 +188,9 @@ def validate_config(cfg: dict) -> dict:
         raise ValueError("config.packing.token_budget must be >= 0 or null")
     if input_cap is not None and input_cap < 1:
         raise ValueError("config.packing.max_input_tokens must be >= 1 or null")
+    form = cfg["input"].get("other_hunks_form", "diff")
+    if form not in OTHER_FORMS:
+        raise ValueError(f"config.input.other_hunks_form must be one of {OTHER_FORMS}, got {form!r}")
     other_cap = packing.get("other_hunks_max_tokens")
     if other_cap is not None and other_cap < 0:
         raise ValueError("config.packing.other_hunks_max_tokens must be >= 0 or null")
@@ -567,7 +573,19 @@ def _fence(text: str) -> str:
     return "`" * max(3, longest + 1)
 
 
-def render_item(item: Item, lines: list[str], segments, start: int, end: int, line_numbers: bool) -> str:
+def _spans(ranges) -> str:
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in ranges)
+
+
+def changed_note(segments, changed) -> str:
+    """What a context block's header says about the PR's other changes in the lines it shows
+    (`changed`: runs of changed lines of the block's file), or "" when it shows none."""
+    inside = _merge([(max(a, c), min(b, d)) for a, b in segments for c, d in changed if c <= b and d >= a])
+    return f"  (this pull request also changes lines {_spans(inside)})" if inside else ""
+
+
+def render_item(item: Item, lines: list[str], segments, start: int, end: int, line_numbers: bool,
+                note: str = "") -> str:
     body, previous = [], None
     for a, b in segments:
         if previous is not None and a > previous + 1:
@@ -581,7 +599,7 @@ def render_item(item: Item, lines: list[str], segments, start: int, end: int, li
     code = "\n".join(body)
     fence = _fence(code)
     language = LANG_BY_EXT.get(Path(item.file).suffix.lower(), "")
-    return f"{_header(item, start, end)}\n{fence}{language}\n{code}\n{fence}"
+    return f"{_header(item, start, end)}{note}\n{fence}{language}\n{code}\n{fence}"
 
 
 def render_pr(pr: dict, strip_html_comments: bool) -> str:
@@ -631,13 +649,44 @@ def split_input(text: str, sections: dict) -> dict[str, str]:
             "contexts": SEPARATOR.join(p for p in (other, part("context")) if p)}
 
 
-def render_other_hunks(others: list[dict], max_tokens: int | None,
-                       count_tokens: Callable[[str], int]) -> tuple[str, dict]:
-    """(the section showing a PR's other hunks, {total, shown, tokens}).
+def _summary_entry(other: dict) -> str:
+    if other.get("deleted_file"):
+        return "file deleted"
+    start, count = other["new_start"], other["new_count"]
+    where = f"lines removed at {start}" if not count else f"lines {_spans([(start, start + count - 1)])}"
+    return f"{where} ({other['section']})" if other.get("section") else where
 
-    `others` is in order of nearness ({index, file, file_header, body}); hunks are taken in that
-    order until the next one would pass `max_tokens`, then shown in diff order, each file's
-    header once. An empty list gives no section."""
+
+def render_other_hunks(others: list[dict], max_tokens: int | None,
+                       count_tokens: Callable[[str], int], form: str = "diff") -> tuple[str, dict]:
+    """(the section showing a PR's other hunks, {total, shown, tokens, form}).
+
+    `others` is in order of nearness ({index, file, file_header, body, new_start, new_count,
+    deleted_file, section}); hunks are taken in that order until the next one would pass
+    `max_tokens`, then shown in diff order. Form "diff" shows their diff lines, each file's
+    header once. Form "summary" shows no code: one line per file with each hunk's lines after
+    the change and the enclosing code named in its `@@` header. An empty list gives no section."""
+    if form == "summary":
+        chosen, used = [], 0
+        for other in others:
+            cost = count_tokens(f"- `{other['file']}`: {_summary_entry(other)}\n")
+            if max_tokens is not None and used + cost > max_tokens:
+                break
+            chosen.append(other)
+            used += cost
+        if not chosen:
+            return "", {"total": len(others), "shown": 0, "tokens": 0, "form": form}
+        by_file: dict[str, list[str]] = {}
+        for other in sorted(chosen, key=lambda o: o["index"]):
+            entry = _summary_entry(other)
+            if entry not in by_file.setdefault(other["file"], []):
+                by_file[other["file"]].append(entry)
+        listing = "\n".join(f"- `{path}`: {'; '.join(entries)}" for path, entries in by_file.items())
+        intro = ("The pull request also changes these places (file, lines after the change, enclosing code)"
+                 + ("" if len(chosen) == len(others) else f"; {len(chosen)} of {len(others)} are listed, the nearest ones")
+                 + ":")
+        section = f"{OTHER_HEADING}{SEPARATOR}{intro}{SEPARATOR}{listing}"
+        return section, {"total": len(others), "shown": len(chosen), "tokens": count_tokens(section), "form": form}
     chosen, used = [], 0
     for other in others:
         cost = count_tokens(f"{other['file_header']}\n{other['body']}\n")
@@ -646,7 +695,7 @@ def render_other_hunks(others: list[dict], max_tokens: int | None,
         chosen.append(other)
         used += cost
     if not chosen:
-        return "", {"total": len(others), "shown": 0, "tokens": 0}
+        return "", {"total": len(others), "shown": 0, "tokens": 0, "form": form}
     lines, previous = [], None
     for other in sorted(chosen, key=lambda o: o["index"]):
         if other["file"] != previous and other["file_header"]:
@@ -658,7 +707,7 @@ def render_other_hunks(others: list[dict], max_tokens: int | None,
     note = "" if len(chosen) == len(others) else (
         f"({len(chosen)} of the {len(others)} other changes are shown, the nearest ones.){SEPARATOR}")
     section = f"{OTHER_HEADING}{SEPARATOR}{note}{fence}diff\n{diff.rstrip()}\n{fence}"
-    return section, {"total": len(others), "shown": len(chosen), "tokens": count_tokens(section)}
+    return section, {"total": len(others), "shown": len(chosen), "tokens": count_tokens(section), "form": form}
 
 
 def _overlaps(segments_a, segments_b) -> bool:
@@ -691,6 +740,10 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
     ranked, limited = apply_limits([it for it in items if it.qn not in forced_qns], limits, ranking, changed_files)
     excluded += limited
 
+    # Per-hunk levels: the PR's changed lines outside the hunk under review, named on the blocks
+    # that show them. The blocks hold the code after the change, so nothing else says what is new.
+    mark_changed, other_changed = bool(inputs.get("mark_changed")), trace.get("other_changed") or {}
+
     repo_root = repo.resolve()
     file_cache: dict[str, tuple[list[str] | None, str | None]] = {}
     decorator_cache: dict[str, dict[int, int]] = {}
@@ -707,7 +760,8 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         return file_cache[path]
 
     def render(item, lines, segments, start, end):
-        block = render_item(item, lines, segments, start, end, packing["line_numbers"])
+        note = changed_note(segments, other_changed.get(item.file, ())) if mark_changed else ""
+        block = render_item(item, lines, segments, start, end, packing["line_numbers"], note)
         # Count the block with the separator that follows it, so the sum tracks the joined text.
         return block, count_tokens(block + SEPARATOR)
 
@@ -748,7 +802,8 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
             base = count_tokens(SEPARATOR.join(s for s in (pr_section, diff_section) if s))
             left = max(0, packing["max_input_tokens"] - base - 64)
             room = left if room is None else min(room, left)
-        other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens)
+        other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens,
+                                                         inputs.get("other_hunks_form", "diff"))
     fixed = [s for s in (pr_section, diff_section, other_section) if s]
     input_cap = packing["max_input_tokens"]
     context_prefix = SEPARATOR.join(fixed + [f"{CONTEXT_HEADING}{SEPARATOR}"])  # the full text is this + context

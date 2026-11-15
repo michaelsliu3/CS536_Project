@@ -772,6 +772,14 @@ class TagParserTests(unittest.TestCase):
             ("the old value was fine", "p.py", 248, 248, "left", True),
             ("quotes something that is not there", "p.py", None, None, "right", False)])
         self.assertEqual((parsed["findings"][0]["snippet"], parsed["findings"][0]["priority"]), ("+b = warning_once(d)", None))
+        # The per-hunk rule: a finding whose quote is not in the hunk under review is set apart.
+        strict = parse_tagged_review(reply, path="p.py", diff=HUNK_P, on_hunk_only=True)
+        self.assertEqual([f["note"] for f in strict["findings"]], ["G1 dict is unhashable", "the old value was fine"])
+        self.assertEqual([(f["note"], f["located"]) for f in strict["off_hunk_findings"]], [("quotes something that is not there", False)])
+        self.assertNotIn("off_hunk_findings", parsed)
+        only_off = parse_tagged_review(tagged(("+ no such line", "right", "about other code"), end=False), path="p.py",
+                                       diff=HUNK_P, on_hunk_only=True)
+        self.assertEqual((only_off["status"], only_off["findings"], len(only_off["off_hunk_findings"])), ("ok", [], 1))
         # Without a path (a whole-PR diff) the file comes from where the snippet is found.
         both = HUNK_P + "\n" + HUNK_W
         self.assertEqual(parse_tagged_review(tagged(("+new long warning string", "right", "too long")), diff=both)["findings"][0]["path"], "w.py")
@@ -828,9 +836,10 @@ class HunkRunTests(unittest.TestCase):
         def reviewer(messages, max_tokens=None):
             text = messages[0]["content"]
             self.calls.append(text)
-            if "a/p.py" in text:  # the second comment quotes a line that is not in the hunk
+            if "a/p.py" in text:  # the third comment quotes a line that is not in the hunk
                 reply = tagged(("+b = warning_once(d)", "right", "G1 dict passed to cached warning_once"),
-                               ("+ something else", "right", "G2 same unhashable problem"))
+                               ("+c = 3", "right", "G2 same unhashable problem"),
+                               ("+ something else", "right", "G3 about code outside the hunk"))
             elif "## Relevant Code Context" in text:
                 reply = "<end />"
             else:
@@ -874,9 +883,11 @@ class HunkRunTests(unittest.TestCase):
                          [("ok", None), ("ok", "H01_min"), ("ok", None), ("ok", None)])
         first = reviews[0]
         self.assertEqual((first["pr"], first["file"], first["prompt_version"], first["parser"]),
-                         ("o__r__1", "p.py", AACR_PROMPT_VERSION, "aacr-tags-v1"))
+                         ("o__r__1", "p.py", AACR_PROMPT_VERSION, "aacr-tags-v2+on-hunk"))
+        # Only the finding that quotes this hunk counts; the other is kept apart and not scored.
         self.assertEqual([(f["path"], f["from_line"], f["located"]) for f in first["parsed"]["findings"]],
-                         [("p.py", 248, True), ("p.py", None, False)])
+                         [("p.py", 248, True), ("p.py", 249, True)])
+        self.assertEqual([(f["path"], f["located"]) for f in first["parsed"]["off_hunk_findings"]], [("p.py", False)])
         self.assertTrue((out / "reviews" / "o__r__1__h0002" / "H02_function.json").is_file())
         run_reviews(cells, self.reviewer, prompt, out)
         self.assertEqual(len(self.calls), 3)  # a second run reuses every saved review
@@ -911,6 +922,7 @@ class HunkRunTests(unittest.TestCase):
                           one["references_on_hunk_covered"], one["references_covered"]), (2, 2, 2, 1, 1))
         self.assertEqual((hunk_rows[2]["references_on_hunk"], hunk_rows[2]["references_on_hunk_covered"]), (2, 1))
         self.assertEqual(hunk_rows[3]["findings"], 0)
+        self.assertEqual([r["findings_off_hunk"] for r in hunk_rows], [1, 0, 1, 0])
 
         write_outputs(out, rows, coverage, hunk_rows)
         self.assertTrue(all((out / name).is_file() for name in ("table.csv", "table.json", "coverage.csv", "hunk_table.csv")))

@@ -215,7 +215,8 @@ class _ReviewFiles:
 
     def parser_version(self, cell: Cell) -> str:
         if self.prompt.reply_format == "aacr-tags":
-            return TAG_PARSER_VERSION
+            # A per-hunk cell counts only the findings that quote its hunk (parse_tagged_review).
+            return TAG_PARSER_VERSION if cell.file is None else f"{TAG_PARSER_VERSION}+on-hunk"
         # A per-hunk cell's findings are placed in the hunk's file (parse_review's `path`).
         return PARSER_VERSION if cell.file is None else f"{PARSER_VERSION}+hunk-path"
 
@@ -234,7 +235,8 @@ class _ReviewFiles:
     def parser(self, cell: Cell) -> Callable[[str], dict]:
         if self.prompt.reply_format == "aacr-tags":  # the paper's tags: lines come from the quoted snippet
             diff = cell.parts.diff if cell.parts else None
-            return lambda text: parse_tagged_review(text, path=cell.file, diff=diff)
+            return lambda text: parse_tagged_review(text, path=cell.file, diff=diff,
+                                                    on_hunk_only=cell.file is not None)
         return lambda text: parse_review(text, cell.known_paths, path=cell.file)
 
     def load(self, cell: Cell, key: str) -> tuple[dict | None, bool]:
@@ -587,7 +589,9 @@ def build_hunk_tables(cells: list[Cell], reviews: list[dict], judgments: list[di
                         "new_start": cell.span[0], "new_end": cell.span[1], "input_tokens": cell.input_tokens,
                         "review_status": status, "truncated": (review or {}).get("truncated"),
                         "retry": retry_rule.steps_taken(review) if review else None,
-                        "findings": len(parsed.get("findings", [])), "output_tokens": reply.get("completion_tokens"),
+                        "findings": len(parsed.get("findings", [])),
+                        "findings_off_hunk": len(parsed.get("off_hunk_findings", [])),
+                        "output_tokens": reply.get("completion_tokens"),
                         "review_seconds": reply.get("seconds"), "reused_from": (review or {}).get("reused_from"),
                         "references_on_hunk": len(on_hunk)}
             if judgment:

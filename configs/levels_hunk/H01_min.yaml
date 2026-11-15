@@ -1,6 +1,7 @@
 # Per-hunk levels (configs/levels_hunk/): one diff hunk is reviewed per call, as AACR-Bench's
 # paper does for its non-agent rows, and every level starts from that hunk alone
-# (src/tracer_context/hunks.py). They mirror configs/levels/ with one level added, H04_pr_diff.
+# (src/tracer_context/hunks.py). H01 to H10 mirror configs/levels/ (L01 to L10) one to one; H11_pr_summary is one extra level
+# outside that chain's ten.
 #
 # H01 min: the PR title and description plus this hunk; no other context. This is the paper's
 # "no code context" setting.

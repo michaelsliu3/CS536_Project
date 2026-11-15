@@ -15,6 +15,8 @@ alone, so `build.build_context` packs the hunk's levels with no change:
   hunks          the changed lines inside the hunk
   diff           the file's diff header and this hunk
   other_hunks    the PR's other hunks, nearest first (shown by levels with `input.other_hunks`)
+  other_changed  the PR's changed lines outside this hunk, by file (levels with
+                 `input.mark_changed` say so on the context blocks that contain them)
 
 The trace must have been made with `per_seed_edges=True` (cbm.trace).
 """
@@ -24,7 +26,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 
-HUNK_VERSION = 1  # how a PR is split and re-walked; part of the hunk dataset's resume key
+HUNK_VERSION = 2  # how a PR is split and re-walked; part of the hunk dataset's resume key
 _HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
@@ -147,7 +149,10 @@ def other_hunks(hunk: Hunk, hunks: list[Hunk]) -> list[dict]:
     same = sorted((h for h in hunks if h.index != hunk.index and h.file == hunk.file),
                   key=lambda h: (abs(h.index - hunk.index), h.index))
     rest = [h for h in hunks if h.file != hunk.file]
-    return [{"index": h.index, "file": h.file, "file_header": h.file_header, "body": h.body} for h in same + rest]
+    return [{"index": h.index, "file": h.file, "file_header": h.file_header, "body": h.body,
+             "new_start": h.new_start, "new_count": h.new_count, "deleted_file": h.deleted_file,
+             "section": h.header.split("@@", 2)[2].strip() if h.header.count("@@") >= 2 else ""}
+            for h in same + rest]
 
 
 def _walk(start: set[str], links: dict[str, list], depth: int) -> dict[str, tuple[int, str, str]]:
@@ -211,6 +216,9 @@ class HunkTracer:
         callers = sorted(({**self._row(self.caller_rows, name), "hop": hop, "via_qn": via, "via_edge": kind}
                           for name, (hop, via, kind) in reached_by.items()), key=lambda r: (r["hop"], r["qn"]))
         ranges = changed_ranges(trace, hunk)
+        mine = {tuple(r) for r in ranges}
+        elsewhere = {path: [list(r) for r in runs if path != hunk.file or tuple(r) not in mine]
+                     for path, runs in trace["hunks"].items()}
         return {
             **trace,
             "seeds": seeds,
@@ -223,6 +231,7 @@ class HunkTracer:
             "hunks": {hunk.file: ranges} if ranges else {},
             "diff": hunk.text,
             "other_hunks": other_hunks(hunk, self.hunks),
+            "other_changed": {path: runs for path, runs in elsewhere.items() if runs},
         }
 
     def check_links(self) -> dict:

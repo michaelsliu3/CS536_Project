@@ -8,7 +8,7 @@ import json
 import re
 
 PARSER_VERSION = "codex-json-v1"
-TAG_PARSER_VERSION = "aacr-tags-v1"
+TAG_PARSER_VERSION = "aacr-tags-v2"  # v2: on_hunk_only
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _FENCE = re.compile(r"^\s*```(?:json)?\s*\n(.*?)\n\s*```\s*$", re.DOTALL)
 
@@ -183,7 +183,8 @@ def locate_snippet(diff_text: str, snippet: str, side: str = "right") -> tuple[s
     return search(lines, wanted) or search(on_side, wanted) or search(on_side, wanted[:1])
 
 
-def parse_tagged_review(text: str, path: str | None = None, diff: str | None = None) -> dict:
+def parse_tagged_review(text: str, path: str | None = None, diff: str | None = None,
+                        on_hunk_only: bool = False) -> dict:
     """A reply in the AACR-Bench paper's tags, as `parse_review` returns a JSON one.
 
     Each `<note>` is one finding; the `<diff>` and `<side>` before it (after the previous note)
@@ -192,6 +193,10 @@ def parse_tagged_review(text: str, path: str | None = None, diff: str | None = N
     (and its file, when `path` is not given). A finding whose snippet is not found keeps no line
     numbers (`located` is False).
 
+    `on_hunk_only` is the rule of a per-hunk review: a finding counts only when its quoted
+    snippet is found in `diff`, the hunk under review. The others (a quote of other code the
+    reviewer was shown, or no quote) are returned under "off_hunk_findings" and are not scored.
+
     status: "ok" for a reply with a note or the end tag (no note and `<end />` is a review with
     no findings), "malformed" for one with neither, "empty_output" for an empty one."""
     body = _THINK.sub("", text or "")
@@ -199,7 +204,7 @@ def parse_tagged_review(text: str, path: str | None = None, diff: str | None = N
         body = body.split("</think>", 1)[1]
     if not body.strip():
         return {"status": "empty_output", "findings": [], "invalid_findings": 0, "overall": {}, "error": "empty reply"}
-    findings, invalid, position = [], 0, 0
+    findings, off_hunk, invalid, position = [], [], 0, 0
     for match in _NOTE.finditer(body):
         before, position = body[position:match.start()], match.end()
         note = match.group(1).strip()
@@ -210,14 +215,16 @@ def parse_tagged_review(text: str, path: str | None = None, diff: str | None = N
         snippet = snippets[-1].strip("\n") if snippets else None
         side = sides[-1].lower() if sides else "right"
         found = locate_snippet(diff, snippet, side) if diff and snippet else None
-        findings.append({
+        (off_hunk if on_hunk_only and found is None else findings).append({
             "note": note, "title": "", "body": note,
             "path": path if path is not None else (found[0] if found else ""), "raw_path": None,
             "from_line": found[1] if found else None, "to_line": found[2] if found else None, "side": side,
             "priority": None, "confidence": None, "snippet": snippet, "located": found is not None})
     invalid += len(_DIFF.findall(body[position:]))  # a quoted snippet with no comment after it
     ended = bool(_END.search(body))
-    if not findings and not ended:
+    extra = {"off_hunk_findings": off_hunk} if on_hunk_only else {}
+    if not findings and not off_hunk and not ended:
         return {"status": "malformed", "findings": [], "invalid_findings": invalid, "overall": {},
                 "error": "no <note> and no <end />"}
-    return {"status": "ok", "findings": findings, "invalid_findings": invalid, "overall": {"ended": ended}, "error": None}
+    return {"status": "ok", "findings": findings, "invalid_findings": invalid, "overall": {"ended": ended},
+            "error": None, **extra}
