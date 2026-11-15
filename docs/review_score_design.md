@@ -1,6 +1,6 @@
 # Review score design (branch `review-score`, started November 15, 2026)
 
-**Status: the equation and its starting values were agreed on November 15, 2026, and the code for the pilot is written and tested (Section 11). The 38 reference comments of the five test PRs are labelled and the three finished per-hunk runs are re-scored per tier (Section 12). The findings have not been rated yet, so only the first term of the score exists. The branch `review-score` was created from `per-hunk-review` to hold it.**
+**Status: the equation and its starting values were agreed on November 15, 2026, and the code for the pilot is written and tested (Section 11). The 38 reference comments of the five test PRs are labelled and the three finished per-hunk runs are re-scored per tier (Section 12). The rating of findings was tried and dropped the same day (Section 13), which reduced the score to its first term. The branch `review-score` was created from `per-hunk-review` to hold it.**
 
 This document records why a new score is wanted, which signals it uses, how it is computed, which numbers in it are choices, and how those choices are meant to be made and checked.
 
@@ -25,6 +25,7 @@ What a developer wants from a review is different: it should find the problems t
 | November 15, later | The equation of Section 4 and the starting values of Section 5 were agreed. The work itself is not to be started yet. |
 | November 15, later | Decided that Qwen3.8-27B labels the references and rates the findings (Section 6.3). |
 | November 15, later | Qwen3.8-27B labelled the 38 references with thinking off and on. Decided that the thinking-on labels are used, and that labelling always runs with thinking on (Section 12). The three finished runs were re-scored per tier. |
+| November 15, later | The findings of two levels were rated with thinking off. Decided to drop the rating of findings and with it the second and third terms of the score (Sections 4 and 13). |
 | November 15, later | Work started. `per-hunk-review` merged into this branch. The labelling, rating and scoring code written with tests (Section 11). |
 
 ## 3. Signals
@@ -44,61 +45,47 @@ The benchmark gives each reference comment a category, a context label, its auth
 
 ## 4. The score
 
-Three parts, each answering one question.
-
-1. **Did the review find what matters?** Each reference comment has an importance. A covered reference earns its importance times a match grade.
-2. **Did it find real problems the benchmark lacks?** Each finding that matches no reference is rated valid, speculative or wrong, and given a severity by the same rubric. A valid one earns part of its severity weight.
-3. **How much noise did it make?** Each speculative or wrong finding costs a fixed penalty.
+**Decided on November 15, 2026:** the score is recall in which a reference comment counts by how much it matters. The reviewer's findings that match no reference are not scored (Section 13 has what was tried and why it was dropped).
 
 ```
 importance(reference) = severity weight × category multiplier × evidence multiplier
 
-score = Σ importance × match grade              over the references
-      + outside credit × Σ severity weight      over valid findings that match no reference
-      − noise penalty × (speculative + wrong findings)
+score = Σ importance of the covered references ÷ Σ importance of all references
 ```
 
-With the starting values of Section 5 the multipliers are 1 and a match is yes or no, so the score is:
+With the starting values of Section 5 the multipliers are 1, so the importance is the severity weight.
 
-```
-score = Σ severity weight of the covered references
-      + 0.5 × Σ severity weight of valid findings that match no reference
-      − 0.5 × (speculative + wrong findings)
-```
-
-**An example.** A PR has three references: one blocking (5), one should-fix (2), one nit (0.5). The review covers the blocking one and the nit, adds one valid should-fix finding that is not among the references, and makes three speculative or wrong findings.
+**An example.** A PR has three references: one blocking (5), one should-fix (2), one nit (0.5). The review covers the blocking one and the nit.
 
 | Part | Value |
 |---|---|
 | Covered references | 5 + 0.5 = 5.5 |
-| Valid finding outside the references | 0.5 × 2 = 1 |
-| Noise | 0.5 × 3 = 1.5 |
-| Score | 5.5 + 1 − 1.5 = 5 |
-| Score as reported | 5 ÷ (5 + 2 + 0.5) = 0.67 |
+| All references | 5 + 2 + 0.5 = 7.5 |
+| Score | 5.5 ÷ 7.5 = 0.73 |
 
-- **For reporting,** the score of a PR is divided by the summed importance of its references, so a PR with many references does not dominate.
-- **For the selector,** the same sum is taken per hunk without dividing. A hunk without references then scores by its valid findings and its noise alone, which is the only outcome that can be measured for most hunks.
+Plain recall for the same review is 2 of 3, or 0.67. Covering only the should-fix reference would score 0.27; covering only the blocking one, 0.67.
+
+- **Over several PRs** the two sums are taken over all their references, as plain recall is.
 - **Token cost** is not part of this score. The selector's reward subtracts it separately.
+- **The score does not see how many findings a review makes.** A review that covers the same references with four times the findings scores the same. Precision, as AACR-Bench defines it, stays in every table for that.
 
 **What is always reported next to the score,** so that no conclusion rests on the weights:
 
-- recall per severity tier, with blocking recall first;
-- speculative and wrong findings per hunk;
-- valid findings that match no reference, per severity tier;
+- references covered per severity tier, blocking first;
+- the score under the five weightings of Section 5.1;
 - plain recall and precision as before.
 
 ## 5. The numbers that are choices
 
-Every signal has a number, and the numbers are few on purpose. Three are neutral at the start.
+Every signal has a number, and the numbers are few on purpose. Two are neutral at the start.
 
 | Choice | Meaning | Starting value |
 |---|---|---|
 | Severity weights | Worth of a blocking, should-fix and nit comment | 5, 2, 0.5 |
 | Category multiplier | Extra weight for a category, on top of severity | 1 for every category (neutral) |
 | Evidence multiplier | Extra weight for a reference written by a person, and more if it was acted on | 1 (neutral); the first value to try is 1.25 and 1.5 |
-| Match grade for a related remark | Credit when a finding is on the same code and related, but not the same problem | 1 for the same problem only (neutral), because the current judge answers yes or no. A graded judge would use 0.5 |
-| Outside credit | Share of its severity weight that a valid finding outside the references earns | 0.5 |
-| Noise penalty | Cost of one speculative or wrong finding | 0.5 |
+
+A covered reference counts in full: the judge answers yes or no, and a graded match is not used. The first version of the score also had a credit for valid findings outside the references and a penalty for noise, both at 0.5; they left with the rating of findings (Section 13).
 
 **The starting values were agreed on November 15, 2026.** The methods of Section 5.1 check them. A value changes only through those methods, with the date and the reason recorded here, and never to make a comparison come out a certain way.
 
@@ -111,8 +98,7 @@ Four methods, used together:
 1. **Exchange-rate questions.** A developer answers a few direct questions, and the answers fix the ratios.
    - How many nits are worth one blocking problem found? (With 5 and 0.5, ten.)
    - How many should-fix problems are worth one blocking problem? (With 5 and 2, two and a half.)
-   - How many false alarms is one blocking problem worth reading through? (With 5 and a penalty of 0.5, ten.)
-2. **A check against a person's preferences.** Take about 40 pairs of reviews of the same hunk, from different levels or runs. A developer picks the better review of each pair without seeing the score. The share of pairs where the score agrees is reported. A model fitted to half of the choices (a logistic regression on the difference between the two reviews' counts per tier and noise) shows which weights the choices imply, and the other half tests them.
+2. **A check against a person's preferences.** Take about 40 pairs of reviews of the same hunk, from different levels or runs. A developer picks the better review of each pair without seeing the score. The share of pairs where the score agrees is reported. A model fitted to half of the choices (a logistic regression on the difference between the two reviews' covered references per tier) shows which weights the choices imply, and the other half tests them.
 3. **Several weightings instead of one.** Every comparison is reported under a small fixed set of weightings, and a conclusion counts as robust only if it holds under all of them.
 
    | Name | Blocking, should fix, nit |
@@ -124,7 +110,7 @@ Four methods, used together:
    | Blocking only | 1, 0, 0 |
 
    The neutral multipliers are varied the same way (for example Security Vulnerability at 1.5, evidence at 1.25 and 1.5).
-4. **A rule that needs no weights.** If one level covers at least as many references in every tier as another and makes no more noise, it is better under any weights that respect the order of the tiers. Where this holds, the weights do not matter; where it does not, the answer depends on them and the write-up says so.
+4. **A rule that needs no weights.** If one level covers at least as many references in every tier as another, it is better under any weights that respect the order of the tiers. Where this holds, the weights do not matter; where it does not, the answer depends on them and the write-up says so.
 
 **Precedent.** Machine-translation evaluation scores errors by severity in the same way (the MQM scheme). The weights in use there differ between groups: minor 1 with major 5 or 10, and 25 for an unusable segment. That supports a steep scale, and it shows that even an established scheme has no single correct set of numbers, which is why method 3 is needed. For code review, a study at Microsoft treated a comment as useful when it led to a code change, which is the "acted on" signal. Both were read through later papers that cite them, and the originals must be checked before either is cited in a report:
 
@@ -153,23 +139,18 @@ The label is for the problem if the comment is right. Whether the comment is rig
 
 ### 6.3 Who labels
 
-**Decided on November 15, 2026: Qwen3.8-27B does both jobs,** on the cloud server. It labels the reference comments by severity, and it rates the reviewer's unmatched findings (valid, speculative or wrong, with a severity). No Claude model is used for either.
+**Decided on November 15, 2026: Qwen3.8-27B labels the reference comments, with thinking on** (Section 12.1), on the cloud server. No Claude model is used.
 
-| Job | What the model is given | Known weakness of using the reviewer's own model |
-|---|---|---|
-| Severity of the reference comments | The comment and the code it is about | 162 references were written by another Qwen model (Qwen-Coder-480B), and it may rate those higher. One set of labels serves every level and run, so a bias moves all of them alike |
-| Validity of the reviewer's findings | The finding, the hunk and the level's context | The findings were written by this same model. A misreading that produced a wrong finding is likely to be repeated when rating it, so the share of valid findings may come out too high. Comparisons between levels are affected less than the absolute numbers |
-
-The option not taken was a Claude model through the plan's included usage: stronger and independent of the reviewer, at no API bill, but that route has never been run. It stays available as a check on a sample (Section 7).
+- **Known weakness:** 162 references were written by another Qwen model (Qwen-Coder-480B), and the labeller may rate those higher. One set of labels serves every level and run, so a bias moves all of them alike.
+- **The option not taken** was a Claude model through the plan's included usage: stronger and independent of the reviewer, at no API bill, but that route has never been run. It stays available as a check on a sample (Section 7).
 
 ## 7. How the labels are checked
 
 A label from a model changes the score, so it is treated like the judge: an input that must be validated.
 
 - **Agreement with a person.** A developer labels about 50 references without seeing the model's labels. The agreement is reported next to every score.
-- **A second opinion on a sample, if the first checks raise doubt.** A different model labels or rates a few hundred items, and the agreement with Qwen is reported. This is optional and not planned for the pilot.
+- **A second opinion on a sample, if the first checks raise doubt.** A different model labels a few hundred references, and the agreement with Qwen is reported. This is optional and not planned.
 - **A model favouring its own kind.** 162 references were written by a Qwen model. The share of each tier is compared per source model and for the references written by people.
-- **The rater's leniency toward its own findings.** A developer rates a sample of unmatched findings without seeing the model's ratings, and the agreement is reported. Every table that uses the ratings says that the rater is the reviewer's own model.
 - **Sense checks from the other signals.** Blocking labels should be more common among Code Defect and Security Vulnerability than among Maintainability. References that were acted on should not sit mostly in a tier the labels call unimportant without an explanation.
 - **Results that use no labeller.** The same comparison is reported by category alone and on the references written by people alone.
 
@@ -177,72 +158,63 @@ A label from a model changes the score, so it is treated like the judge: an inpu
 
 ## 8. Limits known now
 
-- **Another model judgement.** The score rests on the severity labels and on the validity ratings of findings. Section 7 bounds the first; the second has the same weakness as the judge and needs the same check.
+- **Another model judgement.** The score rests on the severity labels, made by the reviewer's own model. Section 7 bounds that.
+- **Blind to volume and to findings outside the references.** A real problem the benchmark lacks earns nothing, and a false alarm costs nothing. This was accepted when the rating of findings was dropped (Section 13).
 - **Small tiers.** Splitting 38 references (the five PRs tested so far) into three tiers leaves a handful in each. Tier results need the 30-PR set or the whole benchmark.
 - **Run-to-run noise** (Section 14.3 of the per-hunk document) is not reduced by a new score. Repeated runs are still needed.
 - **It may not separate the levels.** A blocking problem that depends on other code is where context should matter most. That is a reason to look there, not a result.
-- **A graded match needs a new judge prompt,** which is no longer AACR-Bench's judge. Until that is decided the match grade stays yes or no.
 - **"Acted on" is unknown for many comments:** those written by an LLM, and those of PRs with no commit after the reviewed one.
 
 ## 9. Order of work
 
-Steps 1 and 2 are prepared: the code exists (Section 11), and no model has been called.
-
-1. Agree on the rubric and the starting values (this document). The equation and the starting values are agreed; the rubric's wording has not been reviewed line by line.
-2. Pilot: Qwen3.8-27B labels the 38 references of the five PRs, a developer checks them, and the finished per-hunk tests are re-scored per tier. The labelling needs the cloud server; the re-scoring does not, because the judge's matches are saved.
-3. Rate the validity and severity of the findings of those tests.
-4. A developer labels about 50 references; agreement is measured.
-5. Label all references with Qwen3.8-27B.
-6. Compute "acted on" for the references written by people.
-7. The preference check of Section 5.1.
-8. Use the score as the selector's reward, with token cost subtracted.
+| # | Step | State on November 15 |
+|---|---|---|
+| 1 | Agree on the rubric, the equation and the starting values | Done |
+| 2 | Pilot: label the 38 references of the five PRs and re-score the finished per-hunk tests | Done (Section 12) |
+| 3 | Rate the validity of the reviewer's findings | Tried on the pilot and dropped (Section 13) |
+| 4 | A developer labels about 50 references without seeing the model's labels; agreement is measured | Not done |
+| 5 | Label all references with Qwen3.8-27B, thinking on | Not started |
+| 6 | Compute "acted on" for the references written by people | Not started |
+| 7 | The preference check of Section 5.1 | Not started |
+| 8 | Use the score as the selector's reward, with token cost subtracted | Not started |
 
 ## 10. Open decisions
 
-1. Whether the three questions of Section 5.1 are answered before the pilot, to confirm the agreed starting values.
-2. Whether the rater of findings runs with thinking on. For the labeller this is decided: always on (Section 12.1).
-3. Whether the judge is changed to grade matches.
-4. Where the label file lives. It is small and every score depends on it, so committing it to the repository is proposed; `data/` is git-ignored today.
-5. Whether a speculative finding costs as much as a wrong one.
+1. Whether the category and evidence multipliers stay at 1, or which values they take.
+2. Where the label file lives. It is small and every score depends on it, so committing it to the repository is proposed; `data/` is git-ignored today.
+3. Whether a developer labels a sample independently (step 4 of Section 9), which is the only way to report how well the model's labels agree with a person.
 
 ## 11. What is built
 
 | Path | Content |
 |---|---|
-| `src/review_outcomes/severity.py` | The rubric text, the two prompts, reading a reply, `label_references` and `rate_findings` |
+| `src/review_outcomes/severity.py` | The rubric text, the labelling prompt, reading a reply, `label_references` |
 | `src/review_outcomes/score.py` | The score: `Params`, the five weightings, `score_rows` (per PR and level), `summarize` (per level) |
 | `scripts/outcome/label_severity.py` | Labels the reference comments of a per-hunk profile's PRs |
-| `scripts/outcome/rate_findings.py` | Rates the findings of a run that the judge matched to no reference |
 | `scripts/outcome/score_runs.py` | Scores a finished run from its saved files; calls no model |
-| `tests/test_review_score.py` | Nine tests, including the worked example of Section 4 |
+| `tests/test_review_score.py` | Tests for reading replies, labelling and the score |
 
 **How the pieces behave.**
 
 - **The code shown to the labeller** is the input of the hunk the comment sits on, at `H03_file` (the PR's title and description, the hunk, and its file). On the five PRs all 38 references sit on a hunk; the prompts are 4,000 to 30,000 characters.
 - **Not shown to the labeller:** the comment's author and source model. A test checks this.
 - **A reply that cannot be read is recorded as an error,** never as a guessed tier, and is sent again by the next run.
-- **Saved once.** Labels go to `data/aacr_hunk/labels/severity_<model>.jsonl`, with `_think` in the name when thinking is on. Ratings go to the run folder, `ratings/<hunk>/<level>.json`. A later run keeps what was made with the same prompt and model settings.
-- **Only unmatched findings are rated,** and identical inputs once. The second per-hunk test has 972 unmatched findings over its eleven levels, 682 of them distinct; its `H01_min` and `H03_file` have 174.
-- **Without ratings** the scoring script reports recall per tier and weighted recall under the five weightings. With ratings it adds the valid findings outside the references, the noise and the score.
+- **Saved once.** Labels go to `data/aacr_hunk/labels/severity_<model>.jsonl`, with `_think` in the name when thinking is on. A later run keeps what was made with the same prompt and model settings.
 - **A reference without a label is left out of every sum** and counted, so a partly labelled file cannot pass as complete.
 
-**How to run the pilot** (the first two need the model server):
+**How to run it** (the first needs the model server):
 
 ```bash
-OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/label_severity.py
+OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/label_severity.py --thinking
 ```
 
 ```bash
-OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/rate_findings.py
+.venv/bin/python scripts/outcome/score_runs.py data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2 --labels data/aacr_hunk/labels/severity_qwen3.8-27b_think.jsonl
 ```
 
-```bash
-.venv/bin/python scripts/outcome/score_runs.py data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2 --labels data/aacr_hunk/labels/severity_qwen3.8-27b.jsonl
-```
+The labelling script takes `--dry-run`, which prints what would be sent.
 
-Both model scripts take `--dry-run`, which prints what would be sent, and `--thinking`.
-
-**Not built:** the category and evidence multipliers have parameters but no command-line switch; "acted on" is not computed; the judge still answers yes or no; the preference check does not exist.
+**Not built:** the category and evidence multipliers have parameters but no command-line switch; "acted on" is not computed; the preference check does not exist.
 
 ## 12. Pilot on the five PRs (November 15, 2026)
 
@@ -266,7 +238,7 @@ Qwen3.8-27B labelled the 38 reference comments twice, with thinking off and with
 
 ### 12.2 The finished runs, per tier
 
-References covered, with the thinking-on labels: 2 blocking, 17 should fix, 19 nit. "Flat" is plain recall; "agreed" uses the weights 5, 2 and 0.5.
+References covered, with the thinking-on labels: 2 blocking, 17 should fix, 19 nit. "Flat" is plain recall; "agreed" is the score with the weights 5, 2 and 0.5.
 
 Second per-hunk test (thinking off, the current levels):
 
@@ -299,5 +271,33 @@ First per-hunk test, where the levels from 4 on showed the other hunks as a diff
 - **`H03_file` is the best level under every weighting.**
 - **The blocking tier holds two references,** so "1 of 2" against "2 of 2" is one comment. The blocking-only weighting and the steep one cannot be read on five PRs.
 - **Run-to-run noise applies here as it does to plain recall.** One run per level cannot separate these levels.
-- **Only the first term is scored.** Valid findings outside the references and noise need the ratings (Section 9, step 3).
+
+
+## 13. Rating the reviewer's findings: tried and dropped (November 15, 2026)
+
+The first version of the score had two more terms: a credit for valid findings that match no reference, and a penalty for speculative or wrong ones. Both need each unmatched finding rated as valid, speculative or wrong. On the five PRs about 80% of the findings match no reference.
+
+**What was run.** Qwen3.8-27B, thinking off, rated the unmatched findings of the second per-hunk test, shown the same input the reviewer had seen. A thinking-on rating of two levels was started for comparison and stopped at 75 of 174 when the decision below was made; nothing of it was kept.
+
+| Level | Unmatched findings | Valid | Speculative | Wrong | Unreadable |
+|---|---|---|---|---|---|
+| `H01_min` | 89 | 32 | 57 | 0 | 0 |
+| `H03_file` | 85 | 43 | 37 | 4 | 1 |
+
+Over all eleven levels: 972 unmatched findings (682 distinct), of which about 4% were rated wrong.
+
+**What the full score looked like** for those two levels, with the weights 5, 2, 0.5 and 0.5 for both the credit and the penalty: `H01_min` 33.0 for covered references, +23.8 for valid findings outside them, −28.5 for noise, 28.2 in all; `H03_file` 38.0, +36.2, −20.5, 53.8 in all.
+
+**Why it was dropped.**
+
+1. **The only rater available is the reviewer's own model.** It rated almost none of its own findings wrong. A misreading that produced a finding is likely to be repeated when rating it.
+2. **The term it feeds was as large as the term measured against the benchmark.** The credit for findings outside the references (+24 to +36, and up to +69 for the thinking-on reviewer) rivalled the credit for covered references (33 to 44), so the score would have rested mostly on that rater.
+3. **"Speculative" depended on what the rater was shown.** Given the reviewer's own input, the rater could confirm less at `H01_min` than at `H03_file`. Part of the difference between levels was then the rater seeing more, not the reviewer being more right.
+4. **Dividing by the references' importance no longer gave a share.** With the outside credit added, the reported score went above 1.
+
+**Decided on November 15, 2026:** unmatched findings are not rated, and the score keeps only its first term (Section 4). The score's purpose is to give severe and important reference comments more weight, which needs no rater.
+
+**What is given up.** A real problem that the benchmark lacks earns nothing, and a false alarm costs nothing. Precision stays in the tables as the only measure that reacts to the number of findings, with its known weakness that it counts every unmatched finding as wrong.
+
+**What remains on disk:** the thinking-off ratings, in `ratings/` under the run folders `qwen3.8-27b_aacr-hunk_v2` and `qwen3.8-27b-think_aacr-hunk_v2`. No code reads them. The rating script and the two extra terms were removed from the code; they are in the branch's history at `23b9284`.
 

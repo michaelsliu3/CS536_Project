@@ -1,14 +1,9 @@
-"""Severity labels for reference comments and validity ratings for the reviewer's findings.
+"""Severity labels for reference comments (docs/review_score_design.md).
 
-Two model jobs behind the review score (docs/review_score_design.md):
-
-- `label_references`: each reference comment gets a tier (blocking, should_fix, nit). The model
-  sees the comment and the code it is about, not who wrote the comment.
-- `rate_findings`: each finding the judge matched to no reference gets a validity (valid,
-  speculative, wrong) and a tier. The model sees the finding and the input the reviewer saw.
-
-Both are made once and saved; a later run skips what is saved under the same prompt, model
-settings and input. The model is the caller's choice (a chat backend from backends.py).
+`label_references` gives each reference comment a tier (blocking, should_fix, nit). The model
+sees the comment and the code it is about, not who wrote the comment. Labels are made once and
+saved; a later run skips what is saved under the same prompt, model settings and input. The
+model is the caller's choice (a chat backend from backends.py).
 """
 from __future__ import annotations
 
@@ -24,7 +19,6 @@ from src.review_outcomes.judge import normalize_separators
 
 RUBRIC_VERSION = "severity-v1"
 TIERS = ("blocking", "should_fix", "nit")
-VALIDITIES = ("valid", "speculative", "wrong")
 
 RUBRIC = """\
 Severity tiers, for the problem a comment names if the comment is right:
@@ -55,36 +49,6 @@ Lines: {lines}
 
 Reply with one JSON object and nothing else:
 {{"tier": "blocking" | "should_fix" | "nit", "reason": "<one sentence>", "confidence": <0 to 1>}}"""
-
-RATE_PROMPT = """\
-You are checking one comment that a code reviewer wrote about a change. Decide whether the \
-comment is right, using only the code shown below, and how much the problem it names matters.
-
-Validity:
-- valid: the problem the comment names is real and can be confirmed from the code shown.
-- speculative: the comment may be right, but the code shown cannot confirm it. It asks the \
-author to check something, or it depends on code that is not shown.
-- wrong: the code shown contradicts the comment, or what it names is not a problem.
-
-{rubric}
-
-## What the reviewer was shown
-
-{code}
-
-## The reviewer's comment
-
-File: {path}
-Quoted code:
-{snippet}
-
-{note}
-
-## Answer
-
-Reply with one JSON object and nothing else:
-{{"validity": "valid" | "speculative" | "wrong", "tier": "blocking" | "should_fix" | "nit", \
-"reason": "<one sentence>"}}"""
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _OBJECT = re.compile(r"\{[^{}]*\}", re.DOTALL)
@@ -224,80 +188,3 @@ def label_references(references: dict[str, dict], cells: list, caller, out_path:
     _run(todo, caller, {"tier": TIERS}, concurrency, done)
     wanted = {(i["pr"], i["reference"]) for i in items}
     return {k: v for k, v in labels.items() if k in wanted}
-
-
-# ---------- the reviewer's findings ----------
-
-def finding_items(reviews: list[dict], judgments: list[dict], cells: list, identity) -> list[dict]:
-    """One item per finding that the judge matched to no reference: {entry, level, order, prompt,
-    key, ...}. A finding the judge could not judge is left out."""
-    text = {(c.entry, c.level): c.text for c in cells}
-    judged = {(j["entry"], j["level"]): j for j in judgments}
-    items = []
-    for review in reviews:
-        cell = (review["entry"], review["level"])
-        judgment = judged.get(cell)
-        if judgment is None or cell not in text:
-            continue
-        findings = (review.get("parsed") or {}).get("findings", [])
-        for record in sorted(judgment["records"], key=lambda r: r["order"]):
-            if record.get("matched_gt_indices") or record.get("judge_error") or record["order"] >= len(findings):
-                continue
-            finding = findings[record["order"]]
-            prompt = RATE_PROMPT.format(rubric=RUBRIC, code=text[cell], path=finding.get("path"),
-                                        snippet=finding.get("snippet") or "(none)", note=finding["note"].strip())
-            items.append({"entry": review["entry"], "level": review["level"], "order": record["order"],
-                          "pr": review.get("pr") or review["entry"], "key": _key(prompt, identity), "prompt": prompt})
-    return items
-
-
-def load_ratings(run_dir: Path, folder: str = "ratings") -> dict[tuple[str, str, int], dict]:
-    """The saved ratings of a run as {(entry, level, finding order): record}. `folder` names
-    the set: one rater's ratings live in one folder of the run, so two raters can be compared."""
-    ratings = {}
-    for path in sorted((Path(run_dir) / folder).glob("*/*.json")):
-        for record in json.loads(path.read_text(encoding="utf-8")):
-            ratings[(record["entry"], record["level"], int(record["order"]))] = record
-    return ratings
-
-
-def rate_findings(reviews: list[dict], judgments: list[dict], cells: list, caller, run_dir: Path,
-                  concurrency: int = 1, rater: str = "", progress: Callable[[dict], None] | None = None,
-                  folder: str = "ratings") -> dict:
-    """Rate every unmatched finding of a run and save the ratings under `run_dir`/`folder`, one
-    file per (entry, level). Identical prompts are sent once; saved ratings are kept."""
-    ratings = load_ratings(run_dir, folder)
-    items = finding_items(reviews, judgments, cells, caller.identity)
-    by_key = {r["key"]: r for r in ratings.values() if "error" not in r}
-    todo, waiting = {}, []
-    for item in items:
-        saved = ratings.get((item["entry"], item["level"], item["order"]))
-        if saved and saved.get("key") == item["key"] and "error" not in saved:
-            continue
-        if item["key"] not in by_key and item["key"] not in todo:
-            todo[item["key"]] = item
-        waiting.append(item)
-    lock = threading.Lock()
-
-    def done(result: dict) -> None:
-        with lock:
-            by_key[result["key"]] = result
-        if progress:
-            progress(result)
-
-    _run(list(todo.values()), caller, {"validity": VALIDITIES, "tier": TIERS}, concurrency, done)
-    for item in waiting:
-        answer = by_key.get(item["key"], {})
-        record = {k: v for k, v in item.items() if k != "prompt"}
-        record.update({k: v for k, v in answer.items() if k not in ("entry", "level", "order", "pr")},
-                      rubric=RUBRIC_VERSION, rater=rater)
-        ratings[(item["entry"], item["level"], item["order"])] = record
-    files: dict[tuple[str, str], list] = {}
-    for (entry, level, _), record in sorted(ratings.items()):
-        files.setdefault((entry, level), []).append(record)
-    for (entry, level), records in files.items():
-        path = Path(run_dir) / folder / entry / f"{level}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(records, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
-    wanted = {(i["entry"], i["level"], i["order"]) for i in items}
-    return {k: v for k, v in ratings.items() if k in wanted}
