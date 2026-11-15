@@ -251,20 +251,22 @@ def finding_items(reviews: list[dict], judgments: list[dict], cells: list, ident
     return items
 
 
-def load_ratings(run_dir: Path) -> dict[tuple[str, str, int], dict]:
-    """The saved ratings of a run as {(entry, level, finding order): record}."""
+def load_ratings(run_dir: Path, folder: str = "ratings") -> dict[tuple[str, str, int], dict]:
+    """The saved ratings of a run as {(entry, level, finding order): record}. `folder` names
+    the set: one rater's ratings live in one folder of the run, so two raters can be compared."""
     ratings = {}
-    for path in sorted((Path(run_dir) / "ratings").glob("*/*.json")):
+    for path in sorted((Path(run_dir) / folder).glob("*/*.json")):
         for record in json.loads(path.read_text(encoding="utf-8")):
             ratings[(record["entry"], record["level"], int(record["order"]))] = record
     return ratings
 
 
 def rate_findings(reviews: list[dict], judgments: list[dict], cells: list, caller, run_dir: Path,
-                  concurrency: int = 1, rater: str = "", progress: Callable[[dict], None] | None = None) -> dict:
-    """Rate every unmatched finding of a run and save the ratings under `run_dir`/ratings, one
+                  concurrency: int = 1, rater: str = "", progress: Callable[[dict], None] | None = None,
+                  folder: str = "ratings") -> dict:
+    """Rate every unmatched finding of a run and save the ratings under `run_dir`/`folder`, one
     file per (entry, level). Identical prompts are sent once; saved ratings are kept."""
-    ratings = load_ratings(run_dir)
+    ratings = load_ratings(run_dir, folder)
     items = finding_items(reviews, judgments, cells, caller.identity)
     by_key = {r["key"]: r for r in ratings.values() if "error" not in r}
     todo, waiting = {}, []
@@ -294,7 +296,7 @@ def rate_findings(reviews: list[dict], judgments: list[dict], cells: list, calle
     for (entry, level, _), record in sorted(ratings.items()):
         files.setdefault((entry, level), []).append(record)
     for (entry, level), records in files.items():
-        path = Path(run_dir) / "ratings" / entry / f"{level}.json"
+        path = Path(run_dir) / folder / entry / f"{level}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(records, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
     wanted = {(i["entry"], i["level"], i["order"]) for i in items}

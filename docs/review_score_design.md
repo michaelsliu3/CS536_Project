@@ -1,6 +1,6 @@
 # Review score design (branch `review-score`, started November 15, 2026)
 
-**Status: the equation and its starting values were agreed on November 15, 2026, and the code for the pilot is written and tested (Section 11). No comment has been labelled and no model has been called for it yet. The branch `review-score` was created from `per-hunk-review` to hold it.**
+**Status: the equation and its starting values were agreed on November 15, 2026, and the code for the pilot is written and tested (Section 11). The 38 reference comments of the five test PRs are labelled and the three finished per-hunk runs are re-scored per tier (Section 12). The findings have not been rated yet, so only the first term of the score exists. The branch `review-score` was created from `per-hunk-review` to hold it.**
 
 This document records why a new score is wanted, which signals it uses, how it is computed, which numbers in it are choices, and how those choices are meant to be made and checked.
 
@@ -24,6 +24,7 @@ What a developer wants from a review is different: it should find the problems t
 | November 15 | Two per-hunk tests showed the limits above. The score was proposed and the branch `review-score` created. Decided that membership in AACR-Bench's v2 set is not used as a signal of a comment's value. |
 | November 15, later | The equation of Section 4 and the starting values of Section 5 were agreed. The work itself is not to be started yet. |
 | November 15, later | Decided that Qwen3.8-27B labels the references and rates the findings (Section 6.3). |
+| November 15, later | Qwen3.8-27B labelled the 38 references with thinking off and on. Decided that the thinking-on labels are used, and that labelling always runs with thinking on (Section 12). The three finished runs were re-scored per tier. |
 | November 15, later | Work started. `per-hunk-review` merged into this branch. The labelling, rating and scoring code written with tests (Section 11). |
 
 ## 3. Signals
@@ -199,7 +200,7 @@ Steps 1 and 2 are prepared: the code exists (Section 11), and no model has been 
 ## 10. Open decisions
 
 1. Whether the three questions of Section 5.1 are answered before the pilot, to confirm the agreed starting values.
-2. Whether the labeller and the rater run with thinking on. Thinking made the reviewer about 8.5 times slower; for 1,506 short labelling calls that is hours, not days.
+2. Whether the rater of findings runs with thinking on. For the labeller this is decided: always on (Section 12.1).
 3. Whether the judge is changed to grade matches.
 4. Where the label file lives. It is small and every score depends on it, so committing it to the repository is proposed; `data/` is git-ignored today.
 5. Whether a speculative finding costs as much as a wrong one.
@@ -242,4 +243,61 @@ OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/rate_findings.py
 Both model scripts take `--dry-run`, which prints what would be sent, and `--thinking`.
 
 **Not built:** the category and evidence multipliers have parameters but no command-line switch; "acted on" is not computed; the judge still answers yes or no; the preference check does not exist.
+
+## 12. Pilot on the five PRs (November 15, 2026)
+
+### 12.1 The labels
+
+Qwen3.8-27B labelled the 38 reference comments twice, with thinking off and with thinking on. All 76 replies could be read. The files are `data/aacr_hunk/labels/severity_qwen3.8-27b.jsonl` and `severity_qwen3.8-27b_think.jsonl`; `severity_check.csv` beside them lists every comment with both labels and reasons.
+
+| Tier | Thinking off | Thinking on |
+|---|---|---|
+| Blocking | 7 | 2 |
+| Should fix | 15 | 17 |
+| Nit | 16 | 19 |
+
+- **The two runs agree on 30 of the 38.** In all 8 disagreements the thinking-on label is one tier milder: 5 go from blocking to should fix, 3 from should fix to nit.
+- **Sense check against the category:** with thinking off, all 11 Maintainability references are nits and all 7 blocking labels are Code Defect.
+- **In two of the disagreements the thinking-on reason says the reference comment is partly wrong** (a metric that does not exist in the code; an error that is never masked). The rubric asks for the severity of the problem if the comment is right, so there the model went beyond its task.
+
+**Decided on November 15, 2026:** the thinking-on labels are used, and reference comments are always labelled with thinking on from now on. The developer reviewed the 8 disagreements and accepted the thinking-on set as a whole. That is an acceptance of the model's labels, not a second set of labels made without seeing them, so no agreement rate between a person and the model can be reported from it.
+
+**The three-tier rubric is kept.** More tiers were considered; the spread over the three tiers gives no reason to split one.
+
+### 12.2 The finished runs, per tier
+
+References covered, with the thinking-on labels: 2 blocking, 17 should fix, 19 nit. "Flat" is plain recall; "agreed" uses the weights 5, 2 and 0.5.
+
+Second per-hunk test (thinking off, the current levels):
+
+| Level | Blocking | Should fix | Nit | Flat | Agreed | Steep |
+|---|---|---|---|---|---|---|
+| `H01_min` | 1 of 2 | 12 of 17 | 8 of 19 | 0.553 | 0.617 | 0.604 |
+| `H02_function` | 1 of 2 | 10 of 17 | 8 of 19 | 0.500 | 0.542 | 0.539 |
+| `H03_file` | 2 of 2 | 12 of 17 | 8 of 19 | 0.579 | 0.710 | 0.766 |
+| `H04_callees1` | 2 of 2 | 11 of 17 | 6 of 19 | 0.500 | 0.654 | 0.721 |
+| `H05_callers1` | 2 of 2 | 11 of 17 | 7 of 19 | 0.526 | 0.664 | 0.727 |
+| `H06_tests1` | 2 of 2 | 11 of 17 | 8 of 19 | 0.553 | 0.673 | 0.734 |
+| `H07_agent` | 1 of 2 | 11 of 17 | 5 of 19 | 0.447 | 0.551 | 0.552 |
+| `H08_depth2` | 2 of 2 | 9 of 17 | 6 of 19 | 0.447 | 0.579 | 0.656 |
+| `H09_depth2_docs` | 2 of 2 | 9 of 17 | 5 of 19 | 0.421 | 0.570 | 0.649 |
+| `H10_all` | 2 of 2 | 10 of 17 | 4 of 19 | 0.421 | 0.598 | 0.675 |
+| `H11_pr_summary` | 2 of 2 | 9 of 17 | 8 of 19 | 0.500 | 0.598 | 0.669 |
+
+Reviewer with thinking on (two levels):
+
+| Level | Blocking | Should fix | Nit | Flat | Agreed | Steep |
+|---|---|---|---|---|---|---|
+| `H01_min` | 1 of 2 | 14 of 17 | 9 of 19 | 0.632 | 0.701 | 0.675 |
+| `H03_file` | 2 of 2 | 14 of 17 | 11 of 19 | 0.711 | 0.813 | 0.851 |
+
+First per-hunk test, where the levels from 4 on showed the other hunks as a diff: `H03_file` covers 2 of 2 blocking and 12 of 17 should-fix references (agreed 0.729); every level from `H04_pr_diff` on covers 1 of 2 blocking and 6 or 7 of 17 should-fix (agreed 0.38 to 0.44).
+
+**What this shows, and what it cannot.**
+
+- **Much of the fall in plain recall at the wide levels is nits.** From `H01_min` to `H10_all` the nits covered go from 8 to 4, the should-fix references from 12 to 10, and the blocking ones from 1 to 2. Under the agreed weights `H10_all` (0.598) is close to `H01_min` (0.617), where plain recall has it clearly lower (0.421 against 0.553).
+- **`H03_file` is the best level under every weighting.**
+- **The blocking tier holds two references,** so "1 of 2" against "2 of 2" is one comment. The blocking-only weighting and the steep one cannot be read on five PRs.
+- **Run-to-run noise applies here as it does to plain recall.** One run per level cannot separate these levels.
+- **Only the first term is scored.** Valid findings outside the references and noise need the ratings (Section 9, step 3).
 

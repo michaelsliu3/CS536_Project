@@ -6,8 +6,9 @@ speculative or wrong, with a severity tier (docs/review_score_design.md, Section
     OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/rate_findings.py --levels H01_min H03_file
 
 The rater is the profile's judge model. It sees the finding and the input the reviewer saw.
-Ratings are saved to <run folder>/ratings/<entry>/<level>.json; a later run keeps the ratings
-whose prompt and model settings are unchanged. Run the judge first (run_judgments.py).
+Ratings are saved to <run folder>/ratings/<entry>/<level>.json, or ratings_think/ with
+--thinking, so the two raters can be compared; a later run keeps the ratings whose prompt and
+model settings are unchanged. Run the judge first (run_judgments.py).
 """
 from __future__ import annotations
 
@@ -49,11 +50,12 @@ def main(argv=None) -> int:
     judgments = [j for j in (table.read_json(run_dir / "judgments" / r["entry"] / f"{r['level']}.json") for r in reviews) if j]
     chat = make_chat(spec)
     items = severity.finding_items(reviews, judgments, cells, chat.identity)
-    saved = severity.load_ratings(run_dir)
+    folder = "ratings_think" if args.thinking else "ratings"
+    saved = severity.load_ratings(run_dir, folder)
     kept = sum(1 for i in items if saved.get((i["entry"], i["level"], i["order"]), {}).get("key") == i["key"]
                and "error" not in saved[(i["entry"], i["level"], i["order"])])
     distinct = len({i["key"] for i in items})
-    print(f"run folder {run_dir}\nrater {chat.identity}\n{len(reviews)} reviews ({len(missing)} cells have none), "
+    print(f"run folder {run_dir}, ratings in {folder}/\nrater {chat.identity}\n{len(reviews)} reviews ({len(missing)} cells have none), "
           f"{len(judgments)} judged; {len(items)} unmatched findings, {distinct} distinct; {kept} already rated")
     if args.dry_run:
         print("nothing was sent or written")
@@ -67,7 +69,7 @@ def main(argv=None) -> int:
             print(f"  rated {sum(count.values())}: {dict(count)}", flush=True)
 
     ratings = severity.rate_findings(reviews, judgments, cells, chat, run_dir, args.concurrency or spec.get("concurrency", 1),
-                                     rater=model_name(spec, args.thinking), progress=progress)
+                                     rater=model_name(spec, args.thinking), progress=progress, folder=folder)
     by_level: dict[str, Counter] = {}
     for (_, level, _), record in ratings.items():
         by_level.setdefault(level, Counter())[record.get("validity") or "error"] += 1

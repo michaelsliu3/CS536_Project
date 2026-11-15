@@ -28,12 +28,13 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("run_dir", type=Path, help="a run folder with coverage.csv")
     parser.add_argument("--labels", type=Path, required=True, help="the severity label file")
+    parser.add_argument("--ratings", default="ratings", help="the run's folder of ratings (ratings, or ratings_think)")
     parser.add_argument("--no-write", action="store_true", help="print only")
     args = parser.parse_args(argv)
 
     coverage = score.read_coverage(args.run_dir)
     labels = severity.load_labels(args.labels)
-    ratings = severity.load_ratings(args.run_dir) or None
+    ratings = severity.load_ratings(args.run_dir, args.ratings) or None
     rows = score.score_rows(coverage, labels, ratings)
     summary = score.summarize(rows)
     print(f"run {args.run_dir}\nlabels {args.labels} ({len(labels)} labels); "
@@ -58,7 +59,7 @@ def main(argv=None) -> int:
             scores = " ".join(f"{by_weighting[n][level['level']]['score_norm']:>13.3f}" for n in names)
             print(f"{level['level']:17s} {level['valid_outside']:>6d} {level['noise']:>6d}  {scores}")
     if not args.no_write and rows:
-        path = args.run_dir / "score_table.csv"
+        path = args.run_dir / ("score_table.csv" if args.ratings == "ratings" else f"score_table_{args.ratings}.csv")
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
             writer.writeheader()

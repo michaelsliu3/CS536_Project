@@ -118,6 +118,11 @@ class RateFindingsTests(unittest.TestCase):
             self.assertEqual(severity.load_ratings(Path(tmp)).keys(), ratings.keys())
             severity.rate_findings(reviews, judgments, cells, model, Path(tmp))
             self.assertEqual(len(model.prompts), 2)  # nothing is sent again
+            # Another rater's ratings go to a folder of their own and leave the first set alone.
+            other = severity.rate_findings(reviews, judgments, cells, model, Path(tmp), folder="ratings_think")
+            self.assertEqual((len(model.prompts), other.keys()), (4, ratings.keys()))
+            self.assertTrue((Path(tmp) / "ratings_think" / "o__r__1__h0001" / "H01_min.json").is_file())
+            self.assertEqual(severity.load_ratings(Path(tmp)).keys(), ratings.keys())
 
 
 class ScoreTests(unittest.TestCase):
