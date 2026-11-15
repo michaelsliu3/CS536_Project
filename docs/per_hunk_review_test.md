@@ -1,6 +1,6 @@
 # Per-hunk review test (branch `per-hunk-review`, started November 15, 2026)
 
-**Status: the code is written and tested on the laptop, and five PRs have been built per hunk. No review has been run, because the cloud server is off. Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
+**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that the same day (Section 13) and the five PRs were rebuilt; the changed levels have not been reviewed yet. Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
 
 This document records why the test exists, what was decided and when, what was built, what was checked, and what is still open.
 
@@ -28,6 +28,8 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 | November 15 | The decision above. Branch `per-hunk-review` created from master at `6112480`. Tracer, levels, prompt and outcome-table code written. Five PRs built per hunk on the laptop as a check. |
 | November 15, later | The first prompt was our own wording of the paper's instructions, with a JSON reply. It was replaced by the paper's exact text and tag format, with a parser for the tags. |
 | November 15, later | Decided that the per-hunk test keeps a data folder of its own, `data/aacr_hunk/`, and the original context levels stay as they are. A guard was added so a per-hunk build can never write into the per-PR file. 209 tests pass, 23 of them new. |
+| November 15, later | The branch was pushed. The five-PR build was reviewed and judged on the cloud server (Section 12). |
+| November 15, later | After that test: the other hunks were taken out of the chain, context blocks name the lines the PR changes in them, a summary level was added at the end, and only findings that quote the hunk under review count (Section 13). The five PRs were rebuilt. No review has run on the new levels. |
 | Not yet | A review run, a judge run, and the comparison with the per-PR table. |
 
 ## 3. What one review covers
@@ -40,23 +42,25 @@ The data set's `stats.hunks` field counts something else (runs of changed lines 
 
 ## 4. The levels, per hunk
 
-The eleven levels are in `configs/levels_hunk/`. They mirror the ten per-PR levels and add one, `H04_pr_diff`.
+The eleven levels are in `configs/levels_hunk/`. `H01_min` to `H10_all` mirror the ten per-PR levels `L01_min` to `L10_all` one to one. `H11_pr_summary` is one extra level at the end.
 
 | Level | What it adds |
 |---|---|
 | `H01_min` | The PR's title and description, and this hunk. This is the paper's setting without code context. |
 | `H02_function` | The full function or class this hunk changes |
 | `H03_file` | The file this hunk is in (windows around the hunk for files over 400 lines) |
-| `H04_pr_diff` | The PR's other hunks, as a diff after this hunk |
-| `H05_callees1` | Definitions of what this hunk's code calls directly |
-| `H06_callers1` | Direct callers and users of this hunk's code |
-| `H07_tests1` | Tests that directly exercise this hunk's code |
-| `H08_agent` | Repository guide files, and text-search hits for the names this hunk changes |
-| `H09_depth2` | Callees and callers two hops from this hunk |
-| `H10_depth2_docs` | Documentation sections and tests up to two hops away |
-| `H11_all` | Everything the tracer finds from this hunk, up to three hops, with no item limits |
+| `H04_callees1` | Definitions of what this hunk's code calls directly |
+| `H05_callers1` | Direct callers and users of this hunk's code |
+| `H06_tests1` | Tests that directly exercise this hunk's code |
+| `H07_agent` | Repository guide files, and text-search hits for the names this hunk changes |
+| `H08_depth2` | Callees and callers two hops from this hunk |
+| `H09_depth2_docs` | Documentation sections and tests up to two hops away |
+| `H10_all` | Everything the tracer finds from this hunk, up to three hops, with no item limits |
+| `H11_pr_summary` | A list of the PR's other changes, with no code (Section 4.3) |
 
 Item limits, the 256,000-token input cap, the tokenizer and the rendering are those of the per-PR levels.
+
+**The first test used another order** (Section 12). Its level 4 was `H04_pr_diff`, which showed the PR's other hunks as a diff, and every later level contained it: `H05_callees1`, `H06_callers1`, `H07_tests1`, `H08_agent`, `H09_depth2`, `H10_depth2_docs`, `H11_all`. Section 13 records the change. Section 12 uses the first test's names.
 
 ### 4.1 Which changed symbols belong to a hunk
 
@@ -74,19 +78,34 @@ The tool walks from all of a PR's changed symbols at once and reports each calle
 - **Text-search hits** are kept for the names of the hunk's own symbols.
 - **Check built in:** every build compares a walk from all changed symbols over the kept links with the tool's own walk, and warns on any difference.
 
-### 4.3 The other-changes level
+### 4.3 The PR's other changes
 
-A per-PR review sees the whole diff. A per-hunk review does not, so the rest of the diff becomes context. `H04_pr_diff` shows it in a section named "Other changes in this pull request", between the hunk and the repository context.
+A per-PR review sees the whole diff. A per-hunk review sees one hunk. The levels give the rest of the PR back in two ways, neither of which shows another hunk's diff lines.
 
-- **Order:** nearest first, meaning the other hunks of the same file by distance, then the other files in diff order.
-- **Room:** 16,000 tokens. That holds the whole diff of 175 of the 185 built PRs. When hunks are left out, the section says how many are shown.
-- **Stable:** every later level shows the same section, so the levels stay nested.
+**The context is the code after the change.** Every context block is read from the PR's reviewed version. A change in another hunk therefore reaches the reviewer whenever the tracer links it to this hunk: the same function from `H02_function`, the same file from `H03_file`, a called or calling function from the callee and caller levels, a test from the tests level.
+
+**Blocks name what else the PR changes in them** (`input.mark_changed`, on from `H02_function`). The code after the change does not show which lines are new. So a block's header names the lines the PR changes in it outside the hunk under review, for example:
+
+```
+### changed file: app.py  [lines 1-40]  (this pull request also changes lines 14, 22-25)
+```
+
+**`H11_pr_summary` lists the other changes** (`input.other_hunks` with `input.other_hunks_form: summary`). The section is named "Other changes in this pull request" and sits between the hunk and the repository context. It has one line per file, with each other hunk's lines after the change and the enclosing code named in its `@@` header, and no code:
+
+```
+- `app.py`: lines 12-14 (def second(x):)
+- `util.py`: lines 1-3
+```
+
+- **Order and room:** nearest first (the same file by distance, then the other files in diff order), up to 4,000 tokens. When hunks are left out, the section says how many are listed.
+- **What this level is for:** a change with no code link to the hunk (a config file, a document, a file in another language) reaches no other level. If this level covers references the others miss, PR-wide information matters and deserves a better design.
+- **The diff form still exists** (`other_hunks_form: diff`, the default of the key) but no level uses it. The first test showed why (Section 12.3).
 
 ### 4.4 What the per-PR pipeline keeps
 
 - **A data folder of its own.** Everything of this test lives in `data/aacr_hunk/`: its copy of the AACR file, its context levels, its logs and its outcome runs. `data/aacr/`, with the per-PR levels and the first run, is not written to.
 - **A guard.** A build refuses a folder whose context file holds the other unit's records. So `--unit hunk` pointed at `data/aacr` stops before writing anything, and the original `data/aacr/context_levels.jsonl` cannot be replaced by mistake. On November 15 that file still had the hash the first run recorded (`b06dee5e…`).
-- **Configs:** the two new keys (`input.other_hunks`, `packing.other_hunks_max_tokens`) are optional. A config without them is unchanged, and so is its hash.
+- **Configs:** the four new keys (`input.other_hunks`, `input.other_hunks_form`, `input.mark_changed`, `packing.other_hunks_max_tokens`) are optional. A config without them is unchanged, and so is its hash.
 - **Trace:** the extra links are collected only when a per-hunk build asks for them.
 
 ## 5. The reviewer prompt
@@ -128,7 +147,8 @@ Each level records where its parts sit in its text, so the slots are filled by p
 
 ## 6. Scoring
 
-- **Judge:** unchanged. Each of a hunk's findings (the text of its `<note>`) is compared with the PR's reference comments on the same file.
+- **Only findings on the hunk under review count** (since the first test, Section 13). The paper's format makes the reviewer quote the code each finding is about. A finding counts when its quote is found in the hunk it was asked to review. The others, which quote other code the reviewer was shown or quote nothing, are kept in the review file under `off_hunk_findings` and are not judged. `hunk_table.csv` has their number per hunk (`findings_off_hunk`).
+- **Judge:** unchanged. Each of a hunk's counted findings (the text of its `<note>`) is compared with the PR's reference comments on the same file.
 - **PR rows** (`table.csv`): one per (PR, level). The PR's hunk reviews at that level are put together in diff order and scored as one review by AACR's rule, so these rows use the same metric as the per-PR table. A row is `ok` only when every hunk of the PR has a readable reply.
 - **Hunk rows** (`hunk_table.csv`): one per (hunk, level), with the hunk's own findings and the references that sit on its lines. These are what a selector that picks a level per hunk would learn from.
 
@@ -204,20 +224,20 @@ OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/run_reviews.py --fir
 OUTCOME_PROFILE=cloud-hunk .venv/bin/python scripts/outcome/run_judgments.py --first 5
 ```
 
-The judge script writes the tables for the PRs it was given. Output goes to `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v1/`.
+The judge script writes the tables for the PRs it was given. Output goes to `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2/`. The first test's output is in `qwen3.8-27b_aacr-hunk_v1/` next to it.
 
 ## 10. Not done, and open
 
-1. **No review has been run.** Every claim above is about inputs and code, not about review quality.
-2. **The pilot is not designed:** which PRs, which levels, and what result would justify the full run.
+1. **Only five PRs have been reviewed** (Section 12). They hold 38 reference comments, 23 of them in one PR, so the numbers are a first reading and not a result.
+2. **The changed levels have not been reviewed.** The design change the first test called for is made (Section 13), and the five PRs are rebuilt, but no review has run on the new levels.
 3. **No priority or confidence** in the paper's reply format. A variant that adds them would allow filtering afterwards, at the cost of no longer being the paper's prompt.
 4. **Two causes are still changed together** (the prompt and one hunk per call). Running this prompt once per PR would separate them. The parser can already find a quoted snippet's file in a whole-PR diff, but the per-PR context file would have to be rebuilt so that its levels record their parts, and that variant has not been run or tested end to end.
-5. **How often the reviewer's quotes are found in the hunk** is unknown until replies exist. Findings whose quote is not found have no line numbers.
+5. **How often the reviewer's quotes are found in the hunk:** 92 to 98% at the first three levels, 7 to 14% from `H04_pr_diff` on (Section 12.3). Findings whose quote is not found have no line numbers.
 6. **The fixed code fence** (Section 5) breaks for hunks that contain a fence line.
 7. **Large PRs:** the other-changes section is cut at 16,000 tokens for 10 of the 185 PRs.
 8. **The selector for per-hunk cells is not designed.** Most hunks have no reference comment, so for them the only measurable outcome is a false alarm.
 9. **Which reference set to score against** (v1 or v2) is open, as for the per-PR table.
-10. **The branch is local.** It is not pushed, and the server has neither the branch nor the per-hunk context file.
+10. **The 30-PR build** planned as the next step has not been started.
 
 ## 11. Where things are
 
@@ -234,5 +254,183 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 | `src/review_outcomes/table.py` | Per-hunk cells, `build_hunk_tables` |
 | `notebooks/outcome_table.ipynb` | The `cloud-hunk` profile |
 | `tests/test_hunk_context.py`, `tests/test_review_outcomes.py` | The new tests |
-| `data/aacr_hunk/` (git-ignored) | This test's data: the five-PR per-hunk build, and later its outcome runs |
+| `data/aacr_hunk/` (git-ignored) | This test's data: the five-PR per-hunk build with the current levels (`context_levels.jsonl`), the first test's build (`first_test/context_levels.jsonl`), and the outcome runs (`outcomes/qwen3.8-27b_aacr-hunk_v1/` is the first test) |
 | `data/aacr/` (git-ignored) | The original per-PR levels and the first run, unchanged |
+
+## 12. First test on five PRs (November 15, 2026)
+
+**What was run.** The five PRs built in Section 7 (`cline__cline__5177`, `CherryHQ__cherry-studio__5637`, `browser-use__browser-use__857`, `timescale__timescaledb__7915`, `gofr-dev__gofr__1617`) were reviewed and judged on the cloud server with the `cloud-hunk` profile. They have 78 hunks and 38 reference comments. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v1/` on the laptop and on the server.
+
+### 12.1 The run itself
+
+| Measure | Value |
+|---|---|
+| Cells (hunk and level) | 858, all usable |
+| Model calls for the review | 601 (257 cells reused a call with the same input) |
+| Input tokens | 5,245,646 |
+| Review time | 1 h 11 min at 8 calls at once |
+| Replies that needed a retry step | 9 of 601 (8 a longer output, 1 a follow-up); all 9 then gave an answer |
+| Replies cut off at the output limit | 0 |
+| Judge | 601 calls, 12 min 33 s, 0 judge errors |
+
+Every reply was in the paper's tag format and could be read.
+
+### 12.2 Recall and precision
+
+**How the two runs differ, and what stays the same.** "Per hunk" and "per PR" name how the reviewer is called, not how recall is counted. Recall is counted the same way in both runs, so the columns below can be compared.
+
+| | First run ("per PR") | This test ("per hunk") |
+|---|---|---|
+| Reviewer calls for one PR at one level | One, with the whole diff | One for each hunk |
+| Prompt | Codex rubric | The paper's prompt |
+| Recall | Covered references ÷ the PR's references | The same |
+
+For one PR at one level, the findings of all its hunk reviews are put together. A reference comment counts as covered when a finding from any hunk matches it. The judge compares a hunk's findings with the PR's reference comments on the same file, so a finding from one hunk can cover a reference that sits on another hunk of that file. Every reference of the PR stays in the count, including those on files where no finding was written.
+
+Recall is the share of the 38 reference comments that were covered. Precision is the share of the reviewer's findings that matched a reference comment. Both are summed over the five PRs. The per-PR columns are the first run's numbers on the same five PRs.
+
+| Per-hunk level | Recall | Precision | Findings | Per-PR level | Recall | Precision | Findings |
+|---|---|---|---|---|---|---|---|
+| `H01_min` | 18 of 38 (47.4%) | 13.6% | 110 | `L01_min` | 2 of 38 (5.3%) | 12.5% | 8 |
+| `H02_function` | 20 of 38 (52.6%) | 13.6% | 125 | `L02_function` | 4 of 38 (10.5%) | 50.0% | 6 |
+| `H03_file` | 24 of 38 (63.2%) | 17.5% | 120 | `L03_file` | 5 of 38 (13.2%) | 50.0% | 8 |
+| `H04_pr_diff` | 16 of 38 (42.1%) | 3.9% | 383 | (no such level) | | | |
+| `H05_callees1` | 17 of 38 (44.7%) | 4.0% | 403 | `L04_callees1` | 3 of 38 (7.9%) | 23.1% | 13 |
+| `H06_callers1` | 14 of 38 (36.8%) | 3.4% | 385 | `L05_callers1` | 2 of 38 (5.3%) | 28.6% | 7 |
+| `H07_tests1` | 15 of 38 (39.5%) | 3.7% | 383 | `L06_tests1` | 2 of 38 (5.3%) | 25.0% | 8 |
+| `H08_agent` | 17 of 38 (44.7%) | 4.1% | 386 | `L07_agent` | 6 of 38 (15.8%) | 71.4% | 7 |
+| `H09_depth2` | 16 of 38 (42.1%) | 4.0% | 374 | `L08_depth2` | 4 of 38 (10.5%) | 50.0% | 6 |
+| `H10_depth2_docs` | 15 of 38 (39.5%) | 3.6% | 387 | `L09_depth2_docs` | 5 of 38 (13.2%) | 57.1% | 7 |
+| `H11_all` | 15 of 38 (39.5%) | 3.8% | 373 | `L10_all` | 3 of 38 (7.9%) | 75.0% | 4 |
+
+- **The low recall of the first table came from the method, not from the model.** With the paper's prompt and one hunk per call, the same reviewer covers 47 to 63% of the references at the first three levels. The paper's range for plain LLMs is 24.25 to 47.24% recall at 5.10 to 11.30% precision.
+- **Recall rises over the first three levels** (18, 20, 24 of 38). That is six references on five PRs, too few to call a level effect.
+- **32 of the 38 references are covered at some level, and 9 at every level.** So which level is used changes the outcome for 23 references, which is what a selector needs.
+- **The reviewer now always comments.** Two of the 858 cells have no finding. At the first three levels a hunk gets about 1.5 findings.
+
+### 12.3 The problem from `H04_pr_diff` on
+
+From `H04_pr_diff` on, each hunk gets about 5 findings instead of 1.5, precision falls to about 4%, and recall falls too.
+
+The cause is visible in the quotes. The reviewer must quote the code each finding is about. At the first three levels 92 to 98% of the quotes are found in the hunk under review. From `H04_pr_diff` on, 7 to 14% are. The rest quote the PR's other hunks, which that level shows as context: the reviewer reviews the whole PR in every call, and the same finding comes back once per hunk.
+
+| Level | Findings | Quote found in the hunk under review |
+|---|---|---|
+| `H01_min` | 110 | 108 (98%) |
+| `H02_function` | 125 | 115 (92%) |
+| `H03_file` | 120 | 114 (95%) |
+| `H04_pr_diff` | 383 | 27 (7%) |
+| `H05_callees1` to `H11_all` | 373 to 403 | 25 to 54 (7 to 14%) |
+
+Dropping the findings whose quote is not in the hunk does not repair these levels. Counting only the findings that are in the hunk, `H04_pr_diff` covers 12 of 38 references and `H11_all` 9 of 38, below the 17 to 22 of the first three levels counted the same way. The other hunks take the reviewer's attention away from the hunk it was asked about.
+
+Every level after `H04_pr_diff` contains the other hunks, so this test says nothing yet about callees, callers, tests or documents as context for a hunk.
+
+### 12.4 By PR
+
+References covered at each level, in the order `H01_min` to `H11_all`, and `L01_min` to `L10_all` for the first run.
+
+| PR | Hunks | References | Per hunk, `H01` to `H11` | Per PR, `L01` to `L10` |
+|---|---|---|---|---|
+| `CherryHQ__cherry-studio__5637` | 11 | 23 | 9, 11, 13, 8, 9, 7, 7, 8, 7, 7, 7 | 0 at every level |
+| `timescale__timescaledb__7915` | 19 | 6 | 3, 2, 4, 1, 2, 1, 1, 2, 2, 2, 1 | 0 at every level |
+| `gofr-dev__gofr__1617` | 30 | 5 | 4, 4, 4, 5, 4, 4, 5, 5, 5, 4, 4 | 2, 3, 3, 1, 0, 0, 4, 3, 3, 1 |
+| `browser-use__browser-use__857` | 17 | 2 | 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1 | 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 |
+| `cline__cline__5177` | 1 | 2 | 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2 | 0, 0, 1, 1, 1, 1, 1, 0, 1, 1 |
+
+- The gain is largest where the first run found nothing: two PRs with 29 references between them went from 0 covered to 9 to 17 covered at the first three levels.
+- `gofr-dev__gofr__1617` is the one PR where the first run was already close at its best levels (4 of 5 at `L07_agent`).
+- Findings written per PR at `H01_min`: 21, 23, 43, 21 and 2, in the order of the table. From `H04_pr_diff` on: 61 to 77, 65 to 71, 150 to 165, 83 to 102, and 2 to 3. `cline__cline__5177` has one hunk, so it has no other hunks to show and its findings do not grow.
+
+### 12.5 By kind of reference
+
+References covered, of those of each kind.
+
+| Kind | References | `H01_min` | `H02_function` | `H03_file` | `H04_pr_diff` | `H11_all` |
+|---|---|---|---|---|---|---|
+| Context label: Diff Level | 21 | 9 | 11 | 12 | 7 | 7 |
+| Context label: File Level | 13 | 6 | 7 | 8 | 7 | 6 |
+| Context label: Repo Level | 4 | 3 | 2 | 4 | 2 | 2 |
+| Category: Code Defect | 23 | 11 | 12 | 15 | 10 | 9 |
+| Category: Maintainability and Readability | 11 | 4 | 5 | 6 | 4 | 4 |
+| Category: Performance | 4 | 3 | 3 | 3 | 2 | 2 |
+| Written by an LLM | 31 | 16 | 16 | 21 | 12 | 11 |
+| Written by a person | 7 | 2 | 4 | 3 | 4 | 4 |
+
+- Every kind is covered more often than in the first run, which covered 2 to 6 of all 38.
+- The groups are too small to compare kinds with each other. Four Repo Level references and seven written by a person cannot show whether wider context helps them.
+
+### 12.6 The stricter count per hunk
+
+`hunk_table.csv` has one row per hunk and level. It counts a reference only for the hunk whose lines it sits on, and only when that hunk's own findings cover it.
+
+- 17 of the 78 hunks have a reference on their lines. The other 61 have none, so any finding on them counts against precision.
+- References covered by the review of their own hunk, of 38: 16 at `H01_min`, 17 at `H02_function`, 22 at `H03_file`, 13 at `H04_pr_diff`, 13 at `H05_callees1`, 8 at `H06_callers1`, 8 at `H07_tests1`, 13 at `H08_agent`, 12 at `H09_depth2`, 12 at `H10_depth2_docs`, 10 at `H11_all`.
+- At the first three levels this count is 2 below the PR count of Section 12.2 (16, 17, 22 against 18, 20, 24), so almost all of the recall there comes from hunks reviewing their own code.
+
+### 12.7 Limits of this reading
+
+- Five PRs and 38 references. `CherryHQ__cherry-studio__5637` holds 23 of them.
+- The judge is the same model as the reviewer and has not been validated, as in the first run.
+- More findings give the judge more chances to match. Precision is the check on that: 14 to 18% at the first three levels.
+- References are the v1 set.
+- The first run and this test differ in two things at once, the prompt and one hunk per call (Section 10, point 4). This test does not say how much of the gain each one gives.
+
+## 13. Changes after the first test (November 15, 2026)
+
+**Status: built and tested on the laptop; the five PRs are rebuilt. No review has run on the changed levels.**
+
+The first test showed that a reviewer given the PR's other hunks as a diff reviews those instead of its own hunk (Section 12.3). Four things were changed for that.
+
+| Change | Before | Now |
+|---|---|---|
+| The other hunks | Level 4 (`H04_pr_diff`), as a diff, inside every later level | Out of the chain. A list without code is the last level, `H11_pr_summary` |
+| The chain | Callees, callers, tests and the rest were built on top of the other hunks | `H04_callees1` to `H10_all` are built on `H03_file`, and match `L04_callees1` to `L10_all` |
+| What else the PR changes | Only visible as the other hunks' diff | From `H02_function` on, a context block's header names the lines the PR changes in it outside the hunk |
+| Which findings count | All of them | Only those whose quoted code is found in the hunk under review |
+
+**Why the list and the marker.** Taking the other hunks out could hide a change this hunk depends on. Most of that is kept without them: the context is the code after the change, so a related change in the same function, the same file, a callee, a caller or a test is shown by the level that shows that code. Two things would still be lost. The marker gives back which lines are new. The list level tests whether changes with no code link to the hunk matter.
+
+**Why the counting rule.** At the first three levels of the first test the rule would have dropped 2 to 8% of the findings and 1 or 2 of the covered references. It removes repeated findings about other code at every level, whatever the context shows.
+
+### 13.1 What was checked
+
+- **Tests:** 210 pass. They cover the list form, the marker, the diff form that is still available, the new config keys and the counting rule.
+- **The five PRs were rebuilt** in 1 min 36 s, with no failure and no nesting or size problem in any of the 858 cells. The first test's context file is kept as `data/aacr_hunk/first_test/context_levels.jsonl` (sha256 `9835052d…`). The new file's sha256 is `a4b425c6…`.
+- **`H01_min` is unchanged:** all 78 inputs are identical to the first test's.
+- **The marker appears where expected:** in 21 of the 78 hunks at `H02_function`, 48 at `H03_file` and 63 at `H10_all`. The other inputs at those levels are identical to the first test's (57 of 78 at `H02_function`, 30 at `H03_file`).
+- **The list appears in 77 of the 78 hunks** at `H11_pr_summary`. The one without it is the only hunk of its PR.
+
+### 13.2 Size of the inputs
+
+Input tokens summed over the 78 hunks.
+
+| Level | Now | First test, same position |
+|---|---|---|
+| `H01_min` | 41,391 | 41,391 |
+| `H02_function` | 79,360 | 78,948 |
+| `H03_file` | 153,420 | 151,566 |
+| `H04_callees1` | 221,117 | 565,561 (`H04_pr_diff`) |
+| `H05_callers1` | 286,933 | 632,944 |
+| `H06_tests1` | 322,150 | 698,383 |
+| `H07_agent` | 701,613 | 733,325 |
+| `H08_depth2` | 785,812 | 1,111,979 |
+| `H09_depth2_docs` | 833,529 | 1,196,025 |
+| `H10_all` | 966,995 | 1,243,612 |
+| `H11_pr_summary` | 1,008,382 | 1,376,965 |
+| All levels | 5,400,702 | 7,830,699 |
+
+The first test's levels from position 5 on are one step behind the new ones (its `H05_callees1` is the new `H04_callees1` plus the other hunks), so the rows of the lower half compare positions, not the same context.
+
+### 13.3 The next run
+
+A dry run of the `cloud-hunk` profile on the rebuilt file plans 601 reviewer calls with 4,118,505 input tokens, against 5,245,646 in the first test. Every cell is sent again, including `H01_min`, because the counting rule is part of each review's saved key. The output goes to a new folder, `qwen3.8-27b_aacr-hunk_v2/`, and the first test's folder is left as it is.
+
+The server needs the branch pulled and the new context file copied to `data/aacr_hunk/context_levels.jsonl`.
+
+What to look at in the results:
+
+1. Whether `H04_callees1` to `H10_all` now keep or raise the recall of `H03_file` (24 of 38 in the first test), instead of falling.
+2. How many findings are set aside as not on the hunk, per level.
+3. Whether `H11_pr_summary` covers references that `H10_all` misses, and whether the list brings the off-hunk findings back.
+
