@@ -42,3 +42,6 @@ docs/professor_meeting_transcript/
 
 # Working notes, scripts and caches behind the research reports; kept locally
 research_notes/
+
+# Research reports written by deep-research runs; kept locally
+reports/

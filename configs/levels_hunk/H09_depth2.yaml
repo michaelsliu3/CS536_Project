@@ -1,7 +1,0 @@
-# H09 depth-2: + callees and callers two hops from this hunk.
-inherit: H08_agent.yaml
-level: {name: H09_depth2, parent: H08_agent}
-selection:
-  limits:
-    callee: {max_hop: 2, max_items: 100}
-    caller: {max_hop: 2, max_items: 100}
