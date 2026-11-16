@@ -279,6 +279,23 @@ class OtherHunksSectionTests(RepoTestCase):
         self.assertIn("; 1 of 2 are listed, the nearest ones:", text)
         self.assertNotIn("`util.py`", text[text.index(OTHER_HEADING):text.index(CONTEXT_HEADING)])
 
+    def test_a_parent_that_fills_the_input_cap_leaves_the_summary_what_is_left(self):
+        texts, reports = self.chain("H10_all")
+        full = reports["H10_all"]["input_tokens"]
+        # No room beyond the parent's items: the level is built without the section, not refused.
+        text, report = self.build("H11_pr_summary", reports["H10_all"], max_input_tokens=full + 5)
+        self.assertNotIn(OTHER_HEADING, text)
+        self.assertEqual((report["other_hunks"]["shown"], report["fits"]), (0, True))
+        self.assertTrue(nesting_check(reports["H10_all"], report)["ok"])
+        # A little less room than the whole section needs: entries are given up.
+        _, whole = self.build("H11_pr_summary", reports["H10_all"])
+        size = whole["other_hunks"]["tokens"]
+        text, report = self.build("H11_pr_summary", reports["H10_all"], max_input_tokens=full + 128 + size - 60)
+        self.assertLess(report["other_hunks"]["shown"], 2)  # cut to what is left, never over the cap
+        self.assertTrue(report["fits"])
+        text, report = self.build("H11_pr_summary", reports["H10_all"], max_input_tokens=full + 128 + 50)
+        self.assertEqual((report["other_hunks"]["shown"], report["fits"]), (0, True))  # not even the heading fits
+
     def test_diff_form_shows_the_other_hunks_as_a_diff(self):
         _, reports = self.chain("H03_file")
         text, report = self.build("H11_pr_summary", reports["H03_file"], form="diff", other_hunks_max_tokens=16000)

@@ -795,15 +795,25 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
     diff_section = render_diff(trace["diff"]) if inputs["diff"] else ""
     other_section, other_report = "", None
     if inputs.get("other_hunks"):  # per-hunk levels: the rest of the PR's diff, after this hunk
-        # Its room depends only on the PR text and the hunk, so every level that shows the
-        # section shows the same one.
+        # Its room depends on the PR text, the hunk and what the parent level's items hold: those
+        # items are kept, so a section added on top of a parent that fills the input cap gets
+        # what is left, and none if nothing is.
         room = packing.get("other_hunks_max_tokens")
         if packing["max_input_tokens"] is not None:
             base = count_tokens(SEPARATOR.join(s for s in (pr_section, diff_section) if s))
-            left = max(0, packing["max_input_tokens"] - base - 64)
+            held = sum(entry["tokens"] for entry in forced)
+            left = max(0, packing["max_input_tokens"] - base - held - 128)
             room = left if room is None else min(room, left)
-        other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens,
-                                                         inputs.get("other_hunks_form", "diff"))
+        form = inputs.get("other_hunks_form", "diff")
+        other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens, form)
+        # `room` bounds the entries; the section's heading comes on top. Near the cap the whole
+        # section must fit in what is left, so entries are given up until it does.
+        while other_section and packing["max_input_tokens"] is not None:
+            over = count_tokens(other_section + SEPARATOR) - left
+            if over <= 0:
+                break
+            room = max(0, room - over - 8)
+            other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens, form)
     fixed = [s for s in (pr_section, diff_section, other_section) if s]
     input_cap = packing["max_input_tokens"]
     context_prefix = SEPARATOR.join(fixed + [f"{CONTEXT_HEADING}{SEPARATOR}"])  # the full text is this + context
