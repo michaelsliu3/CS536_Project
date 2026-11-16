@@ -301,3 +301,13 @@ Over all eleven levels: 972 unmatched findings (682 distinct), of which about 4%
 
 **What remains on disk:** the thinking-off ratings, in `ratings/` under the run folders `qwen3.8-27b_aacr-hunk_v2` and `qwen3.8-27b-think_aacr-hunk_v2`. No code reads them. The rating script and the two extra terms were removed from the code; they are in the branch's history at `23b9284`.
 
+## 14. Labels and score on 28 PRs (November 16, 2026)
+
+The score was applied to the run of all ten levels on 28 PRs. The results are in `docs/per_hunk_review_test.md`, Section 19 (the score per level in 19.1, intervals in 19.3, every weighting in 19.7).
+
+- **Labels.** 190 references, labelled by Qwen3.8-27B with thinking on: 15 blocking (8%), 65 should fix (34%), 110 nit (58%). The pilot's 38 labels are unchanged among them. The file is `data/aacr_hunk/labels/severity_qwen3.8-27b_think.jsonl`.
+- **Five of the 152 new replies were unreadable.** The thinking repeated itself until the 16,000-token limit, so no answer was written. A second run of the script, which sends only what failed, got an answer for all five. No label was guessed.
+- **By context label.** Blocking: 4 Diff Level, 7 File Level, 4 Repo Level. Should fix: 29, 21, 15. Nit: 50, 46, 14. Repo Level references are rated higher: 19 of 33 are blocking or should fix, against 33 of 83 for Diff Level.
+- **What the score changed in the reading.** In plain recall `H03_file` is first and context beyond the file only loses references. By score, `H03_file` to `H06_tests1` are level, because the references lost with more context are mostly nits (56 covered at `H03_file`, 40 at `H10_all`) while blocking references are kept or gained (8 of 15 with no context, 12 to 14 from `H03_file` to `H06_tests1`).
+- **The score rests on few references.** The 15 blocking references carry 29% of the total weight, and one of them is worth 0.019 of score.
+- **Still open:** no person has labelled a sample (Section 7), and the category and evidence multipliers are still 1.

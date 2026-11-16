@@ -33,7 +33,8 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 | November 15, later | Second test: the five PRs reviewed and judged again with the changed levels and counting rule (Section 14). The cloud server's clock is 13 hours ahead and showed November 16. |
 | November 15, later | All ten levels reviewed twice more to measure run-to-run variation (Section 17): `H03_file` is the best level, and every level from `H07_agent` on is no better than no context. |
 | November 15, later | Two levels run again with the reviewer's thinking on (Section 15). A look at why the levels do not differ and at what recall and precision measure (Section 16). Pull request 7 opened for this branch. |
-| Not yet | A review run, a judge run, and the comparison with the per-PR table. |
+| November 15 to 16 | 25 more PRs drawn at random and built per hunk. All ten levels reviewed, judged and labelled on 28 PRs with 190 references (Section 19): the pattern of the five PRs holds on the 23 new ones. |
+| Not yet | The two largest PRs of the draw, the choice of levels to keep, and the full benchmark. |
 
 ## 3. What one review covers
 
@@ -202,6 +203,7 @@ Measured on the five PRs, with the review script's dry run:
 - **For all 185 PRs:** about 32,000 calls and about 250 million input tokens. This is an estimate scaled from five small and medium PRs, so it is rough.
 - **Against the first run:** that run made 1,569 calls with 59.5 million input tokens in 5h48m. A full per-hunk run is about four times its input, so about a day of GPU time, plus a longer judge run because there will be more findings.
 - **A pilot comes first:** a subset of PRs and levels, to see recall and precision before paying for the full run.
+- **Later estimate:** Section 19.10 scales the time from the 28-PR run and replaces the figures above.
 
 ## 9. How to run it
 
@@ -231,8 +233,8 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 
 ## 10. Not done, and open
 
-1. **Only five PRs have been reviewed** (Section 12). They hold 38 reference comments, 23 of them in one PR, so the numbers are a first reading and not a result.
-2. **The levels cannot be told apart on five PRs** (Section 14.3). Two runs of the same input differ by about three covered references, as much as the levels differ. A larger set, or repeated runs, is needed before any level effect can be claimed.
+1. **28 PRs have been reviewed** (Section 19), with 190 of the benchmark's 1,506 reference comments, in one run. The first five (Section 12) were picked by hand; the other 23 were drawn at random.
+2. **Some levels can now be told apart and some cannot** (Section 19.3). The wide levels cover fewer references than `H03_file` beyond chance. `H03_file` to `H06_tests1` cannot be separated, and the 23 new PRs have one run, so run-to-run variation is measured only on the first five (Section 17).
 3. **No priority or confidence** in the paper's reply format. A variant that adds them would allow filtering afterwards, at the cost of no longer being the paper's prompt.
 4. **Two causes are still changed together** (the prompt and one hunk per call). Running this prompt once per PR would separate them. The parser can already find a quoted snippet's file in a whole-PR diff, but the per-PR context file would have to be rebuilt so that its levels record their parts, and that variant has not been run or tested end to end.
 5. **How often the reviewer's quotes are found in the hunk:** 92 to 98% at the first three levels, 7 to 14% from `H04_pr_diff` on (Section 12.3). Findings whose quote is not found have no line numbers.
@@ -240,7 +242,7 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 7. **Large PRs:** the other-changes section is cut at 16,000 tokens for 10 of the 185 PRs.
 8. **The selector for per-hunk cells is not designed.** Most hunks have no reference comment, so for them the only measurable outcome is a false alarm.
 9. **Which reference set to score against** (v1 or v2) is open, as for the per-PR table.
-10. **The 30-PR build** planned as the next step has not been started.
+10. **The 30-PR build is done** and 28 of its PRs are reviewed (Section 19). Open: the two largest PRs (`n8n-io__n8n__15362`, `FreeCAD__FreeCAD__18688`), which levels to keep, and whether `H07_agent` is split into guide files and search hits.
 
 ## 11. Where things are
 
@@ -257,7 +259,7 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 | `src/review_outcomes/table.py` | Per-hunk cells, `build_hunk_tables` |
 | `notebooks/outcome_table.ipynb` | The `cloud-hunk` profile |
 | `tests/test_hunk_context.py`, `tests/test_review_outcomes.py` | The new tests |
-| `data/aacr_hunk/` (git-ignored) | This test's data: the five-PR per-hunk build with the current levels (`context_levels.jsonl`), the first test's build (`first_test/context_levels.jsonl`), and the outcome runs (`outcomes/qwen3.8-27b_aacr-hunk_v1/` is the first test) |
+| `data/aacr_hunk/` (git-ignored) | This test's data: the 30-PR per-hunk build with the current levels (`context_levels.jsonl`; `context_levels.five_prs.jsonl` is the five-PR build before it), the first test's build (`first_test/context_levels.jsonl`), the outcome runs (`outcomes/qwen3.8-27b_aacr-hunk_v1/` is the first test, `_v2/` the 28-PR run of Section 19, `_v2_r2/` and `_v2_r3/` the repeats on five PRs, `five_pr_tables/` the five-PR tables of the second test), and the severity labels (`labels/`) |
 | `data/aacr/` (git-ignored) | The original per-PR levels and the first run, unchanged |
 
 ## 12. First test on five PRs (November 15, 2026)
@@ -700,3 +702,232 @@ One step no longer exists: a rater of the findings that match no reference (vali
 - **The labeller's cost stays small with thinking on.** It runs once per reference comment, about 78 seconds each at eight in parallel, and its labels are saved and reused.
 - **Where the settings live:** the reviewer's and the judge's in the profile (`enable_thinking` in `notebooks/outcome_table.ipynb`; the profile `cloud-hunk-think` is the reviewer with thinking on), the labeller's on the command line (`label_severity.py --thinking`).
 
+
+## 19. All ten levels on 28 PRs (November 16, 2026)
+
+**Why.** The five PRs of Sections 12 to 17 were picked by hand and hold 38 references, 23 of them in one PR. This run checks whether their pattern holds on PRs drawn at random.
+
+**What was run.**
+
+- **PRs.** The five, plus 25 drawn at random (`random.seed(536)`) from the other 153 PRs whose per-PR levels are all usable. Two of the 25 were built but not reviewed because of their size: `n8n-io__n8n__15362` (246 hunks) and `FreeCAD__FreeCAD__18688` (134 hunks), together 380 of the 699 new hunks. That leaves 28 PRs with 397 hunks and 190 reference comments, which is 14% of the benchmark's 196 PRs and 13% of its 1,506 references. Nine languages: TypeScript 5, Python 5, C 4, Go 4, Java 3, C# 3, C++ 2, PHP 1, Rust 1.
+- **Levels.** `H01_min` to `H10_all`, one run, thinking off, the `cloud-hunk` profile as before. `H11_pr_summary` is built for all 30 PRs and was not reviewed.
+- **The five PRs were not reviewed again.** Their rows here are the second test (the first run of Section 17).
+- **Review.** 3,970 cells, 2,687 distinct inputs, 2,163 new reviewer calls, 17.0 million input tokens, 2 hours 10 minutes. Every cell has an answer, none was cut off, and 3 replies needed the longer-output retry.
+- **Judge.** 26 minutes, no judge errors.
+- **Severity labels.** The 152 new references were labelled with thinking on in 37 minutes. Five replies were unreadable because the thinking repeated itself up to the 16,000-token limit. All five were answered on a second try. The 190 labels: 15 blocking, 65 should fix, 110 nit.
+- **One fix to the build.** `H11_pr_summary` failed for a PR whose parent level already filled the input cap. The summary now gets the room that is left, which can be none.
+
+The run started on the evening of November 15 and ended after midnight. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2/`, with the five-PR tables of the second test kept in `data/aacr_hunk/outcomes/five_pr_tables/`.
+
+### 19.1 The levels
+
+"Score" is the severity-weighted recall (weights 5, 2 and 0.5).
+
+| Level | Covered, of 190 | Recall | Precision | Score | Blocking, of 15 | Should fix, of 65 | Nit, of 110 | Input tokens per hunk |
+|---|---|---|---|---|---|---|---|---|
+| `H01_min` | 106 | 55.8% | 16.6% | 0.602 | 8 | 45 | 53 | 493 |
+| `H02_function` | 106 | 55.8% | 16.4% | 0.636 | 10 | 45 | 51 | 1,000 |
+| `H03_file` | 116 | 61.1% | 18.4% | 0.708 | 12 | 48 | 56 | 1,876 |
+| `H04_callees1` | 111 | 58.4% | 17.8% | 0.715 | 13 | 48 | 50 | 2,904 |
+| `H05_callers1` | 109 | 57.4% | 17.6% | 0.729 | 14 | 48 | 47 | 4,059 |
+| `H06_tests1` | 107 | 56.3% | 17.3% | 0.719 | 14 | 47 | 46 | 4,331 |
+| `H07_agent` | 99 | 52.1% | 16.7% | 0.635 | 11 | 44 | 44 | 9,340 |
+| `H08_depth2` | 96 | 50.5% | 16.1% | 0.652 | 13 | 42 | 41 | 11,951 |
+| `H09_depth2_docs` | 99 | 52.1% | 16.5% | 0.663 | 13 | 43 | 43 | 12,228 |
+| `H10_all` | 94 | 49.5% | 15.6% | 0.631 | 12 | 42 | 40 | 20,176 |
+
+- **The three groups of Section 17 are there again.** No context and the function alone cover 106 references. The file covers 116, and the file with callees, callers and tests 107 to 111. Every level from `H07_agent` on covers 94 to 99, fewer than no context, at 19 to 41 times its tokens.
+- **`H03_file` has the highest plain recall and precision.**
+- **By severity, `H03_file` to `H06_tests1` are level,** at 0.708 to 0.729. They trade nits for blocking references: from `H03_file` to `H05_callers1`, nits covered fall from 56 to 47 and blocking references rise from 12 to 14. One blocking reference is worth 0.019 of score, so the order among these four rests on one or two references.
+- **Nits are lost as the context grows:** 56 at `H03_file`, 40 at `H10_all`. Should-fix references fall less (48 to 42) and blocking references not at all (12 and 12).
+- **Findings per hunk stay at 1.3 to 1.5** at every level (533 to 578 findings on 397 hunks). Findings that do not quote the reviewed hunk, which are not counted, go from 10 at `H01_min` to about 100 at `H04_callees1` and about 200 at `H08_depth2`.
+
+### 19.2 The 23 new PRs, and the five
+
+| Level | 23 new PRs: covered, of 152 | Recall | Score | Five PRs: covered, of 38 | Recall | Score |
+|---|---|---|---|---|---|---|
+| `H01_min` | 85 | 55.9% | 0.598 | 21 | 55.3% | 0.617 |
+| `H02_function` | 87 | 57.2% | 0.661 | 19 | 50.0% | 0.542 |
+| `H03_file` | 94 | 61.8% | 0.707 | 22 | 57.9% | 0.710 |
+| `H04_callees1` | 92 | 60.5% | 0.731 | 19 | 50.0% | 0.654 |
+| `H05_callers1` | 89 | 58.6% | 0.746 | 20 | 52.6% | 0.664 |
+| `H06_tests1` | 86 | 56.6% | 0.731 | 21 | 55.3% | 0.673 |
+| `H07_agent` | 82 | 53.9% | 0.656 | 17 | 44.7% | 0.551 |
+| `H08_depth2` | 79 | 52.0% | 0.671 | 17 | 44.7% | 0.579 |
+| `H09_depth2_docs` | 83 | 54.6% | 0.688 | 16 | 42.1% | 0.570 |
+| `H10_all` | 78 | 51.3% | 0.639 | 16 | 42.1% | 0.598 |
+
+The 23 PRs that had never been looked at show the same shape as the five: `H03_file` highest in recall, `H04_callees1` to `H06_tests1` close to it, and the wide levels below no context. The fall at the wide levels is smaller on the new PRs (1 to 5 points below `H01_min`, against 11 to 13 on the five).
+
+### 19.3 Are the differences larger than chance
+
+Each level against `H03_file`, over the 28 PRs. The interval is a 95% bootstrap interval from 10,000 resamples of the PRs. Wins, ties and losses count PRs by references covered.
+
+| Level | Recall minus `H03_file`, points | 95% interval | Score minus `H03_file` | 95% interval | PRs won, tied, lost |
+|---|---|---|---|---|---|
+| `H01_min` | −5.3 | −12.6 to +1.1 | −0.106 | −0.212 to −0.016 | 5, 13, 10 |
+| `H02_function` | −5.3 | −12.4 to +0.5 | −0.072 | −0.170 to +0.006 | 5, 14, 9 |
+| `H04_callees1` | −2.6 | −8.8 to +4.2 | +0.007 | −0.038 to +0.070 | 5, 15, 8 |
+| `H05_callers1` | −3.7 | −8.3 to +1.2 | +0.021 | −0.036 to +0.094 | 4, 14, 10 |
+| `H06_tests1` | −4.7 | −9.2 to 0.0 | +0.011 | −0.044 to +0.089 | 4, 12, 12 |
+| `H07_agent` | −8.9 | −15.6 to −1.6 | −0.073 | −0.180 to +0.044 | 5, 11, 12 |
+| `H08_depth2` | −10.5 | −17.5 to −2.8 | −0.056 | −0.122 to +0.035 | 3, 12, 13 |
+| `H09_depth2_docs` | −8.9 | −16.3 to −1.1 | −0.045 | −0.110 to +0.045 | 3, 14, 11 |
+| `H10_all` | −11.6 | −18.1 to −4.7 | −0.077 | −0.160 to +0.023 | 2, 12, 14 |
+
+- **The wide levels cover fewer references than the file level, beyond chance.** For `H07_agent` to `H10_all` the whole interval is below zero.
+- **The file level over no context is not established in plain recall** (the interval reaches +1.1) **and is in score** (−0.212 to −0.016). The same holds against `H01_min` for `H04_callees1`, `H05_callers1` and `H06_tests1`: each scores higher than no context with an interval above zero, because they cover 5 or 6 more of the 15 blocking references (`H03_file` covers 4 more).
+- **`H03_file` to `H06_tests1` cannot be told apart,** in recall or in score.
+- **In score the wide levels are not separated from the file level,** because they still cover 11 to 13 of the 15 blocking references.
+- **About half the PRs are ties** in every comparison.
+
+### 19.4 By kind of reference
+
+References covered at each level, `H01_min` to `H10_all` from left to right.
+
+| Group | References | H01 | H02 | H03 | H04 | H05 | H06 | H07 | H08 | H09 | H10 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Diff Level | 83 | 46 | 45 | 50 | 44 | 44 | 41 | 40 | 40 | 41 | 39 |
+| File Level | 74 | 38 | 42 | 42 | 41 | 39 | 40 | 36 | 32 | 33 | 33 |
+| Repo Level | 33 | 22 | 19 | 24 | 26 | 26 | 26 | 23 | 24 | 25 | 22 |
+| Code Defect | 112 | 66 | 67 | 72 | 69 | 69 | 67 | 63 | 63 | 66 | 60 |
+| Maintainability and Readability | 56 | 26 | 22 | 27 | 28 | 25 | 25 | 21 | 21 | 21 | 19 |
+| Performance | 15 | 8 | 12 | 11 | 9 | 10 | 10 | 9 | 7 | 7 | 9 |
+| Security Vulnerability | 7 | 6 | 5 | 6 | 5 | 5 | 5 | 6 | 5 | 5 | 6 |
+| Written by a person | 47 | 17 | 17 | 20 | 22 | 19 | 20 | 15 | 18 | 18 | 17 |
+| Written by a model | 143 | 89 | 89 | 96 | 89 | 90 | 87 | 84 | 78 | 81 | 77 |
+
+- **The benchmark's context label predicts little.** With no context at all the reviewer covers 22 of the 33 references labelled Repo Level. Callees, callers and tests add 4.
+- **The loss at wide levels is in the references labelled Diff Level and File Level:** 50 to 39 and 42 to 33 from `H03_file` to `H10_all`. Repo Level references are not lost (24 and 22).
+- **References written by a person are covered less often** (32 to 47%) than those written by a model (54 to 67%).
+
+### 19.5 Levels with the same input
+
+How many of the 397 hunks have exactly the input of an earlier level, so the reviewer was called once for both.
+
+| Level | Hunks with the input of an earlier level | Mostly the same as |
+|---|---|---|
+| `H02_function` | 58 | `H01_min` |
+| `H03_file` | 1 | |
+| `H04_callees1` | 154 | `H03_file` |
+| `H05_callers1` | 199 | `H03_file` (103), `H04_callees1` (95) |
+| `H06_tests1` | 348 | `H05_callers1` (162), `H03_file` (99), `H04_callees1` (86) |
+| `H07_agent` | 0 | |
+| `H08_depth2` | 40 | `H07_agent` |
+| `H09_depth2_docs` | 339 | `H08_depth2` (299), `H07_agent` (40) |
+| `H10_all` | 144 | `H08_depth2` (105), `H07_agent` (34) |
+
+- **`H06_tests1` adds something to 49 hunks of 397, and `H09_depth2_docs` to 58.** For the rest they are the level before them.
+- **A quarter of the hunks (99) have the same input from `H03_file` to `H06_tests1`:** the tracer finds no callee, caller or test for them.
+
+### 19.6 What a selector could gain
+
+| Choice | Covered, of 190 | Recall | Score |
+|---|---|---|---|
+| Always `H01_min` | 106 | 55.8% | 0.602 |
+| Always `H03_file` | 116 | 61.1% | 0.708 |
+| Always `H05_callers1` | 109 | 57.4% | 0.729 |
+| The best level for each PR, chosen knowing this run's outcome | 133 | 70.0% | 0.806 |
+| Covered at one level or more | 151 | 79.5% | |
+
+- **The last two rows are upper bounds that include run-to-run variation.** They are picked and scored on the same single run. On the five PRs, holding a run out cut a gain of this kind from several references to under one (Section 17.4). The 23 new PRs have one run, so the same check cannot be made for them yet.
+- **63 references are covered at all ten levels and 39 at none.** The 88 between them are where a choice of level can matter, or where the run varies.
+- **No level is the best one for many PRs.** Splitting ties, `H03_file` is best for 4.7 of the 28 PRs, `H04_callees1` for 4.2, `H01_min` for 3.9, and each wide level for about 2.
+
+### 19.7 The score under every weighting
+
+The weights are for blocking, should fix and nit. "Agreed" is the one used above.
+
+| Level | Flat (1, 1, 1) | Linear (3, 2, 1) | Agreed (5, 2, 0.5) | Steep (25, 5, 1) | Blocking only |
+|---|---|---|---|---|---|
+| `H01_min` | 0.558 | 0.586 | 0.602 | 0.590 | 0.533 |
+| `H02_function` | 0.558 | 0.600 | 0.636 | 0.649 | 0.667 |
+| `H03_file` | 0.611 | 0.660 | 0.708 | 0.736 | 0.800 |
+| `H04_callees1` | 0.584 | 0.649 | 0.715 | 0.759 | 0.867 |
+| `H05_callers1` | 0.574 | 0.649 | 0.729 | 0.786 | 0.933 |
+| `H06_tests1` | 0.563 | 0.639 | 0.719 | 0.779 | 0.933 |
+| `H07_agent` | 0.521 | 0.579 | 0.635 | 0.665 | 0.733 |
+| `H08_depth2` | 0.505 | 0.575 | 0.652 | 0.711 | 0.867 |
+| `H09_depth2_docs` | 0.521 | 0.590 | 0.663 | 0.720 | 0.867 |
+| `H10_all` | 0.495 | 0.561 | 0.631 | 0.679 | 0.800 |
+
+- **Which level is best depends on the weights.** `H03_file` is first under flat and linear weights, `H05_callers1` under the agreed and steep ones.
+- **One thing does not depend on them:** `H05_callers1` is above every wide level under every weighting, and `H04_callees1` and `H06_tests1` are above or level with them.
+- **Where `H01_min` stands does depend on them.** It is above every wide level under flat weights and the lowest of the ten under the agreed and steep ones.
+- **The steeper the weights, the more the order follows the 15 blocking references alone.**
+
+### 19.8 Each PR
+
+References covered at each level, `H01_min` to `H10_all` from left to right. A star marks the five PRs of the earlier tests.
+
+| PR | Language | Hunks | References | H01 | H02 | H03 | H04 | H05 | H06 | H07 | H08 | H09 | H10 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `browser-use__browser-use__857` * | Python | 17 | 2 | 1 | 2 | 2 | 2 | 2 | 2 | 2 | 1 | 1 | 1 |
+| `CherryHQ__cherry-studio__5637` * | TypeScript | 11 | 23 | 11 | 10 | 10 | 7 | 8 | 8 | 6 | 6 | 6 | 6 |
+| `cline__cline__5177` * | TypeScript | 1 | 2 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 2 | 1 | 1 |
+| `gofr-dev__gofr__1617` * | Go | 30 | 5 | 4 | 4 | 4 | 4 | 4 | 5 | 4 | 4 | 4 | 4 |
+| `timescale__timescaledb__7915` * | C | 19 | 6 | 4 | 2 | 5 | 5 | 5 | 5 | 4 | 4 | 4 | 4 |
+| `alibaba__spring-ai-alibaba__869` | Java | 7 | 4 | 1 | 1 | 1 | 2 | 2 | 2 | 2 | 3 | 3 | 3 |
+| `bitcoin__bitcoin__31886` | C++ | 3 | 4 | 2 | 1 | 2 | 1 | 1 | 1 | 1 | 1 | 1 | 2 |
+| `CherryHQ__cherry-studio__5540` | TypeScript | 16 | 19 | 14 | 13 | 13 | 15 | 13 | 13 | 14 | 13 | 13 | 12 |
+| `comfyanonymous__ComfyUI__6542` | Python | 3 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
+| `dotnet__aspnetcore__61006` | C# | 6 | 6 | 2 | 1 | 3 | 3 | 3 | 3 | 1 | 3 | 3 | 3 |
+| `dotnet__aspnetcore__62734` | C# | 2 | 4 | 2 | 1 | 2 | 1 | 1 | 1 | 2 | 1 | 1 | 2 |
+| `elastic__elasticsearch__127697` | Java | 7 | 6 | 4 | 4 | 3 | 5 | 3 | 2 | 2 | 2 | 4 | 2 |
+| `filamentphp__filament__15756` | PHP | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `FreeCAD__FreeCAD__20156` | C++ | 27 | 16 | 8 | 9 | 13 | 11 | 12 | 12 | 9 | 7 | 7 | 9 |
+| `infiniflow__ragflow__6553` | Python | 5 | 6 | 1 | 3 | 2 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
+| `infiniflow__ragflow__7151` | Python | 10 | 10 | 6 | 7 | 8 | 8 | 8 | 8 | 6 | 7 | 7 | 7 |
+| `keycloak__keycloak__40283` | Java | 30 | 17 | 12 | 12 | 11 | 10 | 12 | 10 | 12 | 9 | 10 | 11 |
+| `langflow-ai__langflow__6652` | Python | 4 | 6 | 3 | 5 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 3 |
+| `linera-io__linera-protocol__3151` | Rust | 7 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `microsoft__typescript-go__1000` | Go | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| `microsoft__typescript-go__1354` | Go | 46 | 2 | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
+| `microsoft__typescript-go__691` | Go | 5 | 3 | 2 | 2 | 3 | 2 | 2 | 2 | 2 | 1 | 1 | 0 |
+| `n8n-io__n8n__13323` | TypeScript | 17 | 13 | 6 | 9 | 8 | 5 | 6 | 6 | 5 | 6 | 6 | 5 |
+| `n8n-io__n8n__20188` | TypeScript | 12 | 6 | 3 | 2 | 3 | 3 | 2 | 2 | 2 | 3 | 3 | 2 |
+| `ppy__osu__33423` | C# | 2 | 8 | 4 | 5 | 5 | 5 | 4 | 4 | 5 | 3 | 3 | 3 |
+| `timescale__timescaledb__7935` | C | 22 | 5 | 5 | 3 | 3 | 3 | 2 | 2 | 4 | 3 | 3 | 3 |
+| `timescale__timescaledb__8138` | C | 74 | 11 | 6 | 6 | 6 | 7 | 7 | 7 | 4 | 6 | 6 | 4 |
+| `valkey-io__valkey__2141` | C | 10 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **All 28** | | **397** | **190** | **106** | **106** | **116** | **111** | **109** | **107** | **99** | **96** | **99** | **94** |
+
+- **Five PRs give the same count at every level** (three of them cover none of their one reference), and most others move by one or two references.
+- **Three PRs hold 59 of the 190 references** (`CherryHQ__cherry-studio__5637`, `CherryHQ__cherry-studio__5540` and `keycloak__keycloak__40283`).
+- **The direction differs by PR.** `infiniflow__ragflow__6553` goes from 1 to 4 with context and `alibaba__spring-ai-alibaba__869` from 1 to 3; `CherryHQ__cherry-studio__5637` goes from 11 to 6 and `timescale__timescaledb__7935` from 5 to 2 to 4.
+
+### 19.9 What this says about the levels to keep
+
+The agreed plan is to decide the kept levels from this run. The decision has not been made. What the run shows:
+
+- **`H01_min` and `H03_file` are needed:** the cheapest level, and the level with the highest recall.
+- **One of `H04_callees1`, `H05_callers1` and `H06_tests1` is enough.** They cannot be told apart, and `H06_tests1` equals an earlier level for 348 of the 397 hunks. `H05_callers1` has the highest score.
+- **`H08_depth2` and `H09_depth2_docs` are close to one level:** the same input for 339 of the 397 hunks.
+- **No wide level helps on average.** Whether one is kept depends on whether the selector should be able to show that wide context is not needed, which it can only show if a wide level is in the table.
+- **`H07_agent` is still two things at once** (guide files and search hits). This run does not say which of them lowers recall.
+- **Proposed after the run, not agreed:** keep four levels, `H01_min`, `H03_file`, `H05_callers1` and `H10_all`.
+
+### 19.10 What the full benchmark would take
+
+Scaled from this run by hunks. The 185 built PRs have 4,136 hunks; 397 are reviewed, so 3,739 remain, the two largest PRs included. Reviews already saved are reused.
+
+| Step | Measured on the 23 new PRs (319 hunks) | The 3,739 remaining hunks, all ten levels |
+|---|---|---|
+| Build the per-hunk levels (laptop) | 32 minutes for 25 PRs (699 hunks) | About 2.5 hours |
+| Review | 2 hours 10 minutes | About 25 hours |
+| Judge | 27 minutes | About 5 hours |
+| Severity labels, thinking on | 37 minutes for 152 references | About 5 hours for about 1,300 |
+| Server total | | About 35 hours |
+
+- **This replaces the estimate of Section 8.**
+- **It is rough, to within about 30%.** The remaining PRs are larger (22 hunks per PR on average in the benchmark, 14 in these 28) and may carry more context per hunk.
+- **With four levels** (`H01_min`, `H03_file`, `H05_callers1`, `H10_all`): about half the reviewer calls and 40% of the input tokens, so about 11 to 13 hours of review and about 20 hours in all. The labelling time does not depend on the number of levels.
+
+### 19.11 Limits
+
+- **One run.** On the five PRs, two runs of one level differed by up to 8 references of 38 at the wide levels (Section 17.2).
+- **The two largest PRs of the draw were left out,** so large PRs are under-represented. The largest reviewed PR has 74 hunks.
+- **15 blocking references carry 29% of the score's weight.** Differences in score between levels rest on a few of them.
+- **The reviewer, the judge and the severity labeller are one model.** The judge has not been validated, and no person has labelled severity.
+- **The intervals of Section 19.3 treat PRs as the unit and do not include run-to-run variation of the reviewer or the judge.**
+- **111 of the 397 hunks have a reference on them.** For the other 286 the level cannot change recall.
