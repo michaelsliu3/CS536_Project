@@ -34,7 +34,8 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 | November 15, later | All ten levels reviewed twice more to measure run-to-run variation (Section 17): `H03_file` is the best level, and every level from `H07_agent` on is no better than no context. |
 | November 15, later | Two levels run again with the reviewer's thinking on (Section 15). A look at why the levels do not differ and at what recall and precision measure (Section 16). Pull request 7 opened for this branch. |
 | November 15 to 16 | 25 more PRs drawn at random and built per hunk. All ten levels reviewed, judged and labelled on 28 PRs with 190 references (Section 19): the pattern of the five PRs holds on the 23 new ones. |
-| Not yet | The two largest PRs of the draw, the choice of levels to keep, and the full benchmark. |
+| November 16 | Tested on the 28 PRs whether a selector could tell which hunks need the file: from the change, from the reviewer's first review, and from the reviewer's own request (Section 20). None does much better than a coin flip. |
+| Not yet | The two largest PRs of the draw, the choice of levels to keep, the direction after Section 20, and the full benchmark. |
 
 ## 3. What one review covers
 
@@ -240,7 +241,7 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 5. **How often the reviewer's quotes are found in the hunk:** 92 to 98% at the first three levels, 7 to 14% from `H04_pr_diff` on (Section 12.3). Findings whose quote is not found have no line numbers.
 6. **The fixed code fence** (Section 5) breaks for hunks that contain a fence line.
 7. **Large PRs:** the other-changes section is cut at 16,000 tokens for 10 of the 185 PRs.
-8. **The selector for per-hunk cells is not designed.** Most hunks have no reference comment, so for them the only measurable outcome is a false alarm.
+8. **The selector for per-hunk cells is not designed,** and a first test says the current setup gives it little to learn (Section 20). Most hunks have no reference comment, so for them the only measurable outcome is a false alarm. Open: whether to change the setup, the goal, or to report the comparison of levels as the result.
 9. **Which reference set to score against** (v1 or v2) is open, as for the per-PR table.
 10. **The 30-PR build is done** and 28 of its PRs are reviewed (Section 19). Open: the two largest PRs (`n8n-io__n8n__15362`, `FreeCAD__FreeCAD__18688`), which levels to keep, and whether `H07_agent` is split into guide files and search hits.
 
@@ -258,7 +259,8 @@ The judge script writes the tables for the PRs it was given. Output goes to `dat
 | `src/review_outcomes/parse.py` | `parse_tagged_review`, `locate_snippet` |
 | `src/review_outcomes/table.py` | Per-hunk cells, `build_hunk_tables` |
 | `notebooks/outcome_table.ipynb` | The `cloud-hunk` profile |
-| `tests/test_hunk_context.py`, `tests/test_review_outcomes.py` | The new tests |
+| `src/review_outcomes/ask.py`, `scripts/outcome/ask_context.py` | The question put to the reviewer after its review (Section 20.5) |
+| `tests/test_hunk_context.py`, `tests/test_review_outcomes.py`, `tests/test_ask_context.py` | The new tests |
 | `data/aacr_hunk/` (git-ignored) | This test's data: the 30-PR per-hunk build with the current levels (`context_levels.jsonl`; `context_levels.five_prs.jsonl` is the five-PR build before it), the first test's build (`first_test/context_levels.jsonl`), the outcome runs (`outcomes/qwen3.8-27b_aacr-hunk_v1/` is the first test, `_v2/` the 28-PR run of Section 19, `_v2_r2/` and `_v2_r3/` the repeats on five PRs, `five_pr_tables/` the five-PR tables of the second test), and the severity labels (`labels/`) |
 | `data/aacr/` (git-ignored) | The original per-PR levels and the first run, unchanged |
 
@@ -695,6 +697,7 @@ Every model step is Qwen3.8-27B. Thinking is a setting of each step, decided sep
 | Reviewer | Writes the review comments for each hunk | Off | Tested on at two levels (Section 15): 3 to 6 more references covered of 38, almost twice as many findings, lower precision, and about 8.5 times the review time. Not adopted for now |
 | Judge | Decides whether a comment matches a reference comment | Off | Never changed since the first outcome table, and never tested with thinking on |
 | Severity labeller | Labels each reference comment as blocking, should fix or nit | On | The 38 pilot references were labelled both ways and the thinking-on labels were chosen; labelling always runs with thinking on (`docs/review_score_design.md`, Section 12.1) |
+| Question after the review (a test, Section 20.5) | Asks the reviewer whether it needs the function and the file | Off | Run once with thinking off; thinking on was not tried |
 
 One step no longer exists: a rater of the findings that match no reference (valid, speculative or wrong). It ran once with thinking off, a thinking-on run was stopped part-way, and the step was dropped (`docs/review_score_design.md`, Section 13).
 
@@ -931,3 +934,174 @@ Scaled from this run by hunks. The 185 built PRs have 4,136 hunks; 397 are revie
 - **The reviewer, the judge and the severity labeller are one model.** The judge has not been validated, and no person has labelled severity.
 - **The intervals of Section 19.3 treat PRs as the unit and do not include run-to-run variation of the reviewer or the judge.**
 - **111 of the 397 hunks have a reference on them.** For the other 286 the level cannot change recall.
+
+## 20. Can a selector tell which hunks need the file? (November 16, 2026)
+
+**Why.** The full benchmark would take about 35 hours with ten levels (Section 19.10). Before paying for it, the 28 PRs were used to test whether a selector could work with the current setup at all. Three sources of a decision were tried: the change itself, the reviewer's first review, and the reviewer's own request.
+
+**Result in one line.** None of the three tells the hunks where the file helps from the others much better than a coin flip, and none meets the target. The direction of the project is not decided, and the full benchmark has not been started.
+
+### 20.1 How the test works
+
+- **Data.** The 397 hunks of Section 19. For each hunk and level, the references covered are read from the saved judgment of that cell. A PR's covered references are the union over its hunks, as in the table. Using one level for every hunk reproduces the totals of Section 19.1.
+- **A policy** is one level per hunk. It is scored by references covered, of 190, and by input tokens (the level's text, as in Section 19.1).
+- **Held out.** Every learned selector is trained on 27 PRs and scored on the one left out, 28 times.
+- **Ranking score.** For a prediction per hunk, the area under the ROC curve: 0.5 is a coin flip, 1.0 is perfect. Its 95% interval is a bootstrap over PRs.
+- **Target.** The project's rule for a positive result: recall within one point of the best fixed level at 70% or less of its tokens. Here that is 115 or more references at 70% or less of the tokens of always using `H03_file` (116 references).
+- **Random choice.** 1,000 random orders of the hunks, as mean and 5th to 95th percentile. A selector has to beat this, not only `H01_min`.
+
+### 20.2 Where the level matters
+
+| Hunks, of 397 | Across the ten levels |
+|---|---|
+| 249 | No reference is covered at any level |
+| 37 | The same references are covered at every level |
+| 111 | The outcome changes with the level |
+
+Between `H01_min` and `H03_file` the outcome differs on 58 hunks: the file adds a reference on 38 and loses one on 25 (both on 5).
+
+**With hindsight** (chosen knowing this run's outcome, so an upper bound that includes run-to-run variation):
+
+| Choice per hunk | Covered, of 190 | Tokens, share of always `H03_file` |
+|---|---|---|
+| Always `H01_min` | 106 | 26% |
+| Always `H03_file` | 116 | 100% |
+| The better of `H01_min` and `H03_file` | 129 | 33% |
+| The best of `H01_min`, `H03_file`, `H05_callers1`, `H10_all` | 134 | 50% |
+| The best of all ten | 144 | 49% |
+
+**How much of that is real.** On the five PRs with three runs (78 hunks):
+
+| | In all 3 runs | In 2 of 3 | In 1 of 3 | In none |
+|---|---|---|---|---|
+| Hunks where `H03_file` adds a reference over `H01_min` | 9 | 3 | 0 | 66 |
+| Hunks where it loses one | 3 | 0 | 0 | 75 |
+
+| Choice per hunk made on one run, scored on another | Covered, of 38 | Tokens, share of always `H03_file` |
+|---|---|---|
+| Always `H01_min` | 19.0 | 27% |
+| Always `H03_file` | 22.3 | 100% |
+| The better of `H01_min` and `H03_file` | 21.8 | 38% |
+| The best of the four levels | 21.8 | 44% |
+| The best of all ten | 21.7 | 53% |
+
+- **The label is repeatable.** Whether the file helps a hunk is the same in all three runs for 75 of the 78 hunks.
+- **The saving is real and the quality gain is not.** A choice carried over from another run keeps the recall of `H03_file` (21.8 against 22.3) at 38% of its tokens. It does not go above `H03_file`, with two levels or with ten.
+- **So the room is in cost,** and a selector would have to find about one hunk in ten.
+
+### 20.3 Deciding from the change alone
+
+**Inputs, all known before any review:** lines added and removed, characters of the diff, changed symbols, callees, callers and test callers one step away, text-search hits, hunks in the file and in the PR, input tokens of `H01_min`, `H03_file`, `H05_callers1` and `H10_all`, whether the file is code, whether its path contains "test", whether it is a new file. A second kind of selector read the text of `H01_min` (the PR title and description and the hunk's diff) as word or character counts. No selector saw the file's content, the references or the reviewer's output.
+
+| Predicted, per hunk | Inputs | Ranking score | 95% interval |
+|---|---|---|---|
+| The file adds a reference (38 hunks) | Size and counts, logistic | 0.65 | 0.52 to 0.79 |
+| | Size and counts, boosted trees | 0.60 | |
+| | Words of the hunk | 0.51 | 0.41 to 0.62 |
+| | Characters of the hunk | 0.49 | 0.38 to 0.59 |
+| A reference is covered at some level (148 hunks) | Size and counts, logistic | 0.66 | |
+| | Words of the hunk | 0.69 | 0.58 to 0.81 |
+
+**At a token budget.** Hunks get `H03_file` in the order of the selector's score until the budget is used; the rest get `H01_min`. One review per hunk.
+
+| References covered, of 190, at a share of always-`H03_file` tokens | 40% | 50% | 60% | 70% | 85% |
+|---|---|---|---|---|---|
+| Random choice, mean | 108.6 | 110.3 | 111.8 | 113.1 | 114.8 |
+| Random choice, 5th to 95th percentile | 104 to 113 | 105 to 115 | 107 to 117 | 108 to 118 | 110 to 119 |
+| No learning: the file where it costs least | 108 | 111 | 114 | 117 | 117 |
+| Ridge regression on references gained minus lost | 109 | 112 | 113 | 113 | 114 |
+| Boosted trees on the same | 103 | 104 | 108 | 109 | 114 |
+| Logistic, "the file adds a reference" | 111 | 110 | 109 | 113 | 116 |
+| Logistic, "a reference is covered at some level" | 110 | 109 | 110 | 113 | 115 |
+| Hindsight | 128 | 129 | 130 | 129 | 129 |
+
+- **No learned selector is better than a random choice** at 70%: three reach 113 and one 109, against 113.1 for random.
+- **The rule with no learning meets the target** (117 at 70%), but it is inside the range of random choices.
+- **The target is easy on this sample.** A random choice is within two references of it on average.
+
+**Choosing for quality.** A selector that predicts the references covered at each of four levels (`H01_min`, `H03_file`, `H05_callers1`, `H10_all`) and takes the highest covers 102 of 190 at 118% of the tokens of `H03_file`. Always `H03_file` covers 116.
+
+### 20.4 Two passes: the selector reads the first review
+
+Every hunk is reviewed at `H01_min`. The selector then also sees that review and decides which hunks get a second review at `H03_file`. Tokens of both reviews are counted. The second review either replaces the first or both sets of findings are kept.
+
+**Added inputs from the first review:** number of findings, length, question marks, identifiers named that are not in the hunk, and counts of 26 hedging words ("assume", "verify", "might", "not shown" and so on). A second selector read the review's words.
+
+| Predicting "the file adds a reference" | Ranking score | 95% interval |
+|---|---|---|
+| Before the review: size and counts | 0.65 | 0.52 to 0.79 |
+| Features of the first review only | 0.43 | 0.33 to 0.55 |
+| Size, counts and features of the review, logistic | 0.53 | 0.42 to 0.65 |
+| The same, boosted trees | 0.61 | 0.50 to 0.74 |
+| Words of the first review | 0.63 | 0.53 to 0.72 |
+| Features and words combined | 0.59 | 0.48 to 0.71 |
+
+| References covered at 70% of always-`H03_file` tokens | Second review replaces the first | Both reviews kept |
+|---|---|---|
+| Random choice, mean (5th to 95th percentile) | 111.4 (106 to 116) | 117.2 (113 to 121) |
+| No learning: the file where it costs least | 112 | 118 |
+| Before the review: size and counts | 111 | 118 |
+| Features of the first review only | 109 | 116 |
+| Size, counts and features of the review, logistic | 108 | 116 |
+| The same, boosted trees | 111 | 120 |
+| Words of the first review | 112 | 121 |
+| Features and words combined | 113 | 122 |
+| Hindsight | 130 | 130 |
+| Every hunk gets both reviews (126% of the tokens) | 116 | 130 |
+
+The learned rows rank by score per token of the file.
+
+- **Reading the first review does not help.** No selector predicts better after it than before it.
+- **When the second review replaces the first, no selector meets the target** or is clearly better than a random choice.
+- **When both are kept the target is met, by a random choice too.** Two reviews cover more than one. The best selector's 122 is above 97% of random choices, but it is the best of twelve variants and is not established.
+- **The reviewer hedges everywhere.** "Ensure" is in 79% of the first reviews where the file helped and in 77% of the others. A few words differ ("check" 53% against 25%, "potential" 39% against 19%, "assume" 24% against 10%).
+- **Keeping both reviews on every hunk covers 130 of 190** (68%) against 116, with about twice the findings (573 and 559). Precision for it was not computed in the table's way.
+- **The gain of a second review comes from the file, not from a second try.** On the five PRs: two runs of `H01_min` kept together cover 20.0 of 38 (one run 19.0), `H01_min` with `H03_file` 23.7, two runs of `H03_file` 23.0 (one run 22.3).
+
+### 20.5 The reviewer asks
+
+After its saved review at `H01_min`, in the same conversation, the reviewer is asked whether seeing the function and the rest of the file would be likely to change the review. It answers yes or no, a likelihood from 1 to 5, and what is missing. The review itself is unchanged. Two wordings were run: the question alone ("plain"), and with a sentence that the extra code is not free and that yes is for something specific ("cost"). Thinking off. Code: `src/review_outcomes/ask.py` and `scripts/outcome/ask_context.py` (commit `a36b47f`). Each wording took a little over two minutes for the 397 hunks.
+
+| | Plain | Cost |
+|---|---|---|
+| Hunks where it asks for the file | 318 (80%) | 249 (63%) |
+| Asks, on the 38 hunks where the file adds a reference | 84% | 71% |
+| Asks, on the other 359 | 80% | 62% |
+| Asks, on the 25 hunks where the file loses a reference | 88% | 88% |
+| Ranking score of its likelihood for "the file adds a reference" | 0.53 | 0.57 |
+| 95% interval | 0.45 to 0.64 | 0.45 to 0.70 |
+| Likelihood answers 1, 4 and 5 (2 and 3 were never given) | 79, 243, 75 | 148, 232, 17 |
+
+| Granting every request | Plain | Cost |
+|---|---|---|
+| Covered, second review replaces the first | 113 | 109 |
+| The same number of hunks chosen at random | 114.7 (111 to 119) | 113.3 (108 to 118) |
+| Covered, both reviews kept | 124 | 120 |
+| The same number of hunks chosen at random | 125.6 (122 to 128) | 121.7 (118 to 125) |
+| Tokens of the reviews, share of always `H03_file` | 110% | 90% |
+| With the question's own call counted in full | 187% | 170% |
+
+- **The request does not track the benefit.** It asks about as often where the file helps as where it does not, and most often where the file loses a reference.
+- **Saying that a request has a price lowers the number of requests** (80% to 63%) and not their accuracy.
+- **Granting every request is no better than granting the same number at random,** and saves no tokens.
+- **The question is a call of its own:** about 1,450 input tokens per hunk, because the review's input and reply are sent again, and under 30 output tokens. A server that reuses the shared prefix pays little of this in time, but by token count the loop costs more than giving every hunk the file.
+- **The requests are specific.** Of the 249 under the cost wording, 161 name something that appears in the rest of the file, 66 name no identifier, and 22 name something the file does not hold. The file added a reference for 20 of the 161 (12%), close to the rate for any hunk (10%).
+
+### 20.6 Reading
+
+| The selector decides from | Ranking score for "the file adds a reference" |
+|---|---|
+| The change (size and counts) | 0.65 |
+| The first review's words | 0.63 |
+| The reviewer's own request | 0.53 to 0.57 |
+
+- **The three agree.** Each is weak, each interval reaches or nearly reaches 0.5, and none meets the target beyond what a random choice does.
+- **The effect to predict is small.** The file changes the outcome on 58 of 397 hunks and nets 10 references of 190. The reviewer writes 1.3 to 1.5 findings per hunk whatever it is shown, so context mostly changes which problem it mentions.
+- **More data would narrow the intervals** (the full benchmark would give about 400 hunks where the file helps, against 38). It would not by itself make a weak signal strong.
+- **What a selector can predict better is where problems are:** "a reference is covered at some level" reaches 0.66 to 0.69. That points at spending review effort on some hunks, which is a different goal from choosing context.
+
+**Not tested:** the question with thinking on, other wordings, a request written into the review prompt itself, handing over the one thing the reviewer names instead of the whole file, and a neural model reading the hunk.
+
+**Limits.** 28 PRs and 38 hunks where the file helps. One run for 23 of the PRs. Simple models. Many variants were compared, so a single good number is weak evidence. The judge and the reviewer are one model, and the judge has not been validated.
+
+**The scratch scripts** of this section are kept in `data/aacr_hunk/selector_test/` (git-ignored, with a README), and the reviewer's answers in `asks/` under the run folder.
