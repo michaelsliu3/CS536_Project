@@ -6,7 +6,8 @@ more call (decided 2026-11-14, docs/outcome_table_first_run.md Section 7):
 1. longer_output: the reply was cut off at the output limit. The same request is sent again with
    a larger limit.
 2. follow_up: the reply finished without the JSON (prose, or a tool call the reviewer cannot
-   make). The conversation continues with one message asking for the JSON.
+   make). The conversation continues with one message asking for the JSON. (For a reviewer
+   prompt with another reply format the message asks for that format: `follow_up_request`.)
 
 A cell takes each step at most once, in that order, and a follow-up is its last step. The last
 reply decides the cell: one that still has no JSON counts as a review with no findings, as
@@ -39,7 +40,7 @@ ANSWERED = ("ok", "malformed", "empty_output")  # statuses of a record that hold
 MIN_REPLY_TOKENS = 1024
 # The follow-up's own share of the window: its text, at a generous two characters per token, plus
 # the chat template's tokens around the two added turns.
-FOLLOW_UP_TOKENS = len(FOLLOW_UP_REQUEST) // 2 + 64
+FOLLOW_UP_TOKENS = len(FOLLOW_UP_REQUEST) // 2 + 64  # for the Codex follow-up; see RetryPolicy.follow_up_tokens
 
 
 @dataclass(frozen=True)
@@ -47,20 +48,31 @@ class RetryPolicy:
     longer_max_tokens: int | None = None  # the output limit for a reply that was cut off; None: no such step
     follow_up: bool = False               # ask once for the JSON when a reply finished without it
     context_window: int | None = None     # the model's window in tokens; None: limits are not capped by it
+    # The follow-up message. It names the reply format, so it belongs to the reviewer prompt
+    # (prompts.ReviewPrompt.follow_up); the default is the Codex prompt's.
+    follow_up_request: str = FOLLOW_UP_REQUEST
 
     @classmethod
-    def from_spec(cls, spec: dict) -> "RetryPolicy | None":
-        """The policy in a reviewer profile's "retry" entry, or None when it has none."""
+    def from_spec(cls, spec: dict, follow_up_request: str | None = None) -> "RetryPolicy | None":
+        """The policy in a reviewer profile's "retry" entry, or None when it has none.
+        `follow_up_request` is the run's reviewer prompt's follow-up message."""
         retry = spec.get("retry")
         if not retry:
             return None
-        return cls(retry.get("longer_max_tokens"), bool(retry.get("follow_up")), retry.get("context_window"))
+        return cls(retry.get("longer_max_tokens"), bool(retry.get("follow_up")), retry.get("context_window"),
+                   follow_up_request or FOLLOW_UP_REQUEST)
+
+    @property
+    def follow_up_tokens(self) -> int:
+        """The follow-up's own share of the window (see FOLLOW_UP_TOKENS)."""
+        return len(self.follow_up_request) // 2 + 64
 
     @property
     def identity(self) -> dict:
         """Everything about the rule that changes a retried reply; saved with each retried record."""
         return {"version": RETRY_VERSION, "longer_max_tokens": self.longer_max_tokens, "follow_up": self.follow_up,
-                "follow_up_sha256": hashlib.sha256(FOLLOW_UP_REQUEST.encode("utf-8")).hexdigest() if self.follow_up else None,
+                "follow_up_sha256": (hashlib.sha256(self.follow_up_request.encode("utf-8")).hexdigest()
+                                     if self.follow_up else None),
                 "context_window": self.context_window}
 
 
@@ -97,7 +109,7 @@ def step_limit(step: str, record: dict, policy: RetryPolicy, first_limit: int | 
         return limit, None
     limit = first_limit
     if window is not None and prompt_tokens is not None:
-        room = window - prompt_tokens - (reply.get("completion_tokens") or 0) - FOLLOW_UP_TOKENS
+        room = window - prompt_tokens - (reply.get("completion_tokens") or 0) - policy.follow_up_tokens
         limit = room if limit is None else min(limit, room)
         if limit < MIN_REPLY_TOKENS:
             return None, (f"no room for a follow-up: the prompt and the first reply leave about {max(room, 0)} tokens "
@@ -148,7 +160,8 @@ def run_steps(record: dict, messages: list[dict], reviewer: Callable, policy: Re
         else:
             entry.update(max_tokens=limit, started_at=_now())
             request = messages if step == LONGER_OUTPUT else messages + [
-                {"role": "assistant", "content": record["reply"]["text"]}, {"role": "user", "content": FOLLOW_UP_REQUEST}]
+                {"role": "assistant", "content": record["reply"]["text"]},
+                {"role": "user", "content": policy.follow_up_request}]
             try:
                 entry["reply"] = reviewer(request) if limit is None else reviewer(request, max_tokens=limit)
             except Exception as error:  # noqa: BLE001 - recorded; the next run tries this step again

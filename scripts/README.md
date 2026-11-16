@@ -6,7 +6,7 @@ root from its own location, so the working directory only matters for relative a
 
 | Folder | Script | What it does |
 |---|---|---|
-| `dataset/` | `build_dataset.py` | Builds the context levels for every AACR-Bench PR into `ROOT/context_levels.jsonl` (setup checks, retries, logs, resume). See `src/tracer_context/README.md`. |
+| `dataset/` | `build_dataset.py` | Builds the context levels for every AACR-Bench PR into `ROOT/context_levels.jsonl` (setup checks, retries, logs, resume). With `--unit hunk` it packs a set of levels for every diff hunk (the per-hunk test), which needs a folder of its own: `data/aacr_hunk`. A folder that holds per-PR records is refused. See `src/tracer_context/README.md`. |
 | | `clean_dataset.py` | Deletes a build and downloaded repositories so the next build starts over. |
 | `tracer/` | `build_tracer_context.py` | Builds one review context for one PR checkout, with a config. |
 | | `run_tracer_batch.py` | Builds per-PR folders (trace, every level's `context.md` and `selection.json`) for inspecting chosen AACR entries. |

@@ -1,0 +1,6 @@
+# H06 tests-1: + tests that directly exercise this hunk's code.
+inherit: H05_callers1.yaml
+level: {name: H06_tests1, parent: H05_callers1}
+selection:
+  limits:
+    test: {max_hop: 1, max_items: 10}

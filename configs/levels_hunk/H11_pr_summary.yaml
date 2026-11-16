@@ -1,0 +1,8 @@
+# H11 pr-summary: + a list of the PR's other changes (file, lines after the change, enclosing
+# code), with no diff lines. It is the last level and not part of the L01-L10 mirror. In the first
+# test this information was level 4 and was shown as a diff; the reviewer then commented on those
+# other hunks instead of the hunk under review (docs/per_hunk_review_test.md, Section 12.3).
+inherit: H10_all.yaml
+level: {name: H11_pr_summary, parent: H10_all}
+input: {other_hunks: true, other_hunks_form: summary}
+packing: {other_hunks_max_tokens: 4000}

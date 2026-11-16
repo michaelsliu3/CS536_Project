@@ -48,8 +48,17 @@ from src.tracer_context.aacr import (
 )
 from src.tracer_context.build import RENDER_VERSION, build_context, config_sha256, nesting_check
 from src.tracer_context.cbm import TRACE_FORMAT, trace, tracer_settings
+from src.tracer_context.hunks import HUNK_VERSION, HunkTracer, hunk_id
 
 FORMAT = "aacr-context-levels/v1"
+# One line per PR, like FORMAT, but the levels are packed per diff hunk (`unit="hunk"`): a record has
+# `hunks` (a list, in diff order) where FORMAT has `levels`. Each hunk has id (`<PR id>__h0001`),
+# index, file, old_file, deleted_file, header, old/new start and count, changed_symbols, stats and
+# its own `levels`. A level identical to its parent stores no text (`text: null`); `hunk_units`
+# fills it in. `hunk_checks` counts how the PR was split and how well the per-hunk walks repeat
+# the tool's walk.
+FORMAT_HUNK = "aacr-hunk-context-levels/v1"
+UNITS = ("pr", "hunk")
 
 
 # ---------- file I/O ----------
@@ -172,16 +181,19 @@ def level_rows(records: Iterable[dict], include_text: bool = True) -> list[dict]
 
 # ---------- building one record ----------
 
-def build_key(configs: dict, tool_version: str, tokenizers: dict, record: dict) -> str:
+def build_key(configs: dict, tool_version: str, tokenizers: dict, record: dict, unit: str = "pr") -> str:
     """Everything that changes a PR's contexts: inputs, how the checkout finds the merge base,
-    tool, trace and render versions, every level config and tokenizer. (After changing builder
-    code without bumping FETCH_VERSION, RENDER_VERSION or TRACE_FORMAT, rebuild with --force.)"""
+    tool, trace and render versions, every level config and tokenizer, and for per-hunk levels
+    how the PR is split. (After changing builder code without bumping FETCH_VERSION,
+    RENDER_VERSION, TRACE_FORMAT or HUNK_VERSION, rebuild with --force.)"""
     first = next(iter(configs.values()))
     key = {"source": record["source_commit"], "target": record["target_commit"], "url": record["githubPrUrl"],
            "fetch": FETCH_VERSION, "tool": tool_version, "trace_format": TRACE_FORMAT, "render": RENDER_VERSION,
            "tracer": tracer_settings(first["tracer"]),
            "levels": [[name, config_sha256(cfg)] for name, cfg in configs.items()],
            "tokenizers": sorted(tokenizers.values()), "format": FORMAT}
+    if unit != "pr":  # a per-PR key is unchanged
+        key.update(format=FORMAT_HUNK, unit=unit, hunk_version=HUNK_VERSION)
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -230,9 +242,100 @@ def pack_levels(data: dict, repo: Path, configs: dict, counters: dict, pr: dict 
     return levels
 
 
+def _memo(count: Callable[[str], int], max_chars: int = 200_000, max_total: int = 300_000_000) -> Callable[[str], int]:
+    """`count` with its answers remembered. A PR's hunks show many of the same code blocks, and
+    counting tokens is most of the packing time. Long texts (whole inputs) are not kept."""
+    cache: dict[str, int] = {}
+    total = 0
+
+    def counted(text: str) -> int:
+        nonlocal total
+        if len(text) > max_chars:
+            return count(text)
+        if text not in cache:
+            if total > max_total:
+                cache.clear()
+                total = 0
+            cache[text] = count(text)
+            total += len(text)
+        return cache[text]
+
+    return counted
+
+
+_HUNK_STATS = ("changed_symbols", "changed_symbols_by_label", "callers_by_hop", "test_callers_by_hop",
+               "callees_by_hop", "search_names", "search_hits")
+
+
+def pack_hunks(data: dict, repo: Path, configs: dict, counters: dict, pr: dict | None, entry_id: str) -> tuple[list, dict]:
+    """(one dict per diff hunk with its own levels, counts of how the PR was split).
+
+    `data` is a trace made with per_seed_edges. Each hunk's levels are packed from the trace
+    restricted to that hunk (hunks.HunkTracer), by the same code as a PR's levels."""
+    tracer = HunkTracer(data)
+    cached = {name: (_memo(count), label) for name, (count, label) in counters.items()}
+    hunks, in_some_hunk = [], set()
+    for hunk in tracer.hunks:
+        sub = tracer.restrict(hunk)
+        in_some_hunk |= {s["qn"] for s in sub["seeds"]}
+        levels = pack_levels(sub, repo, configs, cached, pr)
+        for level in levels.values():
+            if level["same_as_parent"]:
+                level["text"] = None  # the parent's text; hunk_units fills it in
+        stats = entry_stats(sub, None)
+        body = hunk.body.split("\n")[1:]
+        hunks.append({
+            "id": hunk_id(entry_id, hunk.index), "index": hunk.index, "file": hunk.file, "old_file": hunk.old_file,
+            "deleted_file": hunk.deleted_file, "header": hunk.header,
+            "old_start": hunk.old_start, "old_count": hunk.old_count,
+            "new_start": hunk.new_start, "new_count": hunk.new_count,
+            "stats": {**{k: stats[k] for k in _HUNK_STATS}, "diff_chars": len(hunk.text),
+                      "added_lines": sum(line.startswith("+") for line in body),
+                      "removed_lines": sum(line.startswith("-") for line in body)},
+            "levels": levels})
+    all_seeds = {s["qn"] for s in data["seeds"]}
+    checks = {"hunks": len(hunks), "hunks_with_changed_symbols": sum(1 for h in hunks if h["stats"]["changed_symbols"]),
+              "changed_symbols": len(all_seeds), "changed_symbols_in_no_hunk": len(all_seeds - in_some_hunk),
+              "links": tracer.check_links()}
+    return hunks, checks
+
+
+def check_unit(records: Iterable[dict], unit: str) -> None:
+    """Raise ValueError if a record was built for the other unit, so a per-hunk build can never
+    replace the per-PR records of a file (or the other way round)."""
+    wrong = sorted(r["id"] for r in records if r.get("status") == "ok" and ("hunks" in r) != (unit == "hunk"))
+    if wrong:
+        other = "per-hunk" if unit == "pr" else "per-PR"
+        raise ValueError(f"this file holds {other} records ({len(wrong)}, e.g. {wrong[0]}); a "
+                         f"{'per-PR' if unit == 'pr' else 'per-hunk'} build must not write into it")
+
+
+def hunk_units(records: Iterable[dict]) -> list[dict]:
+    """One record-like dict per hunk of FORMAT_HUNK records, in dataset and diff order, for code
+    that reads a record's `levels`: id (the hunk's), pr_id, index (the PR's), hunk (its
+    position and lines), language, known_paths, and levels with every text filled in."""
+    units = []
+    for record in records:
+        for hunk in record.get("hunks", []):
+            levels = {}
+            for name, level in hunk["levels"].items():
+                text = level["text"] if level["text"] is not None else levels[level["parent"]]["text"]
+                levels[name] = {**level, "text": text}
+            units.append({"id": hunk["id"], "pr_id": record["id"], "index": record.get("index"),
+                          "language": record.get("language"), "known_paths": record.get("known_paths", []),
+                          "hunk": {k: v for k, v in hunk.items() if k != "levels"}, "levels": levels})
+    return units
+
+
 def _compact_level(report: dict, text: str, parent: str | None, nesting: dict | None,
                    same_as_parent: bool = False) -> dict:
+    other = report.get("other_hunks")  # per-hunk levels that show the PR's other hunks
+    extra = {} if other is None else {"other_hunks_total": other["total"], "other_hunks_shown": other["shown"],
+                                      "other_tokens": other["tokens"]}
     return {
+        **extra,
+        # where the PR text, the diff, the other hunks and the repository context sit in `text`
+        "sections": report["sections"],
         "parent": parent, "text": text, "config_sha256": report["config_sha256"],
         "token_budget": report["token_budget"], "max_input_tokens": report.get("max_input_tokens"),
         "input_tokens": report["input_tokens"],
@@ -251,16 +354,21 @@ def _compact_level(report: dict, text: str, parent: str | None, nesting: dict | 
 
 def process_entry(entry: dict, configs: dict, counters: dict, *, binary: Path, tool_version: str, repos_dir: Path,
                   scratch_dir: Path, key: str, fetch_depth: int = 50, max_depth: int = 3200,
-                  extra_build: dict | None = None) -> dict:
-    """Fetch, check, trace and pack every level for one entry; never raises for entry errors."""
+                  extra_build: dict | None = None, unit: str = "pr") -> dict:
+    """Fetch, check, trace and pack every level for one entry; never raises for entry errors.
+    With `unit="hunk"` the levels are packed for each diff hunk (a FORMAT_HUNK record)."""
+    if unit not in UNITS:
+        raise ValueError(f"unit must be one of {UNITS}, not {unit!r}")
     record = entry["record"]
     owner, name, number = parse_pr_url(record["githubPrUrl"])
-    out = {"format": FORMAT, "id": entry["id"], "index": entry["index"], "url": record["githubPrUrl"],
+    file_format = FORMAT if unit == "pr" else FORMAT_HUNK
+    out = {"format": file_format, "id": entry["id"], "index": entry["index"], "url": record["githubPrUrl"],
            "repo": f"{owner}/{name}", "language": record["project_main_language"],
            "source_commit": record["source_commit"], "target_commit": record["target_commit"],
            "status": "running", "seconds": {},
-           "build": {"key": key, "format": FORMAT, "fetch_version": FETCH_VERSION, "tool_version": tool_version,
+           "build": {"key": key, "format": file_format, "fetch_version": FETCH_VERSION, "tool_version": tool_version,
                      "trace_format": TRACE_FORMAT, "render_version": RENDER_VERSION,
+                     **({} if unit == "pr" else {"unit": unit, "hunk_version": HUNK_VERSION}),
                      "tokenizers": sorted({label for _, label in counters.values()}),
                      "levels": {n: config_sha256(c) for n, c in configs.items()}, **(extra_build or {})}}
     stage, started = "merge_base", time.monotonic()
@@ -285,22 +393,35 @@ def process_entry(entry: dict, configs: dict, counters: dict, *, binary: Path, t
         first = next(iter(configs.values()))
         cache = Path(tempfile.mkdtemp(prefix="cbm-cache-", dir=scratch_dir))
         try:
-            data = trace(repo, BASE_BRANCH, first["tracer"], binary, cache)
+            data = trace(repo, BASE_BRANCH, first["tracer"], binary, cache, per_seed_edges=unit == "hunk")
         finally:
             shutil.rmtree(cache, ignore_errors=True)
         out["seconds"]["trace"] = round(time.monotonic() - started, 1)
         out["seconds"]["trace_steps"] = data.get("timings", {})
 
         stage, started = "pack", time.monotonic()
-        levels = pack_levels(data, repo, configs, counters, pr)
+        if unit == "hunk":
+            hunks, checks = pack_hunks(data, repo, configs, counters, pr, entry["id"])
+            packed, all_levels = {"hunks": hunks, "hunk_checks": checks}, [lv for h in hunks for lv in h["levels"].values()]
+        else:
+            levels = pack_levels(data, repo, configs, counters, pr)
+            packed, all_levels = {"levels": levels}, list(levels.values())
         out["seconds"]["pack"] = round(time.monotonic() - started, 1)
 
         warnings = list(data.get("warnings", []))
-        if any(level["nesting_ok"] is False for level in levels.values()):
+        if any(level["nesting_ok"] is False for level in all_levels):
             warnings.append("a level is missing lines its parent shows")
-        if any(not level["fits"] for level in levels.values()):
+        if any(not level["fits"] for level in all_levels):
             warnings.append("the PR text and diff alone exceed max_input_tokens")
-        out.update(status="ok", levels=levels, stats=entry_stats(data, pr), audit=audit, pr=pr,
+        if unit == "hunk":
+            if not packed["hunks"]:
+                warnings.append("the diff has no hunk to review")
+            if checks["changed_symbols_in_no_hunk"]:
+                warnings.append(f"{checks['changed_symbols_in_no_hunk']} changed symbols overlap no hunk's changed lines")
+            for walk, counts in checks["links"].items():
+                if counts["not_walked"] or counts["only_walked"] or counts["hop_differs"]:
+                    warnings.append(f"per-hunk {walk}: the walk over the kept links differs from the tool's ({counts})")
+        out.update(status="ok", **packed, stats=entry_stats(data, pr), audit=audit, pr=pr,
                    known_paths=trace_paths(data), warnings=warnings, graph=data.get("index", {}))
     except KeyboardInterrupt:
         raise

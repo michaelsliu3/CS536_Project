@@ -4,7 +4,9 @@ and code as notebooks/outcome_table.ipynb.
 It reads the profile from the notebook, loads the reviews saved by scripts/outcome/run_reviews.py,
 scores each one with the profile's judge (AACR-Bench's file-level metric, one judge call per
 generated comment), and writes judgments/, table.csv, table.json and coverage.csv under
-<out_root>/<run_name>/. It makes no reviewer call. Re-running resumes: saved judgments are reused
+<out_root>/<run_name>/. For a per-hunk profile (`cloud-hunk`) each hunk's findings are judged
+against its PR's references, table.csv has one row per (PR, level) with the PR's hunk reviews put
+together, and hunk_table.csv has one row per (hunk, level). It makes no reviewer call. Re-running resumes: saved judgments are reused
 and failed judge calls are retried. Every line also goes to <run folder>/logs/judgments_<time>.log.
 
     .venv/bin/python scripts/outcome/run_judgments.py --dry-run   # what a run would judge; no server needed
@@ -72,6 +74,9 @@ def main(argv=None) -> int:
     parser.add_argument("--profile", default=os.environ.get("OUTCOME_PROFILE", "cloud"), help="notebook profile (default cloud)")
     parser.add_argument("--first", type=int, help="only the first N PRs of the context file")
     parser.add_argument("--entries", nargs="+", metavar="ID", help="only these PRs")
+    parser.add_argument("--levels", nargs="+", metavar="LEVEL", help="only these levels (default: the profile's)")
+    parser.add_argument("--run-suffix", default="", metavar="TEXT",
+                        help="added to the profile's run name, e.g. _r2: a repeat of a run in a folder of its own")
     parser.add_argument("--concurrency", type=int, help="reviews judged at a time (default: the profile's)")
     parser.add_argument("--dry-run", action="store_true", help="print what a run would judge and stop; calls no model, writes nothing")
     args = parser.parse_args(argv)
@@ -80,14 +85,14 @@ def main(argv=None) -> int:
     spec = config["judge"]
     if spec["backend"] != "openai" or "TO_BE_DECIDED" in spec.get("model", ""):
         raise SystemExit(f"profile {args.profile!r} has no judge served by an OpenAI-compatible server: {spec}")
-    out = PROJECT_ROOT / config["out_root"] / config["run_name"]
+    out = PROJECT_ROOT / config["out_root"] / (config["run_name"] + args.run_suffix)
     contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
     judge = backends.judge_caller(make_chat(spec))
     concurrency = args.concurrency or spec.get("concurrency", 1)
-    all_cells = table.discover_cells(contexts, config["entries"], config["levels"])
+    all_cells = table.discover_cells(contexts, config["entries"], (args.levels or config["levels"]))
     cells = select_cells(all_cells, args.first, args.entries)
     reviews, missing = load_reviews(out, cells)
-    references = table.references_by_entry(dataset)
+    references = table.references_by_entry(dataset, cells)
     summary = describe(reviews, missing, references, out, judge.identity)
     if args.dry_run:
         print(summary + "\nnothing was sent or written")
@@ -109,9 +114,17 @@ def main(argv=None) -> int:
 
     judgments = table.run_judgments(reviews, references, judge, out, concurrency=concurrency)
     errors = sum(j["judge_errors"] for j in judgments)
-    if len(cells) == len(all_cells):
-        rows, coverage = table.build_table(reviews, judgments, references)
-        table.write_outputs(out, rows, coverage)
+    per_hunk = any(cell.pr is not None for cell in cells)
+    if len(cells) == len(all_cells) or per_hunk:  # a per-hunk run is piloted on some PRs: write their table
+        if per_hunk:
+            rows, hunk_rows, coverage = table.build_hunk_tables(cells, reviews, judgments, references)
+            table.write_outputs(out, rows, coverage, hunk_rows)
+            log.info(f"wrote {out / 'hunk_table.csv'} ({len(hunk_rows)} rows, one per hunk and level)")
+            if len(cells) != len(all_cells):
+                log.info(f"the table covers the {len({c.group for c in cells})} PRs of this run, not the whole context file")
+        else:
+            rows, coverage = table.build_table(reviews, judgments, references)
+            table.write_outputs(out, rows, coverage)
         log.info(f"wrote {out / 'table.csv'} ({len(rows)} rows) and {out / 'coverage.csv'} ({len(coverage)} rows)")
         for level in table.summarize_by_level(rows):
             log.info(f"{level['level']}: {level['judged']} judged, mean input tokens {level['mean_input_tokens']}, "

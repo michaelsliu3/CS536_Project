@@ -237,10 +237,40 @@ existing cache reuses the stored graph and is not a real rebuild.
 - The defaults (cap, budgets, shares, limits, ranking) are starting points, not tuned values.
   Tune them on validation PRs only.
 
+## Per-hunk levels (a test, on the branch `per-hunk-review`)
+
+`scripts/dataset/build_dataset.py ROOT --unit hunk` packs a set of levels for every diff hunk of
+every PR, where the default packs one set per PR. It needs a folder of its own, `data/aacr_hunk`: a
+build refuses a folder whose file holds the other unit's records, so the per-PR data in `data/aacr`
+cannot be replaced.
+The reasons, the checks and the open points are in
+[`docs/per_hunk_review_test.md`](../../docs/per_hunk_review_test.md).
+
+- **Levels:** `configs/levels_hunk/H01_min.yaml` … `H10_all.yaml` mirror the ten levels above
+  one to one, each starting from one hunk. `H11_pr_summary` adds a list of the PR's other
+  changes with no code (`input.other_hunks` with `input.other_hunks_form: summary`, up to
+  `packing.other_hunks_max_tokens`).
+- **What else the PR changes:** from `H02_function` on (`input.mark_changed`), a context
+  block's header names the lines the PR changes in it outside the hunk under review. The hunk's
+  trace carries them as `other_changed`.
+- **Optional keys:** the four keys above are optional, so the per-PR configs and their hashes
+  are unchanged.
+- **One trace per PR:** `cbm.trace(..., per_seed_edges=True)` also keeps every link among the
+  traced symbols (`call_edges`, `caller_edges`). `hunks.HunkTracer` repeats the walk from one
+  hunk's changed symbols over those links and hands `build_context` a trace of the usual shape.
+- **A hunk's changed symbols** are those that overlap its changed lines. When no change in a
+  file touches a symbol, the tool marks every symbol of the file `whole_file`, and a hunk of
+  that file gets them all.
+- **Record:** one line per PR, as before, with `hunks` (a list) where a per-PR record has
+  `levels`. `dataset.hunk_units` turns records into one record-like dict per hunk, with id
+  `<PR id>__h0001`. A level identical to its parent stores no second copy of its text.
+- **Checks in every record** (`hunk_checks`): the number of hunks, the changed symbols that
+  fall in no hunk, and whether a walk over the kept links repeats the tool's own walk.
+
 ## Tests
 
 ```bash
-python3 -m unittest tests.test_tracer_context -v
+python3 -m unittest tests.test_tracer_context tests.test_hunk_context -v
 ```
 
 These need only Python: synthetic traces, a temporary repo, and a character-count

@@ -13,6 +13,11 @@ Layout under `out_dir` (one folder per run, e.g. data/aacr/outcomes/<run_name>/)
 Every record carries a cache key over all behavior-affecting inputs, so re-running resumes:
 matching cells are reused, changed ones are redone. Reference comments are read only in the
 judging stage; they never reach the reviewer.
+
+A per-hunk run (a context file built with `--unit hunk`) has one cell per (diff hunk, level): its
+entry is the hunk's id (`<PR id>__h0001`) and the layout above is the same. Its table is built by
+`build_hunk_tables`: table.csv / table.json have one row per (PR, level), the PR's hunk reviews
+at that level put together and scored as one review; hunk_table.csv has one row per (hunk, level).
 """
 from __future__ import annotations
 
@@ -30,9 +35,9 @@ from pathlib import Path
 from typing import Callable
 
 from src.review_outcomes import retry as retry_rule
-from src.review_outcomes.judge import score_review
-from src.review_outcomes.parse import PARSER_VERSION, parse_review
-from src.review_outcomes.prompts import JUDGE_PROMPT_VERSION, REVIEW_PROMPT_VERSION, prompt_sha256, review_messages
+from src.review_outcomes.judge import normalize_separators, score_review
+from src.review_outcomes.parse import PARSER_VERSION, TAG_PARSER_VERSION, parse_review, parse_tagged_review
+from src.review_outcomes.prompts import JUDGE_PROMPT_VERSION, ReviewInput, ReviewPrompt, as_prompt
 from src.review_outcomes.retry import RetryPolicy
 
 
@@ -157,37 +162,69 @@ class Cell:
     text: str
     input_tokens: int | None
     known_paths: tuple[str, ...] = ()  # files named in the trace, to make review paths repo-relative
+    # A per-hunk cell only: its PR, the file under review, and the hunk's lines
+    # (new_start, new_end, old_start, old_end).
+    pr: str | None = None
+    file: str | None = None
+    span: tuple[int, int, int, int] | None = None
+    # The input in parts, for a prompt with a slot for each; None for a context file whose levels
+    # do not record where the parts are (one built before the per-hunk test).
+    parts: ReviewInput | None = None
+
+    @property
+    def group(self) -> str:
+        """The PR this cell belongs to (its entry, unless it is one hunk of a PR)."""
+        return self.pr or self.entry
 
 
 def discover_cells(contexts_path: Path, entries=None, levels=None) -> list[Cell]:
-    """Every (entry, level) of the successfully built PRs in the context-level dataset file."""
-    from src.tracer_context.dataset import load_records
+    """Every (entry, level) of the successfully built PRs in the context-level dataset file. For
+    a per-hunk file the entries are the hunks; `entries` may then name PRs or hunks."""
+    from src.tracer_context.build import split_input
+    from src.tracer_context.dataset import hunk_units, load_records
 
     cells = []
     for entry_id, record in sorted(load_records(contexts_path).items(), key=lambda kv: (kv[1].get("index", 0), kv[0])):
-        if entries and entry_id not in entries:
-            continue
-        for name, level in record["levels"].items():
-            if levels and name not in levels:
+        for unit in (hunk_units([record]) if "hunks" in record else [record]):
+            if entries and unit["id"] not in entries and entry_id not in entries:
                 continue
-            cells.append(Cell(entry_id, name, level["text"], level.get("input_tokens"),
-                              tuple(record.get("known_paths", ()))))
+            hunk = unit.get("hunk")
+            extra = {} if hunk is None else {
+                "pr": entry_id, "file": hunk["file"],
+                "span": (hunk["new_start"], hunk["new_start"] + max(hunk["new_count"], 1) - 1,
+                         hunk["old_start"], hunk["old_start"] + max(hunk["old_count"], 1) - 1)}
+            for name, level in unit["levels"].items():
+                if levels and name not in levels:
+                    continue
+                parts = split_input(level["text"], level["sections"]) if level.get("sections") else None
+                cells.append(Cell(unit["id"], name, level["text"], level.get("input_tokens"),
+                                  tuple(unit.get("known_paths", ())), **extra,
+                                  parts=None if parts is None else ReviewInput(**parts)))
     return cells
 
 
 class _ReviewFiles:
     """Where each cell's review is saved, its cache key, and the saved record a run can build on."""
 
-    def __init__(self, reviewer, rubric: str, out_dir: Path, max_input_tokens: int | None, force: bool,
+    def __init__(self, reviewer, rubric: str | ReviewPrompt, out_dir: Path, max_input_tokens: int | None, force: bool,
                  retry: RetryPolicy | None):
         self.reviewer, self.out_dir, self.max_input_tokens = reviewer, Path(out_dir), max_input_tokens
-        self.force, self.retry, self.prompt_hash = force, retry, prompt_sha256(rubric)
+        self.force, self.retry = force, retry
+        self.prompt = as_prompt(rubric)  # a rubric text means the Codex prompt
+        self.prompt_hash = self.prompt.sha256
+
+    def parser_version(self, cell: Cell) -> str:
+        if self.prompt.reply_format == "aacr-tags":
+            # A per-hunk cell counts only the findings that quote its hunk (parse_tagged_review).
+            return TAG_PARSER_VERSION if cell.file is None else f"{TAG_PARSER_VERSION}+on-hunk"
+        # A per-hunk cell's findings are placed in the hunk's file (parse_review's `path`).
+        return PARSER_VERSION if cell.file is None else f"{PARSER_VERSION}+hunk-path"
 
     def key(self, cell: Cell) -> str:
         # The first call only. The retry policy is not in it, so adding or changing the policy keeps
         # every cell whose first reply needs no retry; a retried record names its policy itself.
-        return _key({"input": sha256_text(cell.text), "prompt": self.prompt_hash, "prompt_version": REVIEW_PROMPT_VERSION,
-                     "backend": self.reviewer.identity, "parser": PARSER_VERSION})
+        return _key({"input": sha256_text(cell.text), "prompt": self.prompt_hash, "prompt_version": self.prompt.version,
+                     "backend": self.reviewer.identity, "parser": self.parser_version(cell)})
 
     def path(self, cell: Cell) -> Path:
         return self.out_dir / "reviews" / cell.entry / f"{cell.level}.json"
@@ -196,7 +233,11 @@ class _ReviewFiles:
         return self.max_input_tokens is not None and (cell.input_tokens or 0) > self.max_input_tokens
 
     def parser(self, cell: Cell) -> Callable[[str], dict]:
-        return lambda text: parse_review(text, cell.known_paths)
+        if self.prompt.reply_format == "aacr-tags":  # the paper's tags: lines come from the quoted snippet
+            diff = cell.parts.diff if cell.parts else None
+            return lambda text: parse_tagged_review(text, path=cell.file, diff=diff,
+                                                    on_hunk_only=cell.file is not None)
+        return lambda text: parse_review(text, cell.known_paths, path=cell.file)
 
     def load(self, cell: Cell, key: str) -> tuple[dict | None, bool]:
         """(the saved record to build on, whether it differs from the file), or (None, False).
@@ -207,9 +248,28 @@ class _ReviewFiles:
         """
         saved = read_json(self.path(cell))
         if self.force or not saved or saved.get("key") != key or saved.get("status") in ("error", "too_long"):
-            return None, False
+            sibling = None if self.force else self.sibling(cell, key)
+            if sibling is None:
+                return None, False
+            # Another level of this entry was reviewed with the same input (in an earlier run over
+            # other levels): one input has one reply in a run folder, so its review is copied.
+            saved = {**sibling, "level": cell.level, "input_tokens": cell.input_tokens,
+                     "reused_from": sibling.get("reused_from") or sibling["level"]}
+            return retry_rule.align(saved, self.retry, self.parser(cell)), True
         record = retry_rule.align(saved, self.retry, self.parser(cell))
         return record, record is not saved
+
+    def sibling(self, cell: Cell, key: str) -> dict | None:
+        """A saved review of another level of the same entry with the same key, or None. The one
+        that came from a model call is preferred over a copy."""
+        found = []
+        for path in sorted(self.path(cell).parent.glob("*.json")):
+            record = read_json(path)
+            if (record and record.get("key") == key and record.get("level") != cell.level
+                    and record.get("status") not in ("error", "too_long")):
+                found.append(record)
+        found.sort(key=lambda r: (r.get("reused_from") is not None, r["level"]))
+        return found[0] if found else None
 
 
 def _plan(files: _ReviewFiles, cells: list[Cell]) -> tuple[list[str], dict[str, Cell], dict]:
@@ -235,24 +295,26 @@ def _plan(files: _ReviewFiles, cells: list[Cell]) -> tuple[list[str], dict[str, 
     tokens = lambda group: sum(cell.input_tokens or 0 for cell in group)  # noqa: E731
     return keys, first, {
         "cells": len(cells), "entries": len({c.entry for c in cells}), "distinct": len(first), "saved": saved,
+        "prs": len({c.group for c in cells}), "hunks": len({c.entry for c in cells if c.pr is not None}),
         "too_long": sum(files.too_long(c) for c in first.values()),
         "send": {"cells": len(send), "input_tokens": tokens(send)},
         "retry": {step: {"cells": len(group), "input_tokens": tokens(group)} for step, group in due.items()},
         "no_room": len(no_room)}
 
 
-def plan_reviews(cells: list[Cell], reviewer, rubric: str, out_dir: Path, max_input_tokens: int | None = None,
-                 force: bool = False, retry: RetryPolicy | None = None) -> dict:
+def plan_reviews(cells: list[Cell], reviewer, rubric: str | ReviewPrompt, out_dir: Path,
+                 max_input_tokens: int | None = None, force: bool = False, retry: RetryPolicy | None = None) -> dict:
     """What run_reviews would do with these arguments, without calling the model or writing a file:
     the cells to send, the saved replies due each retry step (with their input tokens), and the
     replies due a step that has no room in the model's window."""
     return _plan(_ReviewFiles(reviewer, rubric, out_dir, max_input_tokens, force, retry), cells)[2]
 
 
-def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubric: str, out_dir: Path,
+def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubric: str | ReviewPrompt, out_dir: Path,
                 max_input_tokens: int | None = None, concurrency: int = 1, force: bool = False,
                 progress: Callable | None = None, retry: RetryPolicy | None = None) -> list[dict]:
-    """Review each cell once; reuse records whose cache key matches. Cells with the same input
+    """Review each cell once; reuse records whose cache key matches. `rubric` is the Codex rubric
+    text or a ReviewPrompt (prompts.load_review_prompt). Cells with the same input
     (a level identical to its parent) are reviewed once and the record is copied to the others
     with `reused_from`. With a `retry` policy, a reply that was cut off or finished without the
     JSON gets the policy's steps (retry.py), whether it arrives in this run or was saved by an
@@ -280,7 +342,9 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
             context = cell.text
             record = {"key": key, "entry": cell.entry, "level": cell.level, "input_sha256": sha256_text(context),
                       "input_tokens": cell.input_tokens, "prompt_sha256": files.prompt_hash,
-                      "prompt_version": REVIEW_PROMPT_VERSION, "backend": reviewer.identity, "parser": PARSER_VERSION}
+                      "prompt_version": files.prompt.version, "backend": reviewer.identity,
+                      "parser": files.parser_version(cell),
+                      **({} if cell.pr is None else {"pr": cell.pr, "file": cell.file})}
             if files.too_long(cell):
                 record.update(status="too_long", error=f"{cell.input_tokens} input tokens > {max_input_tokens}")
                 log.info(f"{cell.entry} {cell.level}: too long, not sent ({record['error']})")
@@ -289,8 +353,8 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
             record["started_at"] = _now()
             log.debug(f"sending {cell.entry} {cell.level} ({cell.input_tokens} input tokens)")
             try:
-                reply = reviewer(review_messages(context, rubric))
-                parsed = parse_review(reply["text"], cell.known_paths)
+                reply = reviewer(files.prompt.messages(context, cell.parts))
+                parsed = files.parser(cell)(reply["text"])
                 record.update(status=parsed["status"], reply=reply, parsed=parsed,
                               truncated=reply.get("finish_reason") == "length")
             except Exception as error:  # noqa: BLE001 - recorded; retried on the next run
@@ -304,7 +368,7 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
                 log.info(f"{cell.entry} {cell.level}: the first reply "
                          + ("was cut off at the output limit" if record.get("truncated") else "finished without the JSON")
                          + f" ({record['reply'].get('completion_tokens')} output tokens); retrying")
-            record = retry_rule.run_steps(record, review_messages(cell.text, rubric), reviewer, retry,
+            record = retry_rule.run_steps(record, files.prompt.messages(cell.text, cell.parts), reviewer, retry,
                                           files.parser(cell), report_step)
             called, changed = called or sends, True
         if called:
@@ -324,7 +388,8 @@ def run_reviews(cells: list[Cell], reviewer: Callable[[list[dict]], dict], rubri
     log.info(f"review stage: {len(cells)} cells from {plan['entries']} entries, {len(first)} distinct inputs; "
              f"{plan['saved']} already saved, {plan['too_long']} over the limit of "
              f"{max_input_tokens} input tokens, {plan['send']['cells']} to send ({plan['send']['input_tokens']:,} input "
-             f"tokens) with concurrency {max(1, concurrency)}{retry_note}; reviewer {reviewer.identity}; output {out_dir}")
+             f"tokens) with concurrency {max(1, concurrency)}{retry_note}; reviewer {reviewer.identity}; "
+             f"prompt {files.prompt.name} ({files.prompt.version}); output {out_dir}")
     done = {}
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         for key, record in zip(first, pool.map(one, first.values())):
@@ -367,10 +432,16 @@ def _retry_summary(records: list[dict]) -> str:
             f"{sum(1 for s in steps if 'skipped' in s)} skipped for lack of room, {sum(1 for s in steps if 'error' in s)} failed")
 
 
-def references_by_entry(dataset_path: Path) -> dict[str, dict]:
+def references_by_entry(dataset_path: Path, cells: list[Cell] | None = None) -> dict[str, dict]:
+    """Each PR's AACR record by entry id. With per-hunk `cells`, each hunk's id also maps to its
+    PR's record: a hunk's findings are judged against the PR's references on the same file."""
     from src.tracer_context.aacr import load_entries
 
-    return {e["id"]: e["record"] for e in load_entries(dataset_path)}
+    references = {e["id"]: e["record"] for e in load_entries(dataset_path)}
+    for cell in cells or ():
+        if cell.pr is not None:
+            references[cell.entry] = references[cell.pr]
+    return references
 
 
 def run_judgments(reviews: list[dict], references: dict[str, dict], judge: Callable[[str], str], out_dir: Path,
@@ -485,6 +556,106 @@ def build_table(reviews: list[dict], judgments: list[dict], references: dict[str
     return rows, coverage
 
 
+def _in_hunk(comment: dict, cell: Cell) -> bool:
+    """Whether a reference comment sits on this hunk: the same file, and its lines overlap the
+    hunk's lines on the comment's side."""
+    if normalize_separators(comment.get("path")) != cell.file or cell.span is None:
+        return False
+    start, end = comment.get("from_line"), comment.get("to_line")
+    if not start or not end:
+        return False
+    low, high = cell.span[2:] if comment.get("side") == "left" else cell.span[:2]
+    return start <= high and end >= low
+
+
+def build_hunk_tables(cells: list[Cell], reviews: list[dict], judgments: list[dict],
+                      references: dict[str, dict]) -> tuple[list, list, list]:
+    """(PR rows, hunk rows, coverage) of a per-hunk run.
+
+    PR rows: one per (PR, level), with build_table's columns. The PR's hunk reviews at that level
+    are put together in diff order and scored as one review by AACR's rule: a finding counts as
+    matched when it covers a reference that no earlier finding covered. `hunks`, `hunks_reviewed`
+    and `hunks_ok` say how many of the PR's hunks have a reply and a readable one;
+    `review_status` is "ok" only when all of them do.
+    Hunk rows: one per (hunk, level): the hunk's own findings, and the references that sit on it.
+    Coverage: one row per (PR, level, reference), as build_table writes it."""
+    reviewed = {(r["entry"], r["level"]): r for r in reviews}
+    judged = {(j["entry"], j["level"]): j for j in judgments}
+    groups: dict[tuple[str, str], list[Cell]] = {}
+    for cell in cells:
+        if cell.pr is None:
+            raise ValueError(f"{cell.entry} is not a per-hunk cell; use build_table")
+        groups.setdefault((cell.pr, cell.level), []).append(cell)
+    pr_rows, hunk_rows, coverage = [], [], []
+    for (pr, level), group in sorted(groups.items()):
+        record = references[pr]
+        comments = record["comments"]
+        covered, matched_generated, generated, findings, judge_errors, scored = set(), 0, 0, 0, 0, 0
+        statuses: dict[str, int] = {}
+        tokens = [c.input_tokens for c in group if c.input_tokens is not None]
+        output_tokens = seconds = 0
+        for cell in group:
+            review = reviewed.get((cell.entry, level))
+            judgment = judged.get((cell.entry, level))
+            status = review.get("status") if review else "missing"
+            statuses[status] = statuses.get(status, 0) + 1
+            reply, parsed = (review or {}).get("reply") or {}, (review or {}).get("parsed") or {}
+            output_tokens += reply.get("completion_tokens") or 0
+            seconds += reply.get("seconds") or 0
+            findings += len(parsed.get("findings", []))
+            on_hunk = {i for i, c in enumerate(comments) if c.get("note") and _in_hunk(c, cell)}
+            hunk_row = {"entry": cell.entry, "pr": pr, "level": level, "file": cell.file,
+                        "new_start": cell.span[0], "new_end": cell.span[1], "input_tokens": cell.input_tokens,
+                        "review_status": status, "truncated": (review or {}).get("truncated"),
+                        "retry": retry_rule.steps_taken(review) if review else None,
+                        "findings": len(parsed.get("findings", [])),
+                        "findings_off_hunk": len(parsed.get("off_hunk_findings", [])),
+                        "output_tokens": reply.get("completion_tokens"),
+                        "review_seconds": reply.get("seconds"), "reused_from": (review or {}).get("reused_from"),
+                        "references_on_hunk": len(on_hunk)}
+            if judgment:
+                scored += 1
+                generated += judgment["generated"]
+                judge_errors += judgment["judge_errors"]
+                own = set()
+                for item in judgment["records"]:
+                    hit = set(item["matched_gt_indices"])
+                    own |= hit
+                    if hit - covered:
+                        matched_generated += 1
+                        covered |= hit
+                hunk_row.update(findings_matched=sum(1 for item in judgment["records"] if item["matched_gt_indices"]),
+                                references_covered=len(own), references_on_hunk_covered=len(own & on_hunk),
+                                judge_errors=judgment["judge_errors"])
+            hunk_rows.append(hunk_row)
+        ok = statuses.get("ok", 0)
+        row = {"entry": pr, "level": level, "language": record.get("project_main_language"),
+               "input_tokens": sum(tokens) if tokens else None,
+               "review_status": "ok" if ok == len(group) else "incomplete",
+               "hunks": len(group), "hunks_reviewed": len(group) - statuses.get("missing", 0), "hunks_ok": ok,
+               "hunk_statuses": json.dumps(dict(sorted(statuses.items()))), "findings": findings,
+               "output_tokens": output_tokens, "review_seconds": round(seconds, 2)}
+        if scored:
+            expected = sum(1 for c in comments if c.get("note"))
+            recall = len(covered) / expected if expected else 0.0
+            precision = matched_generated / generated if generated else 0.0
+            human = _split(comments, covered, lambda c: not c.get("is_ai_comment"))
+            ai = _split(comments, covered, lambda c: c.get("is_ai_comment"))
+            row.update(expected=expected, generated=generated, matched_generated=matched_generated, covered=len(covered),
+                       recall=round(recall, 4), precision=round(precision, 4),
+                       balanced=round(2 * precision * recall / (precision + recall), 4) if precision + recall else 0.0,
+                       human_expected=human[0], human_covered=human[1], ai_expected=ai[0], ai_covered=ai[1],
+                       judge_errors=judge_errors)
+            for index, comment in enumerate(comments):
+                if comment.get("note"):
+                    coverage.append({"entry": pr, "level": level, "reference": index, "covered": index in covered,
+                                     "is_ai_comment": comment.get("is_ai_comment"),
+                                     "source_model": comment.get("source_model") or "", "context": comment.get("context"),
+                                     "category": comment.get("category"), "path": comment.get("path")})
+        pr_rows.append(row)
+    return pr_rows, hunk_rows, coverage
+
+
 def summarize_by_level(rows: list[dict]) -> list[dict]:
     """Per level: pooled recall/precision/balanced over judged PRs (AACR's way) plus the
     per-PR average recall, mean input tokens and output-status counts."""
@@ -515,9 +686,10 @@ def summarize_by_level(rows: list[dict]) -> list[dict]:
     return summary
 
 
-def write_outputs(out_dir: Path, rows: list[dict], coverage: list[dict]) -> None:
+def write_outputs(out_dir: Path, rows: list[dict], coverage: list[dict], hunk_rows: list[dict] | None = None) -> None:
+    """table.csv, table.json and coverage.csv; with `hunk_rows` (a per-hunk run) also hunk_table.csv."""
     out_dir = Path(out_dir)
-    for name, data in (("table", rows), ("coverage", coverage)):
+    for name, data in (("table", rows), ("coverage", coverage), ("hunk_table", hunk_rows)):
         if not data:
             continue
         fields = sorted({k for row in data for k in row}, key=lambda k: list(data[0]).index(k)

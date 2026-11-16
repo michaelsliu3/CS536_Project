@@ -30,6 +30,7 @@ OVERSIZE_POLICIES = ("hunks", "head", "skip")
 RENDER_VERSION = 3  # 3: input cap (max_input_tokens), item limits are level totals
 SEPARATOR = "\n\n"  # between items in the context text
 CONTEXT_HEADING = "## Repository context"
+OTHER_HEADING = "## Other changes in this pull request"  # per-hunk levels: the PR's other hunks
 WHOLE_FILE = 10 ** 9  # end line meaning "to the end of the file"
 _NOT_CODE_LABELS = ("Section", "File", "Guide", "TextHit")
 
@@ -75,6 +76,16 @@ SCHEMA = {
     },
 }
 
+# Keys a config may leave out, by section. They exist for the per-hunk levels (configs/levels_hunk/);
+# a config without them is unchanged, and so is its hash.
+OTHER_FORMS = ("diff", "summary")
+OPTIONAL = {
+    "config.input": {"other_hunks": bool,          # show the PR's other hunks after the diff
+                     "other_hunks_form": str,      # "diff" (default): their diff lines; "summary": where they are
+                     "mark_changed": bool},        # say on a context block which of its lines the PR also changes
+    "config.packing": {"other_hunks_max_tokens": _OPT_INT},   # room for them; null = no limit of their own
+}
+
 LANG_BY_EXT = {
     ".py": "python", ".java": "java", ".kt": "kotlin", ".go": "go", ".rs": "rust",
     ".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "jsx",
@@ -96,11 +107,15 @@ def _check(value, spec, where):
     if isinstance(spec, dict):
         if not isinstance(value, dict):
             raise ValueError(f"{where}: expected a mapping")
-        missing, unknown = set(spec) - set(value), set(value) - set(spec)
+        optional = OPTIONAL.get(where, {})
+        missing, unknown = set(spec) - set(value), set(value) - set(spec) - set(optional)
         if missing or unknown:
             raise ValueError(f"{where}: missing keys {sorted(missing)}, unknown keys {sorted(unknown)}")
         for key, sub in spec.items():
             _check(value[key], sub, f"{where}.{key}")
+        for key, sub in optional.items():
+            if key in value:
+                _check(value[key], sub, f"{where}.{key}")
     elif isinstance(spec, tuple) and all(isinstance(s, str) for s in spec):
         if value not in spec:
             raise ValueError(f"{where}: {value!r} is not one of {list(spec)}")
@@ -173,6 +188,12 @@ def validate_config(cfg: dict) -> dict:
         raise ValueError("config.packing.token_budget must be >= 0 or null")
     if input_cap is not None and input_cap < 1:
         raise ValueError("config.packing.max_input_tokens must be >= 1 or null")
+    form = cfg["input"].get("other_hunks_form", "diff")
+    if form not in OTHER_FORMS:
+        raise ValueError(f"config.input.other_hunks_form must be one of {OTHER_FORMS}, got {form!r}")
+    other_cap = packing.get("other_hunks_max_tokens")
+    if other_cap is not None and other_cap < 0:
+        raise ValueError("config.packing.other_hunks_max_tokens must be >= 0 or null")
     return cfg
 
 
@@ -552,7 +573,19 @@ def _fence(text: str) -> str:
     return "`" * max(3, longest + 1)
 
 
-def render_item(item: Item, lines: list[str], segments, start: int, end: int, line_numbers: bool) -> str:
+def _spans(ranges) -> str:
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in ranges)
+
+
+def changed_note(segments, changed) -> str:
+    """What a context block's header says about the PR's other changes in the lines it shows
+    (`changed`: runs of changed lines of the block's file), or "" when it shows none."""
+    inside = _merge([(max(a, c), min(b, d)) for a, b in segments for c, d in changed if c <= b and d >= a])
+    return f"  (this pull request also changes lines {_spans(inside)})" if inside else ""
+
+
+def render_item(item: Item, lines: list[str], segments, start: int, end: int, line_numbers: bool,
+                note: str = "") -> str:
     body, previous = [], None
     for a, b in segments:
         if previous is not None and a > previous + 1:
@@ -566,7 +599,7 @@ def render_item(item: Item, lines: list[str], segments, start: int, end: int, li
     code = "\n".join(body)
     fence = _fence(code)
     language = LANG_BY_EXT.get(Path(item.file).suffix.lower(), "")
-    return f"{_header(item, start, end)}\n{fence}{language}\n{code}\n{fence}"
+    return f"{_header(item, start, end)}{note}\n{fence}{language}\n{code}\n{fence}"
 
 
 def render_pr(pr: dict, strip_html_comments: bool) -> str:
@@ -580,6 +613,101 @@ def render_pr(pr: dict, strip_html_comments: bool) -> str:
 def render_diff(diff: str) -> str:
     fence = _fence(diff)
     return f"## Diff\n\n{fence}diff\n{diff.rstrip()}\n{fence}"
+
+
+_PR_PREFIX = "## Pull request\n\nTitle: "
+
+
+def input_sections(pr_section: str, diff_section: str, other_section: str, context_text: str) -> dict[str, list[int]]:
+    """Where each part of a level's text starts and ends ([start, end) in characters): "pr",
+    "diff", "other" (the PR's other hunks) and "context" (the repository context without its
+    heading). A part the text does not have is left out."""
+    sections, position = {}, 0
+    for name, section in (("pr", pr_section), ("diff", diff_section), ("other", other_section)):
+        if section:
+            sections[name] = [position, position + len(section)]
+            position += len(section) + len(SEPARATOR)
+    if context_text:
+        start = position + len(CONTEXT_HEADING) + len(SEPARATOR)
+        sections["context"] = [start, start + len(context_text)]
+    return sections
+
+
+def split_input(text: str, sections: dict) -> dict[str, str]:
+    """A level's text taken apart again, for a reviewer prompt with a slot for each part:
+    pr_title, pr_description, diff (without its heading and fence) and contexts (the PR's other
+    hunks, then the repository context; "" when the level shows neither)."""
+    part = lambda name: text[sections[name][0]:sections[name][1]] if name in sections else ""  # noqa: E731
+    pr = part("pr")
+    title, _, description = (pr[len(_PR_PREFIX):] if pr.startswith(_PR_PREFIX) else pr).partition(SEPARATOR)
+    diff_lines = part("diff").split("\n")
+    diff = "\n".join(diff_lines[3:-1]) if len(diff_lines) >= 4 else ""  # drop "## Diff", "", the fence lines
+    other = part("other")
+    if other.startswith("## "):
+        other = "#" + other  # one level down: it sits inside the prompt's own context section
+    return {"pr_title": title, "pr_description": description, "diff": diff,
+            "contexts": SEPARATOR.join(p for p in (other, part("context")) if p)}
+
+
+def _summary_entry(other: dict) -> str:
+    if other.get("deleted_file"):
+        return "file deleted"
+    start, count = other["new_start"], other["new_count"]
+    where = f"lines removed at {start}" if not count else f"lines {_spans([(start, start + count - 1)])}"
+    return f"{where} ({other['section']})" if other.get("section") else where
+
+
+def render_other_hunks(others: list[dict], max_tokens: int | None,
+                       count_tokens: Callable[[str], int], form: str = "diff") -> tuple[str, dict]:
+    """(the section showing a PR's other hunks, {total, shown, tokens, form}).
+
+    `others` is in order of nearness ({index, file, file_header, body, new_start, new_count,
+    deleted_file, section}); hunks are taken in that order until the next one would pass
+    `max_tokens`, then shown in diff order. Form "diff" shows their diff lines, each file's
+    header once. Form "summary" shows no code: one line per file with each hunk's lines after
+    the change and the enclosing code named in its `@@` header. An empty list gives no section."""
+    if form == "summary":
+        chosen, used = [], 0
+        for other in others:
+            cost = count_tokens(f"- `{other['file']}`: {_summary_entry(other)}\n")
+            if max_tokens is not None and used + cost > max_tokens:
+                break
+            chosen.append(other)
+            used += cost
+        if not chosen:
+            return "", {"total": len(others), "shown": 0, "tokens": 0, "form": form}
+        by_file: dict[str, list[str]] = {}
+        for other in sorted(chosen, key=lambda o: o["index"]):
+            entry = _summary_entry(other)
+            if entry not in by_file.setdefault(other["file"], []):
+                by_file[other["file"]].append(entry)
+        listing = "\n".join(f"- `{path}`: {'; '.join(entries)}" for path, entries in by_file.items())
+        intro = ("The pull request also changes these places (file, lines after the change, enclosing code)"
+                 + ("" if len(chosen) == len(others) else f"; {len(chosen)} of {len(others)} are listed, the nearest ones")
+                 + ":")
+        section = f"{OTHER_HEADING}{SEPARATOR}{intro}{SEPARATOR}{listing}"
+        return section, {"total": len(others), "shown": len(chosen), "tokens": count_tokens(section), "form": form}
+    chosen, used = [], 0
+    for other in others:
+        cost = count_tokens(f"{other['file_header']}\n{other['body']}\n")
+        if max_tokens is not None and used + cost > max_tokens:
+            break
+        chosen.append(other)
+        used += cost
+    if not chosen:
+        return "", {"total": len(others), "shown": 0, "tokens": 0, "form": form}
+    lines, previous = [], None
+    for other in sorted(chosen, key=lambda o: o["index"]):
+        if other["file"] != previous and other["file_header"]:
+            lines.append(other["file_header"])
+        lines.append(other["body"])
+        previous = other["file"]
+    diff = "\n".join(lines)
+    fence = _fence(diff)
+    note = "" if len(chosen) == len(others) else (
+        f"({len(chosen)} of the {len(others)} other changes are shown, the nearest ones.){SEPARATOR}")
+    section = f"{OTHER_HEADING}{SEPARATOR}{note}{fence}diff\n{diff.rstrip()}\n{fence}"
+    return section, {"total": len(others), "shown": len(chosen), "tokens": count_tokens(section), "form": form}
 
 
 def _overlaps(segments_a, segments_b) -> bool:
@@ -612,6 +740,10 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
     ranked, limited = apply_limits([it for it in items if it.qn not in forced_qns], limits, ranking, changed_files)
     excluded += limited
 
+    # Per-hunk levels: the PR's changed lines outside the hunk under review, named on the blocks
+    # that show them. The blocks hold the code after the change, so nothing else says what is new.
+    mark_changed, other_changed = bool(inputs.get("mark_changed")), trace.get("other_changed") or {}
+
     repo_root = repo.resolve()
     file_cache: dict[str, tuple[list[str] | None, str | None]] = {}
     decorator_cache: dict[str, dict[int, int]] = {}
@@ -628,7 +760,8 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         return file_cache[path]
 
     def render(item, lines, segments, start, end):
-        block = render_item(item, lines, segments, start, end, packing["line_numbers"])
+        note = changed_note(segments, other_changed.get(item.file, ())) if mark_changed else ""
+        block = render_item(item, lines, segments, start, end, packing["line_numbers"], note)
         # Count the block with the separator that follows it, so the sum tracks the joined text.
         return block, count_tokens(block + SEPARATOR)
 
@@ -660,7 +793,28 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
     # or what max_input_tokens leaves after them (the smaller one when both are set).
     pr_section = render_pr(pr, inputs["strip_html_comments"]) if inputs["pr_text"] else ""
     diff_section = render_diff(trace["diff"]) if inputs["diff"] else ""
-    fixed = [s for s in (pr_section, diff_section) if s]
+    other_section, other_report = "", None
+    if inputs.get("other_hunks"):  # per-hunk levels: the rest of the PR's diff, after this hunk
+        # Its room depends on the PR text, the hunk and what the parent level's items hold: those
+        # items are kept, so a section added on top of a parent that fills the input cap gets
+        # what is left, and none if nothing is.
+        room = packing.get("other_hunks_max_tokens")
+        if packing["max_input_tokens"] is not None:
+            base = count_tokens(SEPARATOR.join(s for s in (pr_section, diff_section) if s))
+            held = sum(entry["tokens"] for entry in forced)
+            left = max(0, packing["max_input_tokens"] - base - held - 128)
+            room = left if room is None else min(room, left)
+        form = inputs.get("other_hunks_form", "diff")
+        other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens, form)
+        # `room` bounds the entries; the section's heading comes on top. Near the cap the whole
+        # section must fit in what is left, so entries are given up until it does.
+        while other_section and packing["max_input_tokens"] is not None:
+            over = count_tokens(other_section + SEPARATOR) - left
+            if over <= 0:
+                break
+            room = max(0, room - over - 8)
+            other_section, other_report = render_other_hunks(trace.get("other_hunks", []), room, count_tokens, form)
+    fixed = [s for s in (pr_section, diff_section, other_section) if s]
     input_cap = packing["max_input_tokens"]
     context_prefix = SEPARATOR.join(fixed + [f"{CONTEXT_HEADING}{SEPARATOR}"])  # the full text is this + context
     budget = packing["token_budget"]
@@ -796,6 +950,8 @@ def build_context(trace: dict, repo: Path, cfg: dict, count_tokens: Callable[[st
         "fits": input_cap is None or input_tokens <= input_cap,  # false only if PR text + diff alone exceed it
         "pr_tokens": count_tokens(pr_section) if pr_section else 0,
         "diff_tokens": count_tokens(diff_section) if diff_section else 0,
+        "other_hunks": other_report,  # None unless the level shows the PR's other hunks
+        "sections": input_sections(pr_section, diff_section, other_section, text),
         "context_tokens": total,
         "tokens_by_kind": {kind: sum(i["tokens"] for i in included if i["kind"] == kind) for kind in KINDS},
         "kind_caps": caps,
@@ -826,8 +982,12 @@ def nesting_check(parent: dict, child: dict) -> dict:
     """Whether everything the parent level shows is also in the child level."""
     missing = shown_lines(parent) - shown_lines(child)
     inputs_p, inputs_c = parent["config"]["input"], child["config"]["input"]
+    # The child shows at least as many of the PR's other hunks (they are taken in one fixed order).
+    shown_p = (parent.get("other_hunks") or {}).get("shown", 0)
+    shown_c = (child.get("other_hunks") or {}).get("shown", 0)
     return {"parent": parent["level"]["name"], "missing_lines": len(missing),
             "pr_text_kept": inputs_c["pr_text"] or not inputs_p["pr_text"],
             "diff_kept": inputs_c["diff"] or not inputs_p["diff"],
+            "other_hunks_kept": shown_c >= shown_p,
             "ok": not missing and (inputs_c["pr_text"] or not inputs_p["pr_text"])
-            and (inputs_c["diff"] or not inputs_p["diff"])}
+            and (inputs_c["diff"] or not inputs_p["diff"]) and shown_c >= shown_p}

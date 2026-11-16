@@ -109,7 +109,13 @@ class Progress:
         self.durations.append(seconds)
         tail = (f"{self.counts['ok']} built, {self.counts['failed']} failed, "
                 f"{self.counts['skipped']} skipped; about {self.eta()} left")
-        if outcome == "ok":
+        if outcome == "ok" and "hunks" in record:  # a per-hunk record: levels are per hunk
+            tokens = [level["input_tokens"] for hunk in record["hunks"] for level in hunk["levels"].values()] or [0]
+            self.log.info(f"{head} ok in {format_duration(seconds)}: {len(record['hunks'])} hunks, "
+                          f"{min(tokens):,}-{max(tokens):,} input tokens, {sum(tokens):,} in all | {tail}")
+            for warning in record.get("warnings", []):
+                self.log.warning(f"{record['id']}: {warning}")
+        elif outcome == "ok":
             tokens = [level["input_tokens"] for level in record["levels"].values()]
             self.log.info(f"{head} ok in {format_duration(seconds)}: {len(tokens)} levels, "
                           f"{min(tokens):,}-{max(tokens):,} input tokens | {tail}")
