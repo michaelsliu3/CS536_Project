@@ -248,9 +248,28 @@ class _ReviewFiles:
         """
         saved = read_json(self.path(cell))
         if self.force or not saved or saved.get("key") != key or saved.get("status") in ("error", "too_long"):
-            return None, False
+            sibling = None if self.force else self.sibling(cell, key)
+            if sibling is None:
+                return None, False
+            # Another level of this entry was reviewed with the same input (in an earlier run over
+            # other levels): one input has one reply in a run folder, so its review is copied.
+            saved = {**sibling, "level": cell.level, "input_tokens": cell.input_tokens,
+                     "reused_from": sibling.get("reused_from") or sibling["level"]}
+            return retry_rule.align(saved, self.retry, self.parser(cell)), True
         record = retry_rule.align(saved, self.retry, self.parser(cell))
         return record, record is not saved
+
+    def sibling(self, cell: Cell, key: str) -> dict | None:
+        """A saved review of another level of the same entry with the same key, or None. The one
+        that came from a model call is preferred over a copy."""
+        found = []
+        for path in sorted(self.path(cell).parent.glob("*.json")):
+            record = read_json(path)
+            if (record and record.get("key") == key and record.get("level") != cell.level
+                    and record.get("status") not in ("error", "too_long")):
+                found.append(record)
+        found.sort(key=lambda r: (r.get("reused_from") is not None, r["level"]))
+        return found[0] if found else None
 
 
 def _plan(files: _ReviewFiles, cells: list[Cell]) -> tuple[list[str], dict[str, Cell], dict]:

@@ -891,6 +891,16 @@ class HunkRunTests(unittest.TestCase):
         self.assertTrue((out / "reviews" / "o__r__1__h0002" / "H02_function.json").is_file())
         run_reviews(cells, self.reviewer, prompt, out)
         self.assertEqual(len(self.calls), 3)  # a second run reuses every saved review
+        # A run over one level, then a run over another level with the same input: one reply, not two.
+        apart = self.root / "apart"
+        only = lambda level: [c for c in cells if c.level == level]  # noqa: E731
+        run_reviews(only("H02_function"), self.reviewer, prompt, apart)
+        later = run_reviews(only("H01_min"), self.reviewer, prompt, apart)
+        self.assertEqual(len(self.calls), 6)  # 2 calls, then 1: hunk 1's H01 input is its H02 input
+        self.assertEqual([(r["entry"], r.get("reused_from")) for r in later],
+                         [("o__r__1__h0001", "H02_function"), ("o__r__1__h0002", None)])
+        saved = lambda level: json.loads((apart / "reviews" / "o__r__1__h0001" / f"{level}.json").read_text())  # noqa: E731
+        self.assertEqual(saved("H01_min")["reply"], saved("H02_function")["reply"])
         # The same cells under the Codex prompt are other reviews.
         self.assertEqual(plan_reviews(cells, self.reviewer, "RUBRIC", out)["send"]["cells"], 3)
 
