@@ -1,6 +1,6 @@
 # Per-hunk review test (branch `per-hunk-review`, started November 15, 2026)
 
-**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that (Section 13) and the five PRs were reviewed again later that day (Section 14): the fall is gone, every level now reaches 42 to 58% recall at 13 to 17% precision, and the levels cannot be told apart at this size, because the same input run twice differs by about as much as the levels do. Three runs of four levels then showed a difference that holds in every run: `H03_file` covers 22 to 23 of 38 references, `H01_min` 18 to 21 and `H10_all` 16 to 20 (Section 17). With the reviewer's thinking on, two levels covered 24 and 27 of 38 references at 10 to 12% precision, for about ten times the output and 8.5 times the review time (Section 15). Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
+**Status: the code is written and tested, and a first test on five PRs was reviewed and judged on November 15 (Section 12). On those five PRs the first three levels reach 47 to 63% recall, against 5 to 16% for the per-PR run. From `H04_pr_diff` on, the reviewer mostly commented on the other hunks it was shown. The levels and the scoring were changed for that (Section 13) and the five PRs were reviewed again later that day (Section 14): the fall is gone, every level now reaches 42 to 58% recall at 13 to 17% precision, and the levels cannot be told apart at this size, because the same input run twice differs by about as much as the levels do. Three runs of all ten levels then showed a difference that holds in every run: `H03_file` covers 22 to 23 of 38 references, `H01_min` 18 to 21, and the levels from `H07_agent` on 16 to 20 (Section 17). With the reviewer's thinking on, two levels covered 24 and 27 of 38 references at 10 to 12% precision, for about ten times the output and 8.5 times the review time (Section 15). Nothing here changes the per-PR pipeline, its data or its table. The work is on the branch `per-hunk-review` and is not merged.**
 
 This document records why the test exists, what was decided and when, what was built, what was checked, and what is still open.
 
@@ -31,7 +31,7 @@ The AACR-Bench paper's rows for plain LLMs change both at once: a prompt that as
 | November 15, later | The branch was pushed. The five-PR build was reviewed and judged on the cloud server (Section 12). |
 | November 15, later | After that test: the other hunks were taken out of the chain, context blocks name the lines the PR changes in them, a summary level was added at the end, and only findings that quote the hunk under review count (Section 13). The five PRs were rebuilt. |
 | November 15, later | Second test: the five PRs reviewed and judged again with the changed levels and counting rule (Section 14). The cloud server's clock is 13 hours ahead and showed November 16. |
-| November 15, later | Four levels reviewed twice more to measure run-to-run variation (Section 17): `H03_file` is the best of the four in every run, and the widest level is no better than no context. |
+| November 15, later | All ten levels reviewed twice more to measure run-to-run variation (Section 17): `H03_file` is the best level, and every level from `H07_agent` on is no better than no context. |
 | November 15, later | Two levels run again with the reviewer's thinking on (Section 15). A look at why the levels do not differ and at what recall and precision measure (Section 16). Pull request 7 opened for this branch. |
 | Not yet | A review run, a judge run, and the comparison with the per-PR table. |
 
@@ -592,25 +592,34 @@ So 13 to 17% precision is a lower bound on how many findings are right, not a me
 - **A measure that can show what context does:** rate each finding as valid, speculative or wrong, and weight references by severity. The design is on the branch `review-score` (`docs/review_score_design.md` there).
 - **The five PRs were picked by hand** when the code was first checked, for a spread of languages. They are not a random sample, and one of them holds 23 of the 38 references. The 30-PR set is to be drawn at random with a fixed seed, with these five added and marked.
 
-## 17. Three runs of four levels (November 15, 2026)
+## 17. Three runs of all ten levels (November 15, 2026)
 
 **Why.** One run per level could not separate the levels from run-to-run variation (Section 14.3), and a new way of scoring does not change that. So the same cells were reviewed again.
 
-**What was run.** The five PRs at `H01_min`, `H03_file`, `H06_tests1` and `H10_all`, twice more, with thinking off and everything else as in the second test (`run_reviews.py` and `run_judgments.py` with `--run-suffix _r2` and `_r3`, on the branch `review-score`). With the second test that makes three runs of each of the 312 cells. Each repeat took 291 reviewer calls and 16 to 17 minutes, plus about 3.5 minutes for the judge. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2_r2/` and `_r3/`.
+**What was run.** The five PRs at the ten levels `H01_min` to `H10_all`, twice more, with thinking off and everything else as in the second test (`run_reviews.py` and `run_judgments.py` with `--run-suffix _r2` and `_r3`, on the branch `review-score`). With the second test that makes three runs of each of the 780 cells. The results are in `data/aacr_hunk/outcomes/qwen3.8-27b_aacr-hunk_v2_r2/` and `_r3/`.
 
 "Score" below is the severity-weighted recall of `docs/review_score_design.md` (weights 5, 2 and 0.5 for blocking, should fix and nit).
+
+**The repeats were made in two passes, and that needed a repair.** Four levels were repeated first (291 reviewer calls per repeat, 16 to 17 minutes), the other six later (348 calls, about 22 minutes). The second pass sent inputs again that the first pass had already answered, because a level whose input equals another level's shares its reply only within one pass. One folder then held two replies for one input, and the judge wrote one over the other. The review stage was changed to copy a saved review of another level of the same hunk when the input is the same (commit `690c077`). In each repeat folder the 202 duplicate reviews were removed and filled in from the first pass, and all ten levels were judged again from scratch. After that every judgment matches its review and no input has two replies. The four levels of the first pass have the same counts as before the repair.
 
 ### 17.1 The levels, over three runs
 
 | Level | References covered, of 38 | Mean | Score in each run | Mean score | Input tokens per PR |
 |---|---|---|---|---|---|
 | `H01_min` | 21, 18, 18 | 19.0 | 0.617, 0.533, 0.533 | 0.561 | 8,278 |
+| `H02_function` | 19, 19, 18 | 18.7 | 0.542, 0.598, 0.617 | 0.586 | 15,872 |
 | `H03_file` | 22, 22, 23 | 22.3 | 0.710, 0.682, 0.720 | 0.704 | 30,684 |
+| `H04_callees1` | 19, 21, 22 | 20.7 | 0.654, 0.673, 0.682 | 0.670 | 44,223 |
+| `H05_callers1` | 20, 21, 23 | 21.3 | 0.664, 0.673, 0.692 | 0.676 | 57,387 |
 | `H06_tests1` | 21, 20, 23 | 21.3 | 0.673, 0.579, 0.692 | 0.648 | 64,430 |
+| `H07_agent` | 17, 18, 18 | 17.7 | 0.551, 0.533, 0.533 | 0.539 | 140,323 |
+| `H08_depth2` | 17, 18, 17 | 17.3 | 0.579, 0.533, 0.495 | 0.536 | 157,162 |
+| `H09_depth2_docs` | 16, 19, 17 | 17.3 | 0.570, 0.542, 0.495 | 0.536 | 166,706 |
 | `H10_all` | 16, 20, 18 | 18.0 | 0.598, 0.551, 0.505 | 0.551 | 193,399 |
 
-- **`H03_file` is the best of the four in every run.** Each of its three runs is above every run of `H01_min` and every run of `H10_all`, in references covered and in score.
-- **The shape is a rise and then a fall.** The file as context adds about 3 references over no context. Everything the tracer has, at six times the tokens of `H03_file`, is no better than no context.
+- **Three groups, not a steady rise.** No context and the function alone: about 19 references and a score of 0.56 to 0.59. The file, and the file with callees, callers and tests: 21 to 22 references and 0.65 to 0.70. Everything from `H07_agent` on: 17 to 18 references and 0.54 to 0.55, no better than no context at 17 to 23 times its tokens.
+- **`H03_file` is the best level.** Each of its three runs is above every run of `H01_min`, `H02_function` and the four levels from `H07_agent` on, in references covered and in score. Against `H04_callees1` to `H06_tests1` it is higher on average but the runs overlap.
+- **The fall comes at `H07_agent`,** the level that adds repository guide files and text-search hits and more than doubles the input (64,430 to 140,323 tokens per PR). Callees, callers and tests, added before it, cost little.
 - **Three runs per level cannot establish this statistically.** With three against three, the strongest possible result of a permutation test is p = 0.1, which is what "every run above every run" gives. It is consistent, not yet proven.
 
 ### 17.2 How much a run varies
@@ -620,28 +629,34 @@ For each reference: in how many of the three runs it was covered.
 | Level | 0 of 3 | 1 of 3 | 2 of 3 | 3 of 3 | Two runs disagree on |
 |---|---|---|---|---|---|
 | `H01_min` | 17 | 3 | 0 | 18 | 0 to 3 references |
+| `H02_function` | 18 | 0 | 4 | 16 | 2 to 3 |
 | `H03_file` | 15 | 0 | 2 | 21 | 1 to 2 |
+| `H04_callees1` | 15 | 2 | 3 | 18 | 3 to 4 |
+| `H05_callers1` | 14 | 3 | 2 | 19 | 2 to 5 |
 | `H06_tests1` | 13 | 4 | 3 | 18 | 3 to 6 |
+| `H07_agent` | 18 | 3 | 1 | 16 | 2 to 3 |
+| `H08_depth2` | 17 | 4 | 3 | 14 | 4 to 5 |
+| `H09_depth2_docs` | 16 | 6 | 2 | 14 | 5 to 6 |
 | `H10_all` | 15 | 6 | 3 | 14 | 4 to 8 |
 
-- **Variation grows with the context.** `H03_file` is nearly stable: 36 of the 38 references have the same outcome in all three runs. At `H10_all` 9 references change between runs.
-- **Two levels in one run disagree on 3 to 11 references,** more than two runs of one narrow level do. The earlier reading, that the levels differ by no more than the noise, holds for the wide levels and not for `H01_min` against `H03_file`.
+- **Variation tends to grow with the context.** `H03_file` is nearly stable: 36 of the 38 references have the same outcome in all three runs. At `H10_all` 9 references change between runs.
+- **The earlier reading, that the levels differ by no more than the noise, holds inside each of the three groups and not between them.**
 
 ### 17.3 Single references
 
-Seven references are covered in all three runs at one level and in none at another:
+Ten references are covered in all three runs at one level and in none at another. Some examples, as runs covered out of three at `H01`, `H03`, `H06` and `H10`:
 
 | Reference | Tier, context label | `H01` | `H03` | `H06` | `H10` |
 |---|---|---|---|---|---|
 | `browser-use` #0 | blocking, File Level | 0 | 3 | 2 | 3 |
 | `timescaledb` #4 | nit, File Level | 0 | 3 | 3 | 3 |
 | `timescaledb` #2 | should fix, Repo Level | 1 | 3 | 3 | 0 |
+| `cherry-studio` #21 | should fix, File Level | 1 | 3 | 3 | 0 |
 | `cherry-studio` #6 | nit, Diff Level | 1 | 3 | 2 | 0 |
-| `cherry-studio` #0 | nit, Diff Level | 3 | 3 | 1 | 0 |
+| `cherry-studio` #0 | nit, Diff Level | 3 | 3 | 0 | 0 |
 | `cherry-studio` #16 | should fix, Diff Level | 3 | 2 | 0 | 0 |
-| `cherry-studio` #17 | nit, Diff Level | 3 | 0 | 2 | 0 |
 
-Context helps some references and costs others. The two that need context from the first step are labelled File Level; the three that are lost as context grows are labelled Diff Level. Counting every reference whose rate differs between `H03_file` and `H10_all` by two runs or more: 1 is higher at `H10_all` and 7 are lower.
+Context helps some references and costs others. Those that need context from the first steps are labelled File Level or Repo Level. Those that are found without context and lost as it grows are labelled Diff Level. Several references that the file level covers in every run are covered in none at `H10_all`.
 
 ### 17.4 What a selector could gain
 
@@ -654,17 +669,18 @@ Choices were made from two runs and scored on the third, for each of the three w
 | Always `H06_tests1` | 21.3 | 0.648 |
 | Always `H10_all` | 18.0 | 0.551 |
 | The best single level, picked on the other two runs (`H03_file` each time) | 22.3 | 0.704 |
-| The best level per PR | 22.3 | 0.704 |
-| The best level per reference (an upper bound no selector can reach) | 24.0 | 0.720 |
+| The best level per PR | 23.0 | 0.710 |
+| The best level per reference (an upper bound no selector can reach) | 24.7 | 0.726 |
 
-- **On quality there is little room above always using `H03_file`:** 1.7 references of 38, or 0.016 in score, even for a choice made per reference with knowledge of the references.
-- **Choosing without holding a run out overstates this.** Scored on the runs they were picked from, the per-reference choices cover 26.0. In a single run, 26 or 27 references are covered at one of the four levels, which looked like 4 above the best level and is mostly variation: three runs of `H06_tests1` alone cover 25 between them.
+- **On quality there is little room above always using `H03_file`:** 0.7 references of 38 for a choice per PR, and 2.4 references, or 0.022 in score, for a choice made per reference with knowledge of the references.
+- **Choosing without holding a run out overstates this.** Scored on the runs they were picked from, the per-reference choices cover 26.3. In a single run, 26 to 29 references are covered at one of the ten levels, which looks like 4 to 7 above the best level and is mostly variation: three runs of `H06_tests1` alone cover 25 between them.
 - **Cost is where the room is.** `H03_file` uses 30,684 input tokens per PR and `H01_min` 8,278. A selector that keeps `H03_file` only where it changes the outcome would save tokens at the same quality. That is a different goal from raising quality, and on this benchmark most hunks hold no reference, so their level cannot matter to the score.
 
 ### 17.5 Limits
 
 - Five PRs picked by hand, 38 references, 23 of them in one PR. The single references of Section 17.3 are mostly from that PR.
-- Three runs, four of the eleven levels.
+- Three runs. The second and third runs were made in two passes and repaired as described above.
+- The judge is not repeatable either, so judging the same reviews again can move a count by a reference.
 - The judge and the severity labels come from the reviewer's own model.
 - The paper's prompt and one reviewer model. A reviewer that writes more than about 1.5 findings per hunk might use wide context differently.
 
