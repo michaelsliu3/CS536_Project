@@ -1,0 +1,13 @@
+,always H01_min,always H03_file,tabular logistic @ 70%,zero-shot LLM @ 70%,LLM embedding @ 70%,LLM embedding + tabular @ 70%,LLM fine-tuned (LoRA) @ 70%,cheapest first (no learning) @ 70%
+human=False,89/143,96/143,94/143,92/143,94/143,95/143,93/143,99/143
+human=True,17/47,20/47,19/47,19/47,20/47,18/47,20/47,18/47
+tier=blocking,8/15,12/15,12/15,12/15,10/15,10/15,12/15,11/15
+tier=nit,53/110,56/110,52/110,51/110,56/110,56/110,54/110,60/110
+tier=should_fix,45/65,48/65,49/65,48/65,48/65,47/65,47/65,46/65
+context=Diff Level,46/83,50/83,48/83,50/83,48/83,46/83,49/83,52/83
+context=File Level,38/74,42/74,41/74,39/74,41/74,43/74,41/74,41/74
+context=Repo Level,22/33,24/33,24/33,22/33,25/33,24/33,23/33,24/33
+category=Code Defect,66/112,72/112,73/112,71/112,70/112,69/112,71/112,72/112
+category=Maintainability and Readability,26/56,27/56,24/56,24/56,27/56,27/56,28/56,29/56
+category=Performance,8/15,11/15,10/15,10/15,11/15,11/15,8/15,10/15
+category=Security Vulnerability,6/7,6/7,6/7,6/7,6/7,6/7,6/7,6/7

@@ -1,0 +1,66 @@
+{
+ "written_at": "2026-11-20T11:48:39-0500",
+ "inputs": {
+  "outcomes": "/Users/penglihua/Desktop/00 Rutgers/2026 Fall/ML2/project/aacr_hunk_15%/selector_test/hunk_outcomes.json",
+  "contexts": "/Users/penglihua/Desktop/00 Rutgers/2026 Fall/ML2/project/aacr_hunk_15%/context_levels.jsonl",
+  "coverage": "/Users/penglihua/Desktop/00 Rutgers/2026 Fall/ML2/project/aacr_hunk_15%/outcomes/qwen3.8-27b_aacr-hunk_v2/coverage.csv"
+ },
+ "hunk_outcomes_sha256": "ffe15fd693d6021bfcbbd1fee1d436e0f3f8f24c4f757716cf219df9444c4032",
+ "contexts_sha256": "d2fb6dafa0968bd2775c73949e1383da85cf03692a9e8d56be1f0bf8439662f3",
+ "hunks": 397,
+ "references": 190,
+ "positives": 37,
+ "cv": "group5",
+ "folds": 5,
+ "base_level": "H01_min",
+ "upgrade_level": "H03_file",
+ "target_weighting": "agreed",
+ "budgets": [
+  0.4,
+  0.5,
+  0.6,
+  0.7,
+  0.85
+ ],
+ "n_random": 1000,
+ "n_boot": 2000,
+ "llm_model": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+ "zero_shot_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+ "max_len": 1024,
+ "diff_share": 0.6,
+ "use_meta": true,
+ "methods": [
+  "tabular logistic",
+  "zero-shot LLM",
+  "LLM embedding",
+  "LLM embedding + tabular",
+  "LLM fine-tuned (LoRA)"
+ ],
+ "finetune": {
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "epochs": 3,
+  "lr": 0.0002,
+  "batch": 1,
+  "grad_acc": 16,
+  "lora": [
+   16,
+   32,
+   0.05
+  ],
+  "tag": "03e7551491"
+ },
+ "versions": {
+  "numpy": "2.4.6",
+  "pandas": "3.1.1",
+  "sklearn": "1.9.1",
+  "torch": "2.15.0",
+  "transformers": "5.23.0",
+  "python": "3.11.18",
+  "gpu": "mps"
+ },
+ "note": "Pilot on 15% of AACR-Bench (one reviewer run). Not a final result."
+}
