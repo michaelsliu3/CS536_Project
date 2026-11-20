@@ -31,7 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.review_outcomes import backends, table  # noqa: E402
 from src.review_outcomes.parse import PARSER_VERSION  # noqa: E402
-from src.review_outcomes.profiles import read_notebook_profile  # noqa: E402
+from src.review_outcomes.profiles import dataset_path, read_notebook_profile  # noqa: E402
 from src.review_outcomes.retry import RetryPolicy  # noqa: E402
 from src.review_outcomes.prompts import (  # noqa: E402
     JUDGE_PROMPT_VERSION, REVIEW_REQUEST, RUBRIC_SHA256, load_review_prompt,
@@ -100,7 +100,7 @@ def main(argv=None) -> int:
     config = read_notebook_profile(args.profile)
     spec = config["reviewer"]
     out = PROJECT_ROOT / config["out_root"] / (config["run_name"] + args.run_suffix)
-    contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
+    contexts, dataset = PROJECT_ROOT / config["contexts"], dataset_path(config)
     concurrency = args.concurrency or spec["concurrency"]
     prompt = load_review_prompt(config.get("prompt", "codex"))  # refuses to run if a pinned prompt file was edited
     reviewer = make_reviewer(spec)

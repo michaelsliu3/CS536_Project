@@ -7,6 +7,13 @@ import json
 from pathlib import Path
 
 NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "outcome_table.ipynb"
+AACR_DATASET = "data/aacr/positive_samples.json"
+
+
+def dataset_path(config: dict, project_root: Path = NOTEBOOK.parents[1]) -> Path:
+    """The file with a profile's reference comments: its "dataset" entry, or AACR-Bench's file
+    for a profile without one."""
+    return Path(project_root) / config.get("dataset", AACR_DATASET)
 
 
 def read_notebook_profile(profile: str, notebook: Path = NOTEBOOK) -> dict:
