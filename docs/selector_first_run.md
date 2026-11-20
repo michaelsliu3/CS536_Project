@@ -127,6 +127,8 @@ Open questions for the team:
 - Whether to add features that can see the context itself (for example, embeddings of the `H03_file` text) rather than only its size.
 - Whether to keep Selector A as the main target, given that B is simpler and does better here.
 
+Later: small-LLM selectors (zero-shot, embeddings, LoRA; 0.5B to 7B) were compared with this run on its 20 folds in [selector_llm_a100_run.md](selector_llm_a100_run.md) Section 6. None beats Selector B with tabular logistic regression.
+
 ## 9. Files
 
 - Run with outputs: `notebooks/selector_training_colab_run_15pct.ipynb`
