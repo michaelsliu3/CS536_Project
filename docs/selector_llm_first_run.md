@@ -115,14 +115,14 @@ Differences from the first selector run: the folds are 5 groups of repositories 
 
 ## 8. Next steps (not decided)
 
-- `notebooks/selector_llm_colab_a100.ipynb` runs the same pipeline with larger models (3B for embeddings and LoRA, 7B for zero-shot), 2,048-token inputs and bfloat16 on an A100. It changes model size and input length together; to tell which helps, a run that changes one of them is needed.
+- `notebooks/selector_llm_colab_a100.ipynb` runs the same pipeline with larger models (3B for embeddings and LoRA, 7B for zero-shot), 2,048-token inputs and bfloat16 on an A100. It changes model size and input length together; to tell which helps, a run that changes one of them is needed. It has since been run: see [selector_llm_a100_run.md](selector_llm_a100_run.md).
 - More positives matter more than a larger model: rerun on the full benchmark when its per-hunk outcome table exists, with a locked test set.
 - Whether the LLM should see the `H03_file` context itself rather than only the hunk and its size.
 
 ## 9. Files
 
 - Notebook with outputs: `notebooks/selector_llm_colab.ipynb`
-- A100 version (not yet run): `notebooks/selector_llm_colab_a100.ipynb`
+- A100 version: `notebooks/selector_llm_colab_a100.ipynb` (results in [selector_llm_a100_run.md](selector_llm_a100_run.md))
 - Results: `results/selector_llm/`
   - `llm_upgrade_auc.csv`: AUC and intervals per method
   - `llm_budget_table.csv`: every method at every budget

@@ -1,0 +1,69 @@
+{
+ "written_at": "2026-11-20T17:30:27+0000",
+ "inputs": {
+  "outcomes": "/content/drive/MyDrive/Colab Notebooks/LH/ML2/aacr_hunk_15%/selector_test/hunk_outcomes.json",
+  "contexts": "/content/drive/MyDrive/Colab Notebooks/LH/ML2/aacr_hunk_15%/context_levels.jsonl",
+  "coverage": "/content/drive/MyDrive/Colab Notebooks/LH/ML2/aacr_hunk_15%/outcomes/qwen3.8-27b_aacr-hunk_v2/coverage.csv"
+ },
+ "hunk_outcomes_sha256": "ffe15fd693d6021bfcbbd1fee1d436e0f3f8f24c4f757716cf219df9444c4032",
+ "contexts_sha256": "d2fb6dafa0968bd2775c73949e1383da85cf03692a9e8d56be1f0bf8439662f3",
+ "hunks": 397,
+ "references": 190,
+ "positives": 37,
+ "cv": "group5",
+ "folds": 5,
+ "base_level": "H01_min",
+ "upgrade_level": "H03_file",
+ "target_weighting": "agreed",
+ "budgets": [
+  0.4,
+  0.5,
+  0.6,
+  0.7,
+  0.85
+ ],
+ "n_random": 1000,
+ "n_boot": 2000,
+ "llm_model": "Qwen/Qwen2.5-Coder-3B-Instruct",
+ "zero_shot_model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+ "max_len": 2048,
+ "diff_share": 0.6,
+ "use_meta": true,
+ "methods": [
+  "tabular logistic",
+  "zero-shot LLM",
+  "LLM embedding",
+  "LLM embedding + tabular",
+  "LLM fine-tuned (LoRA)"
+ ],
+ "finetune": {
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "epochs": 3,
+  "lr": 0.0002,
+  "batch": 4,
+  "grad_acc": 4,
+  "lora": [
+   16,
+   32,
+   0.05
+  ],
+  "tag": "ef0c7acfe4"
+ },
+ "versions": {
+  "numpy": "2.4.6",
+  "pandas": "2.2.3",
+  "sklearn": "1.6.1",
+  "torch": "2.14.1+cu130",
+  "transformers": "5.22.1",
+  "python": "3.13.16",
+  "gpu": "NVIDIA A100-SXM4-80GB"
+ },
+ "note": "A100 version (larger models). Pilot on 15% of AACR-Bench (one reviewer run). Not a final result.",
+ "amp_dtype": "torch.bfloat16",
+ "grad_ckpt": true,
+ "zs_batch": 4
+}
