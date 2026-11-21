@@ -4,7 +4,7 @@
 
 This adds to the target used so far, which compared the selector only with our own fixed context levels ([per_hunk_review_test.md](per_hunk_review_test.md), Section 20.1). That comparison stays, as a second target (Section 3 below).
 
-**No agent session has run on the real model in this design yet.** The code was rehearsed end to end against a stand-in server (Section 4). The only real session so far is one per-hunk session under earlier settings (Section 3).
+**A first trial has run**: Codex per hunk on 12 hunks of 3 AACR pull requests, with thinking on and off, scored next to our four levels ([codex_first_trial.md](codex_first_trial.md)). It is too small to settle anything. Codex per pull request has not run.
 
 ## 1. Why a real harness, and how it is used
 
@@ -33,8 +33,8 @@ Codex's review command uses that same rubric and reviews a pull request in one g
 | Part | Measure |
 |---|---|
 | Hunks | The hunks our reviewer reviews in the run being compared, each reviewed by Codex once |
-| Tokens, selector | The reviewer's input at the level the selector chose, per hunk |
-| Tokens, Codex | Everything its session sent to the model, over all its requests, and what the model wrote. Each request resends the conversation so far, so text read early is counted again by every later request. The part the server had cached is reported separately |
+| Tokens, both sides | Counted the same way for both, as the model server counts them, with the prompt's own instructions included: input tokens over all requests (`prompt_tokens`); the part the server had already processed and reused (`cached_input_tokens`); what it had to read anew (`new_input_tokens`); the largest single request (`largest_request_tokens`); and output tokens, with the thinking part. Our reviewer makes one request per hunk, and its requests share only their first 33 tokens, so nearly all of its input is new. A Codex session makes about 13 requests per hunk, and each resends the whole conversation so far, including about 9,000 tokens of Codex's own instructions and tool definitions, so most of its input is cached. The level's text alone (`input_tokens` in our own tables) leaves out about 400 tokens of instructions per call and is not used for the comparison |
+| Cost, both sides | What the same tokens would cost on a paid API, with one price list for both: input $2.00, cached input $0.10, cache write $2.50 and output $10.00 per million tokens, the prices of Claude Sonnet 5.5 and of OpenAI's gpt-6.2-sol on November 21, 2026 (`cost_usd`). Both providers bill every request's whole input, cached input at a twentieth of the price, and thinking as output. Other models of both lists keep these ratios, so the ratio between the sides does not depend on the model chosen. Our reviewer's prompts share too little to be cached, so all of its input is billed at the full price |
 | Quality | Recall of the reference comments, scored by the same judge, and the severity-weighted score ([review_score_design.md](review_score_design.md)). A PR's hunk reviews are put together as in our own tables |
 | "Similar" | Recall within one point of Codex's, checked with a paired bootstrap over hunks. To be fixed before the comparison is run |
 | Second number | Codex's per-PR review on the same pull requests: recall, and precision over its findings in files with a reference comment |
@@ -46,7 +46,7 @@ These are kept, and reported with the results.
 | Run | Difference | Codex | Our reviewer |
 |---|---|---|---|
 | Per hunk | How context arrives | An agent loop: it runs commands and reads their output over several requests | One call with the level's text |
-| Per hunk | Thinking | On (the server's default for a request that does not turn it off) | Off |
+| Per hunk | Thinking | On by default (the server's default for a request that does not turn it off). `--thinking off` runs Codex with it off, as our reviewer has it; both are reported | Off |
 | Per hunk | Instructions | Codex's general agent instructions, then our request | Our request only |
 | Per hunk | A reply that is not in the asked format | Counted as no findings, and reported as a count | Gets the retry rule |
 | Per PR | Unit | One session reviews the whole pull request | One call per hunk |
@@ -60,7 +60,7 @@ The last row does not change recall: a finding can only cover a reference in its
 | Setting | Value | Why |
 |---|---|---|
 | Model and server | Qwen3.8-27B on our vLLM server, through the Responses API | The same model as our reviewer |
-| Sandbox | Read-only, no network, no web search, never asks for approval | A review must not change anything or reach outside |
+| Sandbox | Read-only, no network, no web search, never asks for approval. Commands can read the checkout and system folders but not the folders where people's files live (`/Users`, `/home`, ...) | A review must not change anything or reach outside. Codex's plain read-only mode lets a command read any file the user can: in the first trial one session searched the whole home folder for a path the model had made up (nothing came back to the model). The block was added after that |
 | Command output shown to the model | 10,000 tokens per command | Codex gives every model in its own list this much, but only 10,000 bytes to a model it does not know. With the default it cut the middle out of a 4,334-token diff |
 | Shell | A plain shell, with the real `git` first on the path (macOS only) | In the sandbox, the macOS `git` launcher printed several warning lines into every git command's output |
 
@@ -75,7 +75,7 @@ The last row does not change recall: a finding can only cover a reference in its
 | `H03_file` | 2,160 | 31,116 | 9,297 | 172,984 |
 | `H04_callees1` | 2,870 | 41,328 | 15,649 | 211,001 |
 
-The one real Codex session so far reviewed a single hunk (jQuery pull request 3956, hunk 3, before the output setting above): 153,318 input tokens over 8 requests, 131,456 of them cached, and 16,076 output tokens, 13,569 of them thinking. It took 11 minutes. That is one session; the run gives a real average. At that rate the 108 pilot hunks are about 20 hours of sessions, or a little over 3 hours with 6 running at a time.
+The first trial ([codex_first_trial.md](codex_first_trial.md)) measured this on 12 AACR hunks: Codex sent 2.1 to 2.9 million input tokens against 45,450 for `H04_callees1`, and at paid-API prices cost 5 times as much with thinking off and 12 times with it on. Sessions took 1 to 6 minutes each with thinking off and 4 to 19 with it on.
 
 **The selector still has to beat simple rules.** If giving every hunk the file also matches Codex, the target is met without the selector doing anything. So the selector is also compared with the fixed levels, with random choice and with the cheapest-first rule at equal quality, as in [per_hunk_review_test.md](per_hunk_review_test.md), Section 20. It should save tokens beyond what a simple rule saves.
 
@@ -91,7 +91,7 @@ The one real Codex session so far reviewed a single hunk (jQuery pull request 39
 
 ## 5. What it needs
 
-- **Hunk sessions on the real model.** First a few, to see how long a session takes and what it costs under the current settings. Then the pilot's 108 hunks.
-- **Our reviewer's results on the same hunks**, at the four kept levels (`H01_min`, `H02_function`, `H03_file`, `H04_callees1`). The pilot has `H01_min` and `H03_file` so far.
+- **More hunk sessions.** The first trial covered 12 hunks of 3 pull requests chosen where a wider level helped ([codex_first_trial.md](codex_first_trial.md)). A claim needs many more, chosen without regard to which level did well. Our four levels are already reviewed and judged on AACR's 28 pull requests (run `qwen3.8-27b_aacr-hunk_v2`, read with `score --compare-run`), so only Codex's sessions and their judging are needed there.
+- **Our reviewer's results on the same hunks**, at the four kept levels (`H01_min`, `H02_function`, `H03_file`, `H04_callees1`). AACR's 28 reviewed pull requests have all four; the ContextCRBench pilot has `H01_min` and `H03_file` so far.
 - **Per-PR sessions on the same pull requests**, for the second number.
-- **A check on what Codex reads.** Read-only still lets it read any file on the computer it runs on, and what it reads goes to our model server. Each session's summary counts the commands that named a path outside the checkout.
+- **A check on what Codex reads.** Commands are now blocked from reading outside the checkout. Each session's summary still counts the commands that named a path outside it: 4 of 320 in the first trial, none of which returned anything from the user's files.
