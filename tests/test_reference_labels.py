@@ -83,7 +83,26 @@ class LabelTests(unittest.TestCase):
         self.assertEqual((got[("o__r__1", 2)]["valid"], got[("o__r__1", 2)]["tier"], got[("o__r__1", 0)]["valid"]), (True, "should_fix", False))
 
 
+class ReferenceFileTests(unittest.TestCase):
+    def test_only_hunks_in_a_file_with_a_reference_are_kept(self):
+        from src.review_outcomes import table
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / "positive_samples.json"
+            dataset.write_text(json.dumps([
+                {"githubPrUrl": "https://github.com/o/r/pull/1", "comments": [{"note": "x", "path": "src\\a.py"}, {"note": "", "path": "b.py"}]},
+                {"githubPrUrl": "https://github.com/o/r/pull/2", "comments": []}]))
+            cells = [Cell("o__r__1__h0001", "H01_min", "", 1, pr="o__r__1", file="src/a.py"),
+                     Cell("o__r__1__h0002", "H01_min", "", 1, pr="o__r__1", file="b.py"),  # its only comment is empty
+                     Cell("o__r__2__h0001", "H01_min", "", 1, pr="o__r__2", file="src/a.py"),  # another PR's file
+                     Cell("o__r__3", "L01_min", "", 1)]  # a per-PR cell
+            self.assertEqual([c.entry for c in table.in_reference_files(cells, dataset)], ["o__r__1__h0001", "o__r__3"])
+
+
 class ProfileTests(unittest.TestCase):
+    def test_the_pilot_reviews_only_hunks_in_reference_files(self):
+        self.assertTrue(read_notebook_profile("cloud-ccrb-hunk")["only_reference_files"])
+        self.assertNotIn("only_reference_files", read_notebook_profile("cloud-hunk"))
+
     def test_a_profile_names_its_own_reference_comments_or_uses_aacr_bench(self):
         self.assertEqual(dataset_path({}, Path("/p")), Path("/p/data/aacr/positive_samples.json"))
         self.assertEqual(dataset_path({"dataset": "data/x/positive_samples.json"}, Path("/p")), Path("/p/data/x/positive_samples.json"))
