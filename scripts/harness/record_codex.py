@@ -12,7 +12,8 @@ check     the tool, its settings and, when it answers, the model server (a plain
 checkout  fetch and check out the chosen hunks' PRs ahead of time (needs GitHub, not the model server)
 run    for each chosen hunk: check the PR out at the reviewed commit, run Codex on it read-only,
        and save its event stream to ROOT/harness/codex/<hunk>/ (resumes; needs the model server)
-build  turn the saved streams into the level HC1_codex -> ROOT/context_levels.codex.jsonl
+build  turn the saved streams into the level HC1_codex -> ROOT/context_levels.codex.jsonl: the recorded
+       hunks with the profile's levels and HC1_codex after them, in the builder's own structure
 
 ROOT is the folder of the profile's context file. Codex runs with a home folder of its own
 (ROOT/harness/codex_home, settings from configs/codex_harness/config.toml) and an empty HOME, so
@@ -349,7 +350,7 @@ def cmd_build(args) -> int:
             info = {"key": run["key"], "tool": run["codex"], "model": run["model"], "turns": run["turns"], "usage": run["usage"],
                     "seconds": run["seconds"], "final_message_chars": run["final_message_chars"]}
             level = harness.harness_level(parent, text, counts, count, limit, info)
-            hunks.append({**{k: v for k, v in hunk.items() if k != "levels"}, "levels": {harness.PARENT: parent, harness.LEVEL: level}})
+            hunks.append(harness.with_level(hunk, level, setup.config.get("levels")))
             totals["recorded"] += 1
             totals.update({f"commands {name}": value for name, value in counts.items() if name != "commands"})
             stats.append((counts["included"], level["input_tokens"] or 0, run["usage"].get("input_tokens", 0), level["same_as_parent"]))

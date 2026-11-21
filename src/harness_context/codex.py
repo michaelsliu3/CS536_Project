@@ -178,3 +178,19 @@ def harness_level(parent: dict, context_text: str, counts: dict, count_tokens: C
     full = SEPARATOR.join(p for p in (pr_section, diff_section, CONTEXT_HEADING + SEPARATOR + context_text) if p)
     return {**level, "text": full, "sections": input_sections(pr_section, diff_section, "", context_text),
             "same_as_parent": False, "context_tokens": count_tokens(context_text), "input_tokens": count_tokens(full)}
+
+
+def with_level(hunk: dict, level: dict, carry: list[str] | None = None) -> dict:
+    """The hunk with its levels in `carry` (all of them when None), then the recorded level, so the
+    record has the same structure as the builder's, with one more level. A carried level that
+    stores no text (it equals its parent) brings its parents along, so its text can be filled in."""
+    levels = hunk["levels"]
+    wanted = list(levels) if carry is None else [name for name in carry if name in levels]
+    keep: set[str] = set()
+    for name in wanted + [PARENT]:
+        while name and name not in keep:
+            keep.add(name)
+            name = levels[name].get("parent")
+    kept = {name: level_ for name, level_ in levels.items() if name in keep}
+    return {**{k: v for k, v in hunk.items() if k != "levels"}, "levels": {**kept, LEVEL: level}}
+

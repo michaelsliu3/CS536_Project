@@ -98,6 +98,34 @@ class LevelTests(unittest.TestCase):
         self.assertEqual((level["text"], level["same_as_parent"], level["input_tokens"], level["sections"]), (None, True, 20, self.parent["sections"]))
 
 
+class RecordTests(unittest.TestCase):
+    def test_the_hunk_keeps_the_profiles_levels_and_gets_the_recorded_one_after_them(self):
+        levels = {"H01_min": {"parent": None, "text": "a"}, "H02_function": {"parent": "H01_min", "text": None},
+                  "H03_file": {"parent": "H02_function", "text": "c"}, "H04_callees1": {"parent": "H03_file", "text": None},
+                  "H05_callers1": {"parent": "H04_callees1", "text": "e"}}
+        hunk = {"id": "p__h0001", "file": "a.py", "levels": levels}
+        recorded = {"parent": "H01_min", "text": "x"}
+        got = codex.with_level(hunk, recorded, ["H01_min", "H02_function", "H03_file", "H04_callees1"])
+        self.assertEqual(list(got["levels"]), ["H01_min", "H02_function", "H03_file", "H04_callees1", codex.LEVEL])
+        self.assertEqual((got["id"], got["file"], got["levels"][codex.LEVEL]), ("p__h0001", "a.py", recorded))
+        self.assertEqual(list(codex.with_level(hunk, recorded, ["H04_callees1"])["levels"]),
+                         ["H01_min", "H02_function", "H03_file", "H04_callees1", codex.LEVEL])  # its parents come along
+        self.assertEqual(len(codex.with_level(hunk, recorded)["levels"]), 6)
+        self.assertEqual(list(codex.with_level(hunk, recorded, [])["levels"]), ["H01_min", codex.LEVEL])
+
+    def test_the_built_file_reads_like_the_builders(self):
+        from src.tracer_context.dataset import hunk_units
+        pr, diff = "## Pull request\n\nTitle: T\n\nBody", "## Diff\n\n```diff\n@@ -1 +1 @@\n-a\n+b\n```"
+        parent = {"parent": None, "text": pr + "\n\n" + diff, "sections": input_sections(pr, diff, "", ""), "input_tokens": 20}
+        same = {"parent": "H01_min", "text": None, "sections": parent["sections"], "input_tokens": 20}
+        context, counts = codex.render_commands([command("bash -lc 'cat a.py'", "x\n")], lambda t: len(t.split()), 100)
+        level = codex.harness_level(parent, context, counts, lambda t: len(t.split()), 1000, {"key": "k"})
+        record = {"id": "p", "hunks": [codex.with_level({"id": "p__h0001", "levels": {"H01_min": parent, "H02_function": same}}, level)]}
+        unit = hunk_units([record])[0]
+        self.assertEqual(unit["levels"]["H02_function"]["text"], parent["text"])  # filled in from its parent
+        self.assertTrue(unit["levels"][codex.LEVEL]["text"].endswith("```\nx\n```"))
+
+
 class RunTests(unittest.TestCase):
     def test_the_prompt_allows_exploring_and_then_asks_for_the_review(self):
         prompt = codex.agent_prompt("REVIEW REQUEST", "aacr-base")
