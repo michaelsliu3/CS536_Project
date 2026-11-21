@@ -106,6 +106,52 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(dict(dropped), {"PR over the size limit": 1})
 
 
+class WriteTests(unittest.TestCase):
+    """`write` keeps the PRs it selected before, first and whatever the quotas."""
+
+    def setUp(self):
+        import json
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        # Three PRs in one language: A and C share a repository, B is in another.
+        prs = {"A": ("o/r1", 1), "B": ("o/r2", 2), "C": ("o/r1", 3)}
+        threads = ccrb.collect_threads(record(id=n, full_name=repo, pr_number=n) for repo, n in prs.values())
+        cli.write_jsonl(self.root / "work" / "threads.jsonl", threads)
+        found = {"pull": {"changed_files": 1, "additions": 1, "deletions": 1, "user": {"login": "author"}},
+                 "comments": [comment()], "commits": {"x" * 40: {"exists": True}}}
+        for repo, n in prs.values():
+            cli.write_json(self.root / "work" / "github" / f"{ccrb.pr_id(repo, n)}.json", found)
+        self.ids = {name: ccrb.pr_id(repo, n) for name, (repo, n) in prs.items()}
+        cli.write_json(self.root / "work" / "candidates.json",
+                       {"seed": 1, "candidates": [self.ids["B"], self.ids["A"], self.ids["C"]]})
+        self.json = json
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write(self, *flags):
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.main(["write", str(self.root), *flags])
+        entries = self.json.loads((self.root / "positive_samples.json").read_text())
+        return [e["githubPrUrl"].rsplit("/", 1)[1] for e in entries]
+
+    def test_a_later_write_keeps_the_earlier_selection_first(self):
+        self.assertEqual(self.write("--per-language", "1"), ["2"])  # B comes first among the candidates
+        cli.write_json(self.root / "work" / "selection.json", {"selected": [self.ids["A"]]})
+        self.assertEqual(self.write("--per-language", "1"), ["1"])  # A was selected before: kept, and the quota is full
+        self.assertEqual(self.write("--per-language", "3"), ["1", "2"])  # B added after A; C shares A's repository
+        self.assertEqual(self.write("--per-language", "3", "--fresh"), ["2", "1"])
+
+    def test_a_kept_pr_that_is_no_longer_usable_is_reported(self):
+        cli.write_json(self.root / "work" / "selection.json", {"selected": [self.ids["A"]]})
+        self.assertEqual(self.write("--per-language", "3", "--max-files", "0"), [])
+        outcome = self.json.loads((self.root / "work" / "selection.json").read_text())["outcome"]
+        self.assertTrue(outcome[self.ids["A"]].startswith("dropped (selected before)"))
+
+
 class CheckTests(unittest.TestCase):
     def test_a_line_of_a_built_hunk_is_found_by_its_number(self):
         header, body = "@@ -10,3 +10,3 @@ f", [" a", "-b", "+c", " d"]

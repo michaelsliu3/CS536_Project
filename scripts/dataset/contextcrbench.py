@@ -11,7 +11,8 @@ threads  one row per comment thread of every record -> ROOT/work/threads.jsonl
 lookup   draws candidate PRs (seeded) and asks GitHub for each one's review comments, the PR and
          the commits the comments were made on -> ROOT/work/github/<PR id>.json (asked once)
 write    drops what cannot be used, keeps one reviewed commit per PR, picks PRs per language
-         -> ROOT/positive_samples.json (AACR's shape), ROOT/work/references.jsonl, selection.json
+         -> ROOT/positive_samples.json (AACR's shape), ROOT/work/references.jsonl, selection.json;
+         the PRs an earlier write selected stay selected and first, so a larger run reuses them
 check    after the build: each reference must land on one hunk, and that hunk must be the code
          the reviewer saw -> ROOT/work/check_report.json
 
@@ -222,17 +223,30 @@ def convert_pr(pr: str, threads: list[dict], found: dict, max_files: int, max_li
     return ccrb.entry(threads[0], pull, target, references), rows, dropped
 
 
+def previous_selection(root: Path, fresh: bool) -> list[str]:
+    """The PRs the last `write` selected, in its order; [] with `fresh` or before any write."""
+    path = root / "work" / "selection.json"
+    if fresh or not path.is_file():
+        return []
+    return json.loads(path.read_text(encoding="utf-8")).get("selected", [])
+
+
 def cmd_write(args) -> int:
     threads = read_jsonl(args.root / "work" / "threads.jsonl")
     by_pr: dict[str, list[dict]] = defaultdict(list)
     for thread in threads:
         by_pr[ccrb.pr_id(thread["repo"], thread["pr"])].append(thread)
     plan = json.loads((args.root / "work" / "candidates.json").read_text(encoding="utf-8"))
+    # The PRs selected before come first, in their old order, and stay selected whatever the
+    # quotas: their contexts, labels and reviews may already exist, and their place in the dataset
+    # file stays the same. New PRs fill the quotas after them, in candidate order.
+    kept = previous_selection(args.root, args.fresh)
+    order = kept + [pr for pr in plan["candidates"] if pr not in set(kept)]
     entries, rows, dropped, outcome = [], [], Counter(), {}
     taken_language: Counter = Counter()
     taken_repo: Counter = Counter()
     usable = Counter()
-    for pr in plan["candidates"]:
+    for pr in order:
         path = args.root / "work" / "github" / f"{pr}.json"
         if not path.is_file():
             outcome[pr] = "not looked up"
@@ -241,12 +255,12 @@ def cmd_write(args) -> int:
         dropped.update(why)
         usable["threads"] += len(by_pr[pr])
         if made is None:
-            outcome[pr] = "dropped: " + (", ".join(sorted(why)) or "no thread left")
+            outcome[pr] = ("dropped (selected before): " if pr in kept else "dropped: ") + (", ".join(sorted(why)) or "no thread left")
             continue
         usable["PRs usable"] += 1
         usable["threads usable"] += len(refs)
         language, repo = made["project_main_language"], by_pr[pr][0]["repo"]
-        if taken_language[language] >= args.per_language or taken_repo[repo] >= args.per_repo:
+        if pr not in kept and (taken_language[language] >= args.per_language or taken_repo[repo] >= args.per_repo):
             outcome[pr] = "usable, not needed"
             continue
         taken_language[language] += 1
@@ -254,18 +268,21 @@ def cmd_write(args) -> int:
         outcome[pr] = "selected"
         entries.append(made)
         rows += refs
+    selected = [p for p, o in outcome.items() if o == "selected"]
     write_json(args.root / "positive_samples.json", entries)
     write_jsonl(args.root / "work" / "references.jsonl", rows)
     write_json(args.root / "work" / "selection.json",
                {"seed": plan["seed"], "per_language": args.per_language, "per_repo": args.per_repo, "max_files": args.max_files,
-                "max_lines": args.max_lines, "candidates": len(plan["candidates"]), "counts": dict(usable),
-                "threads_dropped": dict(dropped), "selected": [p for p, o in outcome.items() if o == "selected"], "outcome": outcome})
-    print(f"{len(plan['candidates'])} candidate PRs with {usable['threads']} threads: {usable['PRs usable']} PRs and "
+                "max_lines": args.max_lines, "candidates": len(plan["candidates"]), "kept_from_before": len(kept),
+                "counts": dict(usable), "threads_dropped": dict(dropped), "selected": selected, "outcome": outcome})
+    print(f"{len(order)} PRs considered with {usable['threads']} threads: {usable['PRs usable']} PRs and "
           f"{usable['threads usable']} threads usable")
     for reason, count in dropped.most_common():
         print(f"  dropped  {count:4d}  {reason}")
-    print(f"selected {len(entries)} PRs with {len(rows)} references: {dict(sorted(taken_language.items()))}\n"
-          f"wrote {args.root / 'positive_samples.json'}")
+    lost = [p for p in kept if outcome.get(p) != "selected"]
+    print(f"selected {len(entries)} PRs with {len(rows)} references: {dict(sorted(taken_language.items()))}; "
+          f"{len(kept) - len(lost)} of them kept from the last write" + (f", {len(lost)} lost: {', '.join(lost)}" if lost else "")
+          + f"\nwrote {args.root / 'positive_samples.json'}")
     return 0
 
 
@@ -382,6 +399,8 @@ def main(argv=None) -> int:
     sub.add_argument("--per-repo", type=int, default=1, help="at most this many selected PRs per repository (default 1)")
     sub.add_argument("--max-files", type=int, default=30, help="leave out PRs that change more files (default 30)")
     sub.add_argument("--max-lines", type=int, default=2000, help="leave out PRs that add and remove more lines (default 2000)")
+    sub.add_argument("--fresh", action="store_true",
+                     help="select from scratch; by default the PRs the last write selected are kept, first and whatever the quotas")
     command("check", cmd_check, "check the built contexts against what the reviewers saw")
     args = parser.parse_args(argv)
     return args.run(args)
