@@ -28,10 +28,10 @@ for folder in (PROJECT_ROOT, Path(__file__).resolve().parent):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
 
-from run_reviews import make_reviewer as make_chat, select_cells  # noqa: E402 - the sibling script
+from run_reviews import make_reviewer as make_chat, profile_cells, select_cells  # noqa: E402 - the sibling script
 from src.review_outcomes import backends, table  # noqa: E402
 from src.review_outcomes.judge import normalize_separators  # noqa: E402
-from src.review_outcomes.profiles import read_notebook_profile  # noqa: E402
+from src.review_outcomes.profiles import dataset_path, read_notebook_profile  # noqa: E402
 from src.review_outcomes.prompts import JUDGE_PROMPT_VERSION  # noqa: E402
 
 log = table.log
@@ -86,10 +86,10 @@ def main(argv=None) -> int:
     if spec["backend"] != "openai" or "TO_BE_DECIDED" in spec.get("model", ""):
         raise SystemExit(f"profile {args.profile!r} has no judge served by an OpenAI-compatible server: {spec}")
     out = PROJECT_ROOT / config["out_root"] / (config["run_name"] + args.run_suffix)
-    contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
+    contexts, dataset = PROJECT_ROOT / config["contexts"], dataset_path(config)
     judge = backends.judge_caller(make_chat(spec))
     concurrency = args.concurrency or spec.get("concurrency", 1)
-    all_cells = table.discover_cells(contexts, config["entries"], (args.levels or config["levels"]))
+    all_cells = profile_cells(config, contexts, dataset, args.levels or config["levels"])
     cells = select_cells(all_cells, args.first, args.entries)
     reviews, missing = load_reviews(out, cells)
     references = table.references_by_entry(dataset, cells)

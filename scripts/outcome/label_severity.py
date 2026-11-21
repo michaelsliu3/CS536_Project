@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_reviews import make_reviewer as make_chat, select_cells  # noqa: E402 - the sibling script
 from src.review_outcomes import severity, table  # noqa: E402
-from src.review_outcomes.profiles import read_notebook_profile  # noqa: E402
+from src.review_outcomes.profiles import dataset_path, read_notebook_profile  # noqa: E402
 
 
 def model_name(spec: dict, thinking: bool) -> str:
@@ -57,7 +57,7 @@ def main(argv=None) -> int:
     spec = model_spec(config["judge"], args.thinking, args.max_tokens)
     name = model_name(spec, args.thinking)
     out = labels_path(config, name).resolve()
-    dataset = PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
+    dataset = dataset_path(config)
     cells = select_cells(table.discover_cells(PROJECT_ROOT / config["contexts"], config["entries"], [args.code_level]),
                          args.first, args.entries)
     if not cells or cells[0].pr is None:

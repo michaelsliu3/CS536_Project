@@ -10,6 +10,7 @@ __pycache__/
 .agents/skills/*
 !.agents/skills/latex-document
 !.agents/skills/git-commit-push
+!.agents/skills/server-run-console
 wandb/
 notebooks/model_downloads/
 
