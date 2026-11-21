@@ -103,6 +103,12 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(read_notebook_profile("cloud-ccrb-hunk")["only_reference_files"])
         self.assertNotIn("only_reference_files", read_notebook_profile("cloud-hunk"))
 
+    def test_the_aacr_50pct_run_uses_the_kept_levels_in_a_folder_of_its_own(self):
+        kept, old = read_notebook_profile("cloud-hunk-kept"), read_notebook_profile("cloud-hunk")
+        self.assertEqual((kept["levels"], kept["only_reference_files"]), (["H01_min", "H02_function", "H03_file", "H04_callees1"], True))
+        self.assertEqual((kept["contexts"], kept["prompt"], kept["reviewer"], kept["judge"]), (old["contexts"], old["prompt"], old["reviewer"], old["judge"]))
+        self.assertNotEqual(kept["run_name"], old["run_name"])  # the ten-level run's tables stay as they are
+
     def test_a_profile_names_its_own_reference_comments_or_uses_aacr_bench(self):
         self.assertEqual(dataset_path({}, Path("/p")), Path("/p/data/aacr/positive_samples.json"))
         self.assertEqual(dataset_path({"dataset": "data/x/positive_samples.json"}, Path("/p")), Path("/p/data/x/positive_samples.json"))
