@@ -105,6 +105,13 @@ class SessionTests(unittest.TestCase):
         self.assertEqual((command["command"], command["exit_code"], command["output_tokens"]), ("git diff abc1234", 0, 321))
         self.assertIn("diff --git a/src/a.c", command["output"])
 
+    def test_input_tokens_are_split_by_what_is_resent(self):
+        session = codex.parse_session(review_session())  # two requests: 4,000 then 5,000 input tokens
+        got = codex.input_sources([session], request_tokens=1000)
+        self.assertEqual(got, {"requests": 2, "harness": 6000, "request": 2000, "conversation": 1000, "total": 9000})
+        self.assertEqual(got["harness"] + got["request"] + got["conversation"], got["total"])
+        self.assertEqual(codex.input_sources([], 10)["total"], 0)
+
     def test_a_review_run_is_two_conversations_and_the_review_is_in_the_second(self):
         sessions = [codex.parse_session(EXEC_SESSION), codex.parse_session(review_session())]
         self.assertEqual([s["source"] for s in sessions], ["exec", "review"])
@@ -223,6 +230,20 @@ class RunTests(unittest.TestCase):
             self.assertIsNotNone(cli.saved_run(Path(folder)))  # scoring takes any finished session
             (Path(folder) / "run.json").write_text(json.dumps({"status": "timeout", "key": "k1"}), encoding="utf-8")
             self.assertIsNone(cli.saved_run(Path(folder), "k1"))
+
+    def test_commands_are_kept_from_reading_outside_the_checkout(self):
+        import types
+        setup = types.SimpleNamespace(empty_home=Path("/Users/me/project/data/harness/empty_home"))
+        flags = cli.read_block(setup, Path("/Users/me/project/data/repos/o__r"))
+        self.assertEqual(flags[:4], ("-c", 'default_permissions="review"', "-c", 'permissions.review.extends=":read-only"'))
+        table = flags[5]
+        self.assertTrue(table.startswith("permissions.review.filesystem={ "))
+        for root in cli.blocked_roots():
+            self.assertIn(f'"{root}" = "deny"', table)
+        self.assertIn('"/Users/me/project/data/repos/o__r" = "read"', table)   # the checkout stays readable
+        self.assertIn('"/Users/me/project/data/harness/empty_home" = "read"', table)
+        self.assertIn(f'"{cli.CODEX.parents[2].resolve()}" = "read"', table)    # Codex's own ripgrep
+        self.assertNotIn("write", table)
 
     def test_codexs_recorded_context_is_not_a_level_of_any_profile(self):
         with self.assertRaises(ValueError):

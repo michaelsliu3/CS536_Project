@@ -208,6 +208,25 @@ def session_totals(sessions: list[dict]) -> dict:
             "commands": [command for s in sessions for command in s["commands"]]}
 
 
+def input_sources(sessions: list[dict], request_tokens: int) -> dict:
+    """Where a run's input tokens come from, as {requests, harness, request, conversation, total}.
+
+    Every model request of an agent session resends three things: the harness's own instructions
+    and tool definitions (`harness`), the request it was given (`request`, `request_tokens` each
+    time: count them with the model's tokenizer) and the conversation so far (`conversation`: the
+    commands the model ran, what they printed, its own messages and, when it thinks, its
+    thinking). The first request holds no conversation yet, so the harness's part is that
+    request's size less the request's own tokens, and a later request's conversation is how much
+    larger it is than the first."""
+    sizes = [usage.get("input_tokens", 0) for session in sessions for usage in session["request_usage"]]
+    if not sizes:
+        return {"requests": 0, "harness": 0, "request": 0, "conversation": 0, "total": 0}
+    first = sizes[0]
+    return {"requests": len(sizes), "harness": max(0, first - request_tokens) * len(sizes),
+            "request": min(first, request_tokens) * len(sizes), "conversation": sum(size - first for size in sizes),
+            "total": sum(sizes)}
+
+
 def review_reply(sessions: list[dict]) -> str:
     """The reply of the review conversation: the JSON Codex's review rubric asks for, as the model
     wrote it. "" when the run has no review conversation."""
