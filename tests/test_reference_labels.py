@@ -108,7 +108,8 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(dataset_path({"dataset": "data/x/positive_samples.json"}, Path("/p")), Path("/p/data/x/positive_samples.json"))
         pilot = read_notebook_profile("cloud-ccrb-hunk")
         self.assertEqual((pilot["dataset"], pilot["contexts"], pilot["levels"]),
-                         ("data/ccrb_hunk/positive_samples.json", "data/ccrb_hunk/context_levels.jsonl", ["H01_min", "H03_file"]))
+                         ("data/ccrb_hunk/positive_samples.json", "data/ccrb_hunk/context_levels.jsonl",
+                          ["H01_min", "H02_function", "H03_file", "H04_callees1"]))
         self.assertNotIn("dataset", read_notebook_profile("cloud-hunk"))
 
 
