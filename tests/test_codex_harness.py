@@ -59,7 +59,7 @@ class CommandTests(unittest.TestCase):
         repo = "/work/repos/o__r"
         for inside in ("sed -n 1,9p src/a.py", "git diff aacr-base...HEAD -- src/a.py", "rg -n 'a/b' src 2>/dev/null",
                        f"cat {repo}/src/a.py", "/usr/bin/git log -1", "ls ./src/../src", "sed -n '/def f/,/^$/p' src/a.py",
-                       "rg -n \"/api/v1\" src"):
+                       "rg -n \"/api/v1\" src", "cat src/var/isFunction.js", "ls lib/tmp/ src/etc/x"):
             self.assertFalse(codex.leaves_repository(f"bash -lc {json.dumps(inside)}", repo), inside)
         for outside in ("cat ~/.ssh/id_rsa", "ls $HOME", "cat /etc/passwd", "cat ../other/secret", "cat /work/repos/other/a.py",
                         "find / -name '*.pem'", "cat '/etc/hosts'", "cat /private/tmp/x"):

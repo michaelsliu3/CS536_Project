@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 import urllib.error
@@ -174,8 +175,10 @@ def cmd_check(args) -> int:
     called = ok and any(item.get("type") == "function_call" for item in reply.get("output", []))
     report(called, "the model calls a tool through the Responses API",
            "" if called else f"start vLLM with  {SERVE_FLAGS}  (reply: {str(reply)[:300]})")
-    report(None, "Codex itself was tried before the server answered: run `check` again to see a full session"
-           if not events["turns"] else "Codex got a reply from the model")
+    if events["turns"]:
+        report(True, f"Codex got a reply from the model ({events['usage'].get('input_tokens', 0):,} input tokens for a one-word answer)")
+    else:
+        report(None, "Codex itself was tried before the server answered: run `check` again to see a full session")
     return 1 if problems else 0
 
 
@@ -274,36 +277,50 @@ def cmd_run(args) -> int:
     records = load_records(setup.contexts)
     entries = {entry["id"]: entry["record"] for entry in load_entries(setup.dataset)}
     counts: Counter = Counter()
-    for number, (pr, items) in enumerate(by_pr.items(), 1):
-        try:
-            checkout = prepare_checkout(setup.repos, entries[pr], records[pr]["merge_base"])
-        except Exception as error:  # noqa: BLE001 - one PR that cannot be checked out must not stop the run
-            counts["checkout failed"] += len(items)
-            print(f"[{number}/{len(by_pr)}] {pr}: checkout failed: {type(error).__name__}: {str(error)[:200]}", flush=True)
-            continue
-        repo = Path(checkout["repo"])
+    lock = threading.Lock()
+    done = [0]
 
-        def one(item: dict) -> dict:
-            started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            result = run_codex(setup, repo, item["prompt"], item["dir"], args.timeout)
-            events = harness.parse_events((item["dir"] / "events.jsonl").read_text(encoding="utf-8").splitlines())
-            status = ("timeout" if result["timed_out"] else "ok" if result["exit_code"] == 0 and events["turns"] and not events["errors"]
-                      else "failed")
-            run = {"hunk": item["cell"].entry, "pr": pr, "key": item["key"], "status": status, **result, "started_at": started_at,
-                   "codex": version, "model": model, "settings_sha256": settings_sha, "repo": str(repo),
-                   "commit": entries[pr]["target_commit"], "turns": events["turns"], "commands": len(events["commands"]),
-                   "usage": events["usage"], "errors": events["errors"][:3], "final_message_chars": len(events["final_message"])}
-            (item["dir"] / "run.json").write_text(json.dumps(run, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-            return run
+    def one(pr: str, repo: Path, item: dict) -> dict:
+        started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        result = run_codex(setup, repo, item["prompt"], item["dir"], args.timeout)
+        events = harness.parse_events((item["dir"] / "events.jsonl").read_text(encoding="utf-8").splitlines())
+        status = ("timeout" if result["timed_out"] else "ok" if result["exit_code"] == 0 and events["turns"] and not events["errors"]
+                  else "failed")
+        run = {"hunk": item["cell"].entry, "pr": pr, "key": item["key"], "status": status, **result, "started_at": started_at,
+               "codex": version, "model": model, "settings_sha256": settings_sha, "repo": str(repo),
+               "commit": entries[pr]["target_commit"], "turns": events["turns"], "commands": len(events["commands"]),
+               "usage": events["usage"], "errors": events["errors"][:3], "final_message_chars": len(events["final_message"])}
+        (item["dir"] / "run.json").write_text(json.dumps(run, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        with lock:
+            counts[status] += 1
+            done[0] += 1
+            print(f"[{done[0]}/{len(todo)}] {run['hunk']}: {status} in {run['seconds']}s, {run['commands']} commands, "
+                  f"{run['usage'].get('input_tokens', 0):,} input tokens" + (f" | {run['errors'][0][:120]}" if run["errors"] else ""),
+                  flush=True)
+        return run
 
-        with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
-            for run in pool.map(one, items):
-                counts[run["status"]] += 1
-                print(f"[{number}/{len(by_pr)}] {run['hunk']}: {run['status']} in {run['seconds']}s, {run['commands']} commands, "
-                      f"{run['usage'].get('input_tokens', 0):,} input tokens" + (f" | {run['errors'][0][:120]}" if run["errors"] else ""),
-                      flush=True)
-        if not args.keep_repos:
-            shutil.rmtree(repo, ignore_errors=True)
+    def repository(prs: list[str]) -> None:
+        """One repository's PRs, one after another: they share a checkout folder."""
+        for pr in prs:
+            try:
+                checkout = prepare_checkout(setup.repos, entries[pr], records[pr]["merge_base"])
+            except Exception as error:  # noqa: BLE001 - one PR that cannot be checked out must not stop the run
+                with lock:
+                    counts["checkout failed"] += len(by_pr[pr])
+                    print(f"{pr}: checkout failed: {type(error).__name__}: {str(error)[:200]}", flush=True)
+                continue
+            repo = Path(checkout["repo"])
+            with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
+                list(pool.map(lambda item: one(pr, repo, item), by_pr[pr]))
+            if not args.keep_repos:
+                shutil.rmtree(repo, ignore_errors=True)
+
+    by_repo: dict[str, list[str]] = defaultdict(list)
+    for pr in by_pr:
+        by_repo[pr.rsplit("__", 1)[0]].append(pr)
+    print(f"{len(by_repo)} repositories, up to {args.parallel} at a time, up to {args.concurrency} sessions per PR", flush=True)
+    with ThreadPoolExecutor(max_workers=max(1, args.parallel)) as pool:
+        list(pool.map(repository, by_repo.values()))
     print(f"done: {dict(counts)}")
     return 0 if set(counts) <= {"ok"} else 1
 
@@ -373,7 +390,9 @@ def main(argv=None) -> int:
 
     choice(command("checkout", cmd_checkout, "check the chosen hunks' PRs out ahead of a run"))
     sub = choice(command("run", cmd_run, "record Codex sessions"))
-    sub.add_argument("--concurrency", type=int, default=4, help="sessions at a time within one PR (default 4)")
+    sub.add_argument("--parallel", type=int, default=6, help="repositories at a time (default 6); keep parallel x concurrency at or "
+                     "below the model server's --max-num-seqs (8)")
+    sub.add_argument("--concurrency", type=int, default=1, help="sessions at a time within one PR (default 1)")
     sub.add_argument("--timeout", type=int, default=900, help="seconds before a session is stopped (default 900)")
     sub.add_argument("--keep-repos", action="store_true", help="keep each repository checkout after its PR")
     sub.add_argument("--force", action="store_true", help="record again what is already recorded")

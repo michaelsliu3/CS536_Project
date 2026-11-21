@@ -46,7 +46,8 @@ for.
 _SHELLS = {"sh", "bash", "zsh"}
 _FENCE = re.compile(r"`{3,}")
 _PROGRAM = re.compile(r"(?:^|(?<=[\s;&|(]))/(?:usr/(?:local/)?|opt/homebrew/)?s?bin/[\w.+-]+")  # a program by its full path
-_OUTSIDE_ROOT = re.compile(r"/(?:etc|Users|home|root|var|private|Volumes|Library|System|tmp|mnt|proc)(?:/|\b)")
+# A system or user folder named as an absolute path, not a folder of that name inside the repository (src/var/).
+_OUTSIDE_ROOT = re.compile(r"(?:^|(?<=[\s'\"=<>|;&(]))/(?:etc|Users|home|root|var|private|Volumes|Library|System|tmp|mnt|proc)(?:/|\b)")
 _BARE_PATH = re.compile(r"(?:^|(?<=[\s=<>|;&(]))/[^\s'\"|;&)<>]*")  # an absolute path that is not inside quotes
 
 
