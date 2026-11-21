@@ -1,0 +1,34 @@
+# Codex CLI settings for recording what a real harness reads (scripts/harness/record_codex.py).
+# The script copies this file into a Codex home of its own (CODEX_HOME inside the dataset
+# folder); your own ~/.codex is never read or written.
+#
+# Codex talks to the project's vLLM server through the OpenAI Responses API. The server must be
+# started with tool calling on (see the script's `check` output for the command).
+
+model = "Qwen/Qwen3.8-27B"            # must be the name vLLM serves
+model_provider = "vllm"
+model_context_window = 262144
+approval_policy = "never"             # never stop to ask; a command the sandbox refuses just fails
+sandbox_mode = "read-only"            # commands may read, never write, and have no network
+web_search = "disabled"
+check_for_update_on_startup = false
+
+[model_providers.vllm]
+name = "vLLM"
+base_url = "http://localhost:8000/v1"
+env_key = "VLLM_API_KEY"              # any value; vLLM asks for none by default
+wire_api = "responses"
+request_max_retries = 2
+stream_idle_timeout_ms = 600000
+
+[shell_environment_policy]
+inherit = "core"                      # commands see PATH, HOME and the like, not the rest of the environment
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+
+[history]
+persistence = "none"
