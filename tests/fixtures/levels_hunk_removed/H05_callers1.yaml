@@ -1,5 +1,5 @@
 # H05 callers-1: + direct callers and users of this hunk's code.
-inherit: H04_callees1.yaml
+inherit: ../../../configs/levels_hunk/H04_callees1.yaml
 level: {name: H05_callers1, parent: H04_callees1}
 selection:
   limits:
