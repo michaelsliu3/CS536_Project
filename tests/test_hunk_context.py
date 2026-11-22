@@ -115,9 +115,15 @@ def chars(text):
     return len(text)  # a deterministic stand-in for a tokenizer
 
 
+KEPT_LEVELS = ["H01_min", "H02_function", "H03_file", "H04_callees1"]
+REMOVED_LEVELS = PROJECT_ROOT / "tests" / "fixtures" / "levels_hunk_removed"
+
+
 def hunk_configs():
-    """The real per-hunk level configs, counted in characters."""
-    configs = load_level_configs(sorted((PROJECT_ROOT / "configs" / "levels_hunk").glob("*.yaml")))
+    """The four kept per-hunk level configs, then the seven removed ones (test fixtures, for the
+    builder features only wider levels use), counted in characters."""
+    configs = load_level_configs(sorted((PROJECT_ROOT / "configs" / "levels_hunk").glob("*.yaml"))
+                                 + sorted(REMOVED_LEVELS.glob("*.yaml")))
     for cfg in configs.values():
         cfg["packing"]["tokenizer"] = "approx"
     return configs
@@ -349,6 +355,10 @@ class OtherHunksSectionTests(RepoTestCase):
 
 
 class HunkDatasetTests(RepoTestCase):
+    def test_only_the_four_kept_levels_are_built(self):
+        kept = load_level_configs(sorted((PROJECT_ROOT / "configs" / "levels_hunk").glob("*.yaml")))
+        self.assertEqual(list(kept), KEPT_LEVELS)
+
     def test_every_hunk_gets_its_own_levels(self):
         configs = hunk_configs()
         self.assertEqual(list(configs), ["H01_min", "H02_function", "H03_file", "H04_callees1", "H05_callers1",

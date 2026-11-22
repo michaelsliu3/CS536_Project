@@ -31,7 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.review_outcomes import backends, table  # noqa: E402
 from src.review_outcomes.parse import PARSER_VERSION  # noqa: E402
-from src.review_outcomes.profiles import read_notebook_profile  # noqa: E402
+from src.review_outcomes.profiles import dataset_path, read_notebook_profile  # noqa: E402
 from src.review_outcomes.retry import RetryPolicy  # noqa: E402
 from src.review_outcomes.prompts import (  # noqa: E402
     JUDGE_PROMPT_VERSION, REVIEW_REQUEST, RUBRIC_SHA256, load_review_prompt,
@@ -84,6 +84,13 @@ def select_cells(cells: list, first: int | None, entries: list[str] | None) -> l
     return [cell for cell in cells if cell.group in chosen]
 
 
+def profile_cells(config: dict, contexts: Path, dataset: Path, levels) -> list:
+    """The profile's cells: its PRs at `levels`, and with "only_reference_files" only the hunks in
+    a file that has a reference comment (table.in_reference_files)."""
+    cells = table.discover_cells(contexts, config["entries"], levels)
+    return table.in_reference_files(cells, dataset) if config.get("only_reference_files") else cells
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--profile", default=os.environ.get("OUTCOME_PROFILE", "cloud"), help="notebook profile (default cloud)")
@@ -100,13 +107,13 @@ def main(argv=None) -> int:
     config = read_notebook_profile(args.profile)
     spec = config["reviewer"]
     out = PROJECT_ROOT / config["out_root"] / (config["run_name"] + args.run_suffix)
-    contexts, dataset = PROJECT_ROOT / config["contexts"], PROJECT_ROOT / "data" / "aacr" / "positive_samples.json"
+    contexts, dataset = PROJECT_ROOT / config["contexts"], dataset_path(config)
     concurrency = args.concurrency or spec["concurrency"]
     prompt = load_review_prompt(config.get("prompt", "codex"))  # refuses to run if a pinned prompt file was edited
     reviewer = make_reviewer(spec)
     retry = RetryPolicy.from_spec(spec, prompt.follow_up)
     if args.dry_run:
-        cells = select_cells(table.discover_cells(contexts, config["entries"], (args.levels or config["levels"])), args.first, args.entries)
+        cells = select_cells(profile_cells(config, contexts, dataset, args.levels or config["levels"]), args.first, args.entries)
         plan = table.plan_reviews(cells, reviewer, prompt, out, max_input_tokens=spec["max_input_tokens"], retry=retry)
         print(describe_plan(plan, retry, out))
         return 0
@@ -114,7 +121,7 @@ def main(argv=None) -> int:
     commit = subprocess.run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     log.info(f"profile {args.profile}, run folder {out}, code commit {commit[:7]}, server {spec['base_url']}")
 
-    all_cells = table.discover_cells(contexts, config["entries"], (args.levels or config["levels"]))
+    all_cells = profile_cells(config, contexts, dataset, args.levels or config["levels"])
     cells = select_cells(all_cells, args.first, args.entries)
     limit = spec["max_input_tokens"]
     if len(cells) != len(all_cells):

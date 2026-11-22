@@ -1,0 +1,42 @@
+# Codex CLI settings for running it as a reviewer (scripts/harness/record_codex.py).
+# The script copies this file into a Codex home of its own (CODEX_HOME inside the dataset
+# folder); your own ~/.codex is never read or written.
+#
+# Codex talks to the project's vLLM server through the OpenAI Responses API. The server must be
+# started with tool calling on (see the script's `check` output for the command).
+
+model = "Qwen/Qwen3.8-27B"            # must be the name vLLM serves
+model_provider = "vllm"
+model_context_window = 262144
+# How much of each command's output the model is shown. Codex keeps 10,000 tokens for every model
+# in its own list, but only 10,000 bytes (about 2,500 tokens) for a model it does not know, which
+# cuts the middle out of a mid-sized diff. This gives our model what Codex's own models get.
+tool_output_token_limit = 10000
+approval_policy = "never"             # never stop to ask; a command the sandbox refuses just fails
+sandbox_mode = "read-only"            # commands may read, never write, and have no network
+web_search = "disabled"
+check_for_update_on_startup = false
+# Commands run in a plain shell, not a login shell. A login shell on macOS rebuilds PATH and puts
+# /usr/bin first, where `git` is a launcher that fails to write its cache file in the read-only
+# sandbox and prints warnings into every git command's output. The script puts the real git first.
+allow_login_shell = false
+
+[model_providers.vllm]
+name = "vLLM"
+base_url = "http://localhost:8000/v1"
+env_key = "VLLM_API_KEY"              # any value; vLLM asks for none by default
+wire_api = "responses"
+request_max_retries = 2
+stream_idle_timeout_ms = 600000
+
+[shell_environment_policy]
+inherit = "core"                      # commands see PATH, HOME and the like, not the rest of the environment
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+
+[history]
+persistence = "none"

@@ -432,6 +432,20 @@ def _retry_summary(records: list[dict]) -> str:
             f"{sum(1 for s in steps if 'skipped' in s)} skipped for lack of room, {sum(1 for s in steps if 'error' in s)} failed")
 
 
+def in_reference_files(cells: list[Cell], dataset_path: Path) -> list[Cell]:
+    """The per-hunk cells whose file has a reference comment of their PR; per-PR cells as they are.
+
+    The judge compares a finding only with the references on the same file, so a hunk in any
+    other file can never cover a reference. When references are few per PR (ContextCRBench's
+    human comments), reviewing only these hunks gives the same coverage for a fraction of the
+    calls. It narrows the hunks a selector is trained and tested on, so say so with the results."""
+    records = references_by_entry(dataset_path)
+    files: dict[str, set[str]] = {}
+    for pr, record in records.items():
+        files[pr] = {normalize_separators(c.get("path")) for c in record.get("comments", []) if c.get("note")}
+    return [cell for cell in cells if cell.pr is None or cell.file in files.get(cell.pr, set())]
+
+
 def references_by_entry(dataset_path: Path, cells: list[Cell] | None = None) -> dict[str, dict]:
     """Each PR's AACR record by entry id. With per-hunk `cells`, each hunk's id also maps to its
     PR's record: a hunk's findings are judged against the PR's references on the same file."""
