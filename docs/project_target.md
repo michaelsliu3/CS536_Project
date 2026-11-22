@@ -6,6 +6,8 @@ This adds to the target used so far, which compared the selector only with our o
 
 **A first trial has run**: Codex per hunk on 12 hunks of 3 AACR pull requests, with thinking on and off, scored next to our four levels ([codex_first_trial.md](codex_first_trial.md)). It is too small to settle anything. Codex per pull request has not run.
 
+**Our four levels have run on 93 AACR pull requests** ([aacr_50pct_run.md](aacr_50pct_run.md)). Context adds 2 to 3 points of recall over no context, the function level gets that at 1.3 times no context's cost, and a selector that must choose before the review ranks hunks at the edge of chance.
+
 ## 1. Why a real harness, and how it is used
 
 A coding agent gathers its own context before it reviews: it runs read-only commands in the repository, reads files and searches for definitions. That is what people would otherwise use. Matching its review quality at a fraction of its cost is worth reporting even if the selector never beats the best fixed level.
@@ -77,7 +79,7 @@ The last row does not change recall: a finding can only cover a reference in its
 
 The first trial ([codex_first_trial.md](codex_first_trial.md)) measured this on 12 AACR hunks: Codex sent 2.1 to 2.9 million input tokens against 45,450 for `H04_callees1`, and at paid-API prices cost 5 times as much with thinking off and 12 times with it on. Sessions took 1 to 6 minutes each with thinking off and 4 to 19 with it on.
 
-**The selector still has to beat simple rules.** If giving every hunk the file also matches Codex, the target is met without the selector doing anything. So the selector is also compared with the fixed levels, with random choice and with the cheapest-first rule at equal quality, as in [per_hunk_review_test.md](per_hunk_review_test.md), Section 20. It should save tokens beyond what a simple rule saves.
+**The selector still has to beat simple rules.** If giving every hunk the file also matches Codex, the target is met without the selector doing anything. On 93 AACR pull requests the three wider levels are level with each other and the selector's ranking is at the edge of chance ([aacr_50pct_run.md](aacr_50pct_run.md), Sections 2 and 4). So the selector is also compared with the fixed levels, with random choice and with the cheapest-first rule at equal quality, as in [per_hunk_review_test.md](per_hunk_review_test.md), Section 20. It should save tokens beyond what a simple rule saves.
 
 ## 4. What exists
 
@@ -91,7 +93,7 @@ The first trial ([codex_first_trial.md](codex_first_trial.md)) measured this on 
 
 ## 5. What it needs
 
-- **More hunk sessions.** The first trial covered 12 hunks of 3 pull requests chosen where a wider level helped ([codex_first_trial.md](codex_first_trial.md)). A claim needs many more, chosen without regard to which level did well. Our four levels are already reviewed and judged on AACR's 28 pull requests (run `qwen3.8-27b_aacr-hunk_v2`, read with `score --compare-run`), so only Codex's sessions and their judging are needed there.
-- **Our reviewer's results on the same hunks**, at the four kept levels (`H01_min`, `H02_function`, `H03_file`, `H04_callees1`). AACR's 28 reviewed pull requests have all four; the ContextCRBench pilot has `H01_min` and `H03_file` so far.
+- **More hunk sessions.** The first trial covered 12 hunks of 3 pull requests chosen where a wider level helped ([codex_first_trial.md](codex_first_trial.md)). A claim needs many more, chosen without regard to which level did well. Our four levels are already reviewed and judged on 93 AACR pull requests (run `qwen3.8-27b_aacr-hunk_kept4`, the `cloud-hunk-kept` profile's own run), so only Codex's sessions and their judging are needed there.
+- **Our reviewer's results on the same hunks**, at the four kept levels (`H01_min`, `H02_function`, `H03_file`, `H04_callees1`). AACR's 93 reviewed pull requests have all four, and so do the 30 pull requests of the ContextCRBench pilot.
 - **Per-PR sessions on the same pull requests**, for the second number.
 - **A check on what Codex reads.** Commands are now blocked from reading outside the checkout. Each session's summary still counts the commands that named a path outside it: 4 of 320 in the first trial, none of which returned anything from the user's files.
