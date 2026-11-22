@@ -2,6 +2,8 @@
 
 **Revised November 7, 2026; status updated November 9. Status: the data pipeline and the outcome-table code are implemented and tested, but no review result exists, so nothing is validated yet.**
 
+**Update, November 21, 2026:** Section 12 (final phase) lists an optional demo for the talk: a recorded Codex session beside our reviewer on the same hunk, built from the logs of the first Codex trial ([codex_first_trial.md](codex_first_trial.md)). It may not be built, depending on time.
+
 **Update, November 14, 2026:** The reviewer stage of the outcome table has run once in full: Qwen3.8-27B reviewed all 185 PRs at all 10 levels (1,850 cells) in 5h48m. 13.7% of the cells held a reply the parser could not read, concentrated at `L01_min`; a retry rule run the same day brought that to 1.7%. The same model then judged every review, so the first table exists: recall is about 6 to 7% at every level and the levels barely differ in aggregate. The judge is not yet checked against a second judge or a human audit. Three checks followed the same day, with no decision yet: the reviewer comments in only 19% of the files that hold reference comments; the AACR-Bench paper prints the prompt it used for plain LLMs, which reviews one diff hunk per call and asks for every issue; and AACR-Bench now has a v2 reference set, a 944-comment subset of the 1,506 in v1, on which the saved table scores 7.6% recall. Details and open decisions are in [outcome_table_first_run.md](outcome_table_first_run.md) (the checks are its Section 11). **Update, November 15, 2026:** a test of per-hunk review was started on the branch `per-hunk-review`: one diff hunk per call, the AACR-Bench paper's own reviewer prompt, and context levels built from that hunk. The code is written and tested and five PRs are built per hunk; no review has been run. It changes nothing in the per-PR pipeline described below. See [per_hunk_review_test.md](per_hunk_review_test.md). The status line above and the sections below predate this run.
 
 **Update, November 12, 2026:** Section 4.7 adds three suggested alternative datasets (DeepSWE, FrontierCode, CyberGym), with one real sample of each and the preprocessing each would need. None of them replaces AACR-Bench.
@@ -1588,6 +1590,14 @@ These phases replace the retired A–F plan below. Each should become a scoped i
 **Report:** explain the midpoint pilot as infrastructure and lessons; distinguish it from the new review task. State dataset filtering, reference provenance, graph limitations, reviewer dependence, selection bias, and total costs. Show a quality–cost frontier, context-level breakdown, cost decomposition, and several concrete success/failure cases.
 
 **Demo:** show diff, candidate evidence, selected chunks, token counts, and resulting findings. It illustrates the pipeline but is not experimental evidence. Do not require a Cursor/Codex integration, Ollama deployment, or remote GUI to complete the study.
+
+**Demo for the talk, added November 21, 2026 (optional; it may not be built, depending on time).** The talk could show how a real coding agent reviews a hunk next to how our reviewer does with a chosen level. The first Codex trial ([codex_first_trial.md](codex_first_trial.md)) already recorded what this needs: every command, output and token count of each Codex session, and our saved reviews at every level for the same hunks. No fork of Codex is needed. In order of preference:
+
+1. **A replay from the logs.** A page that plays one recorded Codex session step by step (each command, tokens and cost adding up) beside our single call for the same hunk. Small to build, needs no GPU, and nothing can fail live.
+2. **Our own small command-line tool.** It takes a pull request, picks a level per hunk and prints the reviews with their tokens. The pieces exist; a live run needs the model server.
+3. **The selector as a tool inside Codex.** Codex 0.171.0 accepts outside tools (MCP servers), hooks, skills and plugins, so the selector could be offered as a "get review context" tool. This shows that the selector fits a real harness, but it would not show the saving: every Codex request carries about 9,000 tokens of Codex's own instructions, and the model may still explore on its own.
+
+Until a selector beats the fixed levels, the demo would show a fixed level or a simple rule against Codex, with the selector swapped in later. Like the demo above, it illustrates and is not experimental evidence.
 
 ### Suggested order under course time constraints
 
