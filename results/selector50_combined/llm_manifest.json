@@ -1,0 +1,96 @@
+{
+ "written_at": "2026-11-23T10:30:49-0500",
+ "inputs": {
+  "outcomes": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/hunk_outcomes.json",
+  "contexts": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/context_levels_slim.jsonl",
+  "coverage": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/coverage.csv"
+ },
+ "sha256": {
+  "outcomes": "f4009442a5198b8c1f62b6307dc31618aff18906baaf2afaa8ebf05d1a63f07c",
+  "contexts": "8f4227f726b6a02c7da16aa2c6deb5fc42ada668b7e1f022bfaa72dded2c0ea9",
+  "coverage": "1591cab74c31100468b5e78a1fafc3c8994ef1acb502d8a2bdcd9aad1933c689"
+ },
+ "hunks": 928,
+ "references": 684,
+ "label": "wider",
+ "positives": 190,
+ "cv": "group5",
+ "folds": 5,
+ "fold_hash": "1778fb4a7e",
+ "base_level": "H01_min",
+ "upgrade_levels": [
+  "H02_function",
+  "H03_file",
+  "H04_callees1"
+ ],
+ "main_upgrade": "H02_function",
+ "spend": [
+  0.1,
+  0.2,
+  0.3,
+  0.4,
+  0.5,
+  0.7,
+  1.0
+ ],
+ "target_spend": 0.3,
+ "target_weighting": "agreed",
+ "n_random": 1000,
+ "n_boot": 2000,
+ "zs_models": [
+  "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "Qwen/Qwen2.5-Coder-7B-Instruct"
+ ],
+ "emb_models": [
+  "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+  "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "Qwen/Qwen2.5-Coder-3B-Instruct",
+  "Qwen/Qwen2.5-Coder-7B-Instruct"
+ ],
+ "ft_models": [
+  "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+ ],
+ "max_len": 2048,
+ "diff_share": 0.6,
+ "use_meta": true,
+ "emb_pca": 32,
+ "finetune": {
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "epochs": 3,
+  "lr": 0.0002,
+  "batch": 1,
+  "grad_acc": 16,
+  "lora": [
+   16,
+   32,
+   0.05
+  ],
+  "tag": "06772646",
+  "grad_ckpt": true
+ },
+ "smoke": false,
+ "seconds": {
+  "zero-shot 1.5B": 1.2879159450531006,
+  "zero-shot 7B": 1.3524999618530273,
+  "embedding 0.5B": 1.3936939239501953,
+  "embedding 1.5B": 0.6036350727081299,
+  "embedding 3B": 1.3990111351013184,
+  "embedding 7B": 0.5713398456573486,
+  "LoRA 0.5B": 0.05785703659057617
+ },
+ "versions": {
+  "python": "3.11.4",
+  "numpy": "2.4.6",
+  "pandas": "3.1.1",
+  "sklearn": "1.9.1",
+  "torch": "2.15.0",
+  "transformers": "5.23.0",
+  "gpu": "mps",
+  "dtype": "torch.float16"
+ },
+ "note": "AACR-Bench 50% (93 PRs, 928 hunks, four levels). One reviewer run. No locked test set."
+}

@@ -46,3 +46,6 @@ research_notes/
 
 # Research reports written by deep-research runs; kept locally
 reports/
+
+# Model output caches of the selector notebooks (tens of MB of .npy; kept on Drive)
+results/*/cache/

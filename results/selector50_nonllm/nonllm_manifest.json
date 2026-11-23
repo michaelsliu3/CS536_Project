@@ -1,0 +1,53 @@
+{
+ "written_at": "2026-11-23T10:17:17-0500",
+ "inputs": {
+  "outcomes": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/hunk_outcomes.json",
+  "contexts": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/context_levels_slim.jsonl",
+  "coverage": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/coverage.csv"
+ },
+ "sha256": {
+  "outcomes": "f4009442a5198b8c1f62b6307dc31618aff18906baaf2afaa8ebf05d1a63f07c",
+  "contexts": "8f4227f726b6a02c7da16aa2c6deb5fc42ada668b7e1f022bfaa72dded2c0ea9",
+  "coverage": "1591cab74c31100468b5e78a1fafc3c8994ef1acb502d8a2bdcd9aad1933c689"
+ },
+ "hunks": 928,
+ "references": 684,
+ "label": "wider",
+ "positives": 190,
+ "cv": "group5",
+ "folds": 5,
+ "fold_hash": "1778fb4a7e",
+ "base_level": "H01_min",
+ "upgrade_levels": [
+  "H02_function",
+  "H03_file",
+  "H04_callees1"
+ ],
+ "main_upgrade": "H02_function",
+ "spend": [
+  0.1,
+  0.2,
+  0.3,
+  0.4,
+  0.5,
+  0.7,
+  1.0
+ ],
+ "target_spend": 0.3,
+ "target_weighting": "agreed",
+ "seeds": [
+  0,
+  1,
+  2
+ ],
+ "n_random": 1000,
+ "n_boot": 2000,
+ "tabular_features": 114,
+ "versions": {
+  "python": "3.11.18",
+  "numpy": "2.4.6",
+  "pandas": "3.1.1",
+  "sklearn": "1.9.1"
+ },
+ "note": "AACR-Bench 50% (93 PRs, 928 hunks, four levels). One reviewer run. No locked test set."
+}

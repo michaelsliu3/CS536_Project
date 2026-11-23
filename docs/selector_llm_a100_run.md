@@ -4,6 +4,8 @@
 
 **No LLM method, at either size, beats that run's tabular logistic selector: 114 references, score 0.710 at 70% of the `H03_file` tokens. Nor does any beat its tree models on AUC (about 0.60 to 0.62). On the M2 run's 5 folds, the 3B embedding reaches AUC 0.636 [0.55, 0.73], the only interval above 0.5. On the first run's 20 folds it drops to 0.523, so that lead depends on the folds. The one result that holds on every fold set is negative: the 7B zero-shot model selects significantly worse than the tabular baseline and always `H03_file`. LoRA at 3B is no better than at 0.5B.**
 
+**Update, November 23, 2026:** on the AACR 50% set ([selector50_run.md](selector50_run.md)) the non-LLM selectors stay at AUC about 0.55 with 2.3 times the hunks, so Section 7's view that the limit is the data does not hold; and the 7B zero-shot model is the best ranker there (AUC 0.591), though it still does not beat random choice at a budget.
+
 The run is saved with its outputs in `notebooks/selector_llm_colab_a100.ipynb`, and its result files are in `results/selector_llm_results_a100/`. The comparisons on common folds are made by `scripts/analysis/compare_selector_llm_runs.py`:
 - on the M2 run's folds: `results/selector_llm_results_a100/same_folds/` (Sections 2 to 5);
 - on the first selector run's folds: `results/selector_llm_results_a100/loo_folds/` (Section 6).
