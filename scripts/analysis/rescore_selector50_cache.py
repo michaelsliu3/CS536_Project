@@ -8,8 +8,9 @@ model lists set to what the cache holds, reads every model output from the cache
 is run; only the tokenizers are loaded, to rebuild the texts and their hash), and merges the
 non-LLM scores, so all methods share one set of tables.
 
-LoRA 3B is used with the seeds whose five folds are all cached (two of three in the run of
-November 23, 2026), and is named "LoRA 3B (<n> seeds)".
+Zero-shot and embedding models are used when their output is cached. LoRA 3B is used with
+the seeds whose five folds are all cached; with fewer than all seeds it is named
+"LoRA 3B (<n> seeds)".
 
 Usage, from the project root, in the cs536 environment:
     python scripts/analysis/rescore_selector50_cache.py
@@ -25,17 +26,22 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 OVERRIDE = '''
-ZS_MODELS = ["Qwen/Qwen2.5-Coder-1.5B-Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct"]
-EMB_MODELS = ["Qwen/Qwen2.5-Coder-0.5B-Instruct", "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-              "Qwen/Qwen2.5-Coder-3B-Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct"]
+def _cached(prefix, m):
+    return any(CACHE_DIR.glob(f"{prefix}_{slug(m)}_*.npy"))
+def slug(name):
+    return name.replace("/", "_")
+ZS_MODELS = [m for m in ["Qwen/Qwen2.5-Coder-1.5B-Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct",
+                         "Qwen/Qwen2.5-Coder-14B-Instruct"] if _cached("zs", m)]
+EMB_MODELS = [m for m in ["Qwen/Qwen2.5-Coder-0.5B-Instruct", "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                          "Qwen/Qwen2.5-Coder-3B-Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct"] if _cached("emb", m)]
 FT_MODELS = ["Qwen/Qwen2.5-Coder-0.5B-Instruct"]
-PLOT_METHODS = ["tabular, logistic", "zero-shot 1.5B", "zero-shot 7B", "embedding 3B", "embedding 7B",
-                "embedding + tabular 7B", "LoRA 0.5B", "LoRA 3B (2 seeds)",
-                "non-LLM: tabular+text, boosted trees"]
+PLOT_METHODS = ["tabular, logistic", "zero-shot 1.5B", "zero-shot 7B", "zero-shot 14B", "embedding 7B",
+                "embedding + tabular 7B", "LoRA 0.5B", "LoRA 3B", "non-LLM: tabular+text, boosted trees"]
 FIG_NAME = "frontier_combined.png"
 # The cache tag hashes the effective batch (16 on every GPU), not the per-device batch.
 FT_TAG = hashlib.sha1(json.dumps([FT_EPOCHS, FT_LR, 16, FT_WARMUP, LORA_R, LORA_ALPHA,
                                   LORA_DROPOUT, LABEL, SMOKE]).encode()).hexdigest()[:8]
+print("from the cache: zero-shot", ZS_MODELS, "| embeddings", EMB_MODELS)
 '''
 
 LORA3B = '''
@@ -53,7 +59,7 @@ for seed in FT_SEEDS:
     else:
         print(f"LoRA 3B seed {seed}: not all folds cached, left out")
 if seeds:
-    name = f"LoRA 3B ({len(seeds)} seeds)"
+    name = "LoRA 3B" if len(seeds) == len(FT_SEEDS) else f"LoRA 3B ({len(seeds)} seeds)"
     SEED_SCORES[name] = seeds
     SCORES[name] = np.mean([pd.Series(p).rank().to_numpy() for p in seeds], axis=0)
     FAMILY[name] = ("LoRA", "3B")

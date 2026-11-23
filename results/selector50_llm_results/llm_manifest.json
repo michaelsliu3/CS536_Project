@@ -1,5 +1,5 @@
 {
- "written_at": "2026-11-23T14:48:55+0000",
+ "written_at": "2026-11-23T16:04:55+0000",
  "inputs": {
   "outcomes": "/content/drive/MyDrive/Colab Notebooks/LH/ML2/aacr_hunk_50%_selector_files/hunk_outcomes.json",
   "contexts": "/content/drive/MyDrive/Colab Notebooks/LH/ML2/aacr_hunk_50%_selector_files/context_levels_slim.jsonl",
@@ -38,15 +38,19 @@
  "n_random": 1000,
  "n_boot": 2000,
  "zs_models": [
-  "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+  "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "Qwen/Qwen2.5-Coder-14B-Instruct"
  ],
  "emb_models": [
   "Qwen/Qwen2.5-Coder-0.5B-Instruct",
   "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-  "Qwen/Qwen2.5-Coder-3B-Instruct"
+  "Qwen/Qwen2.5-Coder-3B-Instruct",
+  "Qwen/Qwen2.5-Coder-7B-Instruct"
  ],
  "ft_models": [
-  "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+  "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+  "Qwen/Qwen2.5-Coder-3B-Instruct"
  ],
  "max_len": 2048,
  "diff_share": 0.6,
@@ -60,8 +64,8 @@
   ],
   "epochs": 3,
   "lr": 0.0002,
-  "batch": 1,
-  "grad_acc": 16,
+  "batch": 4,
+  "grad_acc": 4,
   "lora": [
    16,
    32,
@@ -72,11 +76,15 @@
  },
  "smoke": false,
  "seconds": {
-  "zero-shot 1.5B": 5.664686679840088,
-  "embedding 0.5B": 12.87321424484253,
-  "embedding 1.5B": 6.616064786911011,
-  "embedding 3B": 11.64001727104187,
-  "LoRA 0.5B": 6.920028209686279
+  "zero-shot 1.5B": 5.367894411087036,
+  "zero-shot 7B": 4.401746988296509,
+  "zero-shot 14B": 212.48015236854553,
+  "embedding 0.5B": 9.827404260635376,
+  "embedding 1.5B": 6.4076621532440186,
+  "embedding 3B": 11.556803464889526,
+  "embedding 7B": 8.543964385986328,
+  "LoRA 0.5B": 9.226621866226196,
+  "LoRA 3B": 459.72595596313477
  },
  "versions": {
   "python": "3.13.16",
@@ -85,7 +93,7 @@
   "sklearn": "1.6.1",
   "torch": "2.14.1+cu130",
   "transformers": "5.22.1",
-  "gpu": "Tesla T4",
+  "gpu": "NVIDIA A100-SXM4-80GB",
   "dtype": "torch.bfloat16"
  },
  "note": "AACR-Bench 50% (93 PRs, 928 hunks, four levels). One reviewer run. No locked test set."

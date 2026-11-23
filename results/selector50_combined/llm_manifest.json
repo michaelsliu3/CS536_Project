@@ -1,5 +1,5 @@
 {
- "written_at": "2026-11-23T10:30:49-0500",
+ "written_at": "2026-11-23T11:17:14-0500",
  "inputs": {
   "outcomes": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/hunk_outcomes.json",
   "contexts": "/Users/penglihua/Desktop/GitHub/CS536_Project/data/aacr_hunk_50%_selector_files/context_levels_slim.jsonl",
@@ -39,7 +39,8 @@
  "n_boot": 2000,
  "zs_models": [
   "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-  "Qwen/Qwen2.5-Coder-7B-Instruct"
+  "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "Qwen/Qwen2.5-Coder-14B-Instruct"
  ],
  "emb_models": [
   "Qwen/Qwen2.5-Coder-0.5B-Instruct",
@@ -74,13 +75,14 @@
  },
  "smoke": false,
  "seconds": {
-  "zero-shot 1.5B": 1.2879159450531006,
-  "zero-shot 7B": 1.3524999618530273,
-  "embedding 0.5B": 1.3936939239501953,
-  "embedding 1.5B": 0.6036350727081299,
-  "embedding 3B": 1.3990111351013184,
-  "embedding 7B": 0.5713398456573486,
-  "LoRA 0.5B": 0.05785703659057617
+  "zero-shot 1.5B": 1.298954963684082,
+  "zero-shot 7B": 1.4444739818572998,
+  "zero-shot 14B": 1.1920690536499023,
+  "embedding 0.5B": 1.3577861785888672,
+  "embedding 1.5B": 0.46488118171691895,
+  "embedding 3B": 1.3764870166778564,
+  "embedding 7B": 0.5850188732147217,
+  "LoRA 0.5B": 0.060098886489868164
  },
  "versions": {
   "python": "3.11.4",
