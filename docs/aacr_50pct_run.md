@@ -2,6 +2,8 @@
 
 **Status: run, judged and scored on November 21, 2026.** The four kept context levels were reviewed on half of AACR-Bench (93 pull requests, 684 reference comments). Context adds 2 to 3 points of recall over no context, which is at the edge of what 93 pull requests can tell from nothing, and the three wider levels are level with each other. The cheapest of them, the enclosing function, costs 1.3 times no context. A selector that must say before the review which hunks need context ranks them at 0.55 to 0.57, where 0.50 is chance, and that does not improve with more training data. The ContextCRBench pilot, now reviewed at all four levels, yields 0.53 such hunks per pull request against 2.04 on AACR.
 
+**Update, November 27, 2026:** the other 92 buildable pull requests have since been run ([aacr_confirmation_run.md](aacr_confirmation_run.md)). On all 185 the gain from context reported below does not hold: no level covers more reference comments than no context, by recall or by severity score. The numbers below describe the first 93 only.
+
 This run follows the 28-pull-request run of [per_hunk_review_test.md](per_hunk_review_test.md) (Section 19) and the selector runs on those 28 ([selector_first_run.md](selector_first_run.md), [selector_llm_first_run.md](selector_llm_first_run.md), [selector_llm_a100_run.md](selector_llm_a100_run.md)). The target it serves is in [project_target.md](project_target.md).
 
 ## 1. What was run
