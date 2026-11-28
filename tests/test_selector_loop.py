@@ -161,5 +161,62 @@ class Loop(Fixture):
         self.assertLessEqual(cost["random_covered_mean"], 3.0)
 
 
+class GivenGate(Fixture):
+    def test_a_file_of_scores_stands_in_for_the_trained_gate(self):
+        path = Path(self.folder.name) / "gate.csv"
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["hunk", "gate|H01_min", "gate|H02_function", "gate|H03_file"])
+            writer.writerows([[hunk, 2.0 - i, -1.0, 0.5 * i] for i, hunk in enumerate(self.data["hunks"])])
+        gate = loop.read_gate(path, self.data)
+        self.assertEqual([g.tolist() for g in gate], [[2.0, 1.0, 0.0, -1.0], [-1.0] * 4, [0.0, 0.5, 1.0, 1.5]])
+        report = loop.build_report(self.data, [0.25], draws=20, gate=gate, gate_name="a model's answer")
+        self.assertEqual(report["gate"], "a model's answer")
+        self.assertEqual(report["gates"][0]["auc"][0], 0.5)                  # hunks 0 and 3 gain; the scores rank them first and last
+        self.assertEqual(report["gates"][0]["share_above_zero"], 0.5)
+        self.assertNotIn("auc_facts_only", report["gates"][0])
+        looped = next(row for row in report["rows"] if row["price"] is not None)
+        self.assertEqual((looped["hunks_with_more"], looped["depths"], looped["covered"]), (1, [3, 1, 0, 0], 3))   # only the top hunk goes up
+
+    def test_a_given_gate_is_set_beside_the_trained_one(self):
+        gate = [np.array([2.0, 1.0, 0.0, -1.0]), np.full(4, -1.0), np.array([0.0, 0.5, 1.0, 1.5])]
+        first = loop.build_report(self.data, [0.25], draws=20, gate=gate)["gates"][0]
+        trained = loop.auc(loop.adds_catch(self.data, 0), loop.gate_scores(self.data, 0))
+        self.assertEqual(first["auc_trained_gate"], trained)
+        self.assertEqual(len(first["auc_minus_trained_gate"]), 3)
+        self.assertAlmostEqual(first["auc_minus_trained_gate"][0], 0.5 - trained)
+        self.assertEqual((first["above_zero_where_it_adds"], first["above_zero_elsewhere"]), (0.5, 0.5))   # hunks 0 and 3 gain
+
+
+class Report(Fixture):
+    def test_the_function_level_for_every_hunk_is_a_reference_row(self):
+        report = loop.build_report(self.data, [0.25], draws=20)
+        row = next(r for r in report["rows"] if r["start"] == "function")
+        ones = np.ones(4, dtype=int)
+        self.assertEqual((row["starts"], row["extra_requests"], row["hunks_with_more"]), ([0, 4, 0, 0], 0, 0))
+        self.assertEqual(row["covered"], loop.evaluate(self.data, ones, ones)["covered"])
+
+    def test_the_start_selectors_own_score_is_ranked_too(self):
+        selector = np.array([3.0, 0.0, 1.0, 2.0])                            # ranks the two hunks that gain, 0 and 3, on top
+        report = loop.build_report(self.data, [0.25], selector, "a selector", draws=20)
+        self.assertEqual(report["gates"][0]["auc_start_selector"], 1.0)
+        self.assertNotIn("auc_start_selector", loop.build_report(self.data, [0.25], draws=20)["gates"][0])
+
+    def test_the_figure_is_drawn_with_and_without_a_second_gate(self):
+        report = loop.build_report(self.data, [0.25, 0.5], np.array([3.0, 0.0, 1.0, 2.0]), "a selector", draws=20)
+        gate = [np.array([2.0, 1.0, 0.0, -1.0]), np.full(4, -1.0), np.array([0.0, 0.5, 1.0, 1.5])]
+        other = loop.build_report(self.data, [0.25, 0.5], draws=20, gate=gate, gate_name="a model")
+        for name, second in (("one.png", None), ("two.png", other)):
+            path = Path(self.folder.name) / "figures" / name
+            loop.figure(report, path, second)
+            self.assertGreater(path.stat().st_size, 10_000)
+
+    def test_a_gate_file_must_cover_every_hunk_and_level(self):
+        path = Path(self.folder.name) / "gate.csv"
+        path.write_text("hunk,gate|H01_min\n" + "\n".join(f"{hunk},1" for hunk in self.data["hunks"]) + "\n", encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            loop.read_gate(path, self.data)
+
+
 if __name__ == "__main__":
     unittest.main()
