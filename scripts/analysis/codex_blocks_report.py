@@ -5,6 +5,7 @@ all hunks; the block in progress is left out. Calls no model.
 
     .venv/bin/python scripts/analysis/codex_blocks_report.py
     .venv/bin/python scripts/analysis/codex_blocks_report.py --blocks 2      # the first two blocks only
+    .venv/bin/python scripts/analysis/codex_blocks_report.py --breakdown     # and where Codex covers more or fewer
 
 It reads the saved order and the sessions under ROOT/harness/, the scored run folder
 (<run>_codex<suffix>/hunk_table.csv, written by `record_codex.py score`, which holds Codex and the
@@ -13,6 +14,11 @@ levels on the same hunks) and the levels' saved reviews for their tokens.
 Comments covered are counted per hunk (a hunk's review can cover the reference comments of its
 file). A Codex session that did not finish with a review counts as covering nothing. Intervals are
 the middle 95% of 10,000 bootstrap draws of repositories (seed 536).
+
+--breakdown adds where Codex covers more and where fewer: the distinct reference comments that the
+sampled hunks' reviews cover, by the benchmark's context label, by who wrote the comment and by
+severity, and the per-hunk counts by the hunk's size. The labels and sizes come from the selectors'
+input file (data/aacr_hunk_selector_files/hunk_outcomes.json).
 """
 from __future__ import annotations
 
@@ -32,6 +38,8 @@ from src.review_outcomes.profiles import read_notebook_profile  # noqa: E402
 CODEX = "C01_codex_hunk"
 # Dollars per million tokens, the price list of scripts/harness/record_codex.py.
 PRICES = {"input": 2.00, "cached_input": 0.10, "cache_write": 2.50, "output": 10.00}
+OUTCOMES = PROJECT_ROOT / "data/aacr_hunk_selector_files/hunk_outcomes.json"
+TIERS = {"blocking": "blocking", "should_fix": "should fix", "nit": "nit"}
 
 
 def read_csv(path: Path) -> list[dict]:
@@ -80,6 +88,89 @@ def bootstrap(hunks: list[str], values: dict[str, float], base: dict[str, float]
     else:
         drawn, point = top[picks].sum(1), top.sum()
     return float(point), float(np.percentile(drawn, 2.5)), float(np.percentile(drawn, 97.5))
+
+
+def grouped_difference(group: list[str], unit: list[str], first: list[float], second: list[float], draws: int = 10000,
+                       seed: int = 536) -> dict[str, dict]:
+    """Per group: its items, the sums of `first` and `second`, and first minus second with the
+    middle 95% of bootstrap draws of the units (repositories)."""
+    import numpy as np
+    names = sorted(set(unit))
+    index = {name: i for i, name in enumerate(names)}
+    picks = np.random.default_rng(seed).integers(0, len(names), size=(draws, len(names)))
+    out = {}
+    for key in sorted(set(group)):
+        per_unit, a, b, items = np.zeros(len(names)), 0.0, 0.0, 0
+        for g, u, x, y in zip(group, unit, first, second):
+            if g == key:
+                per_unit[index[u]] += x - y
+                a, b, items = a + x, b + y, items + 1
+        drawn = per_unit[picks].sum(1)
+        out[key] = {"items": items, "first": a, "second": b,
+                    "difference": [a - b, float(np.percentile(drawn, 2.5)), float(np.percentile(drawn, 97.5))]}
+    return out
+
+
+def size_group(lines: int, edges: tuple[int, int]) -> str:
+    """The hunk's size group by its changed lines; `edges` are the last sizes of the first two groups."""
+    low, middle = edges
+    if lines <= low:
+        return f"1. up to {low} changed lines"
+    return f"2. {low + 1} to {middle} changed lines" if lines <= middle else f"3. over {middle} changed lines"
+
+
+def build_breakdown(profile: str, thinking: str, seed: int, blocks: int | None = None, outcomes: Path = OUTCOMES) -> dict:
+    """Where Codex covers more and where fewer than each level, on the finished blocks."""
+    import numpy as np
+    config = read_notebook_profile(profile)
+    root = (PROJECT_ROOT / config["contexts"]).parent
+    suffix = "" if thinking == "on" else "_nothink"
+    run = PROJECT_ROOT / config["out_root"] / config["run_name"]
+    scored = PROJECT_ROOT / config["out_root"] / f"{config['run_name']}_codex{suffix}"
+    levels = list(config["levels"])
+    order = json.loads((root / "harness" / f"codex_order_seed{seed}.json").read_text(encoding="utf-8"))
+    hunks, taken = finished_hunks(order, root / "harness" / f"codex{suffix}", blocks)
+    saved = json.loads(Path(outcomes).read_text(encoding="utf-8"))
+    lines = {row["hunk"]: row["added"] + row["removed"] for row in saved["rows"]}
+
+    def covered(hunk: str, level: str) -> list[int]:
+        path = (scored if level == CODEX else run) / "judgments" / hunk / f"{level}.json"
+        return json.loads(path.read_text(encoding="utf-8"))["covered_indices"] if path.is_file() else []   # no review: nothing covered
+
+    cells = {level: {hunk: covered(hunk, level) for hunk in hunks} for level in [CODEX, *levels]}
+    found = {level: {(hunk.rsplit("__h", 1)[0], index) for hunk, items in cells[level].items() for index in items} for level in cells}
+    references = sorted(set().union(*found.values()))
+    labels = [saved["refs"][pr][str(index)] for pr, index in references]
+    groupings = {"context label": [label.get("context") or "no label" for label in labels],
+                 "author": ["written by a person" if label.get("human") else "generated by an AI tool" for label in labels],
+                 "severity": [TIERS.get(label.get("tier"), "no label") for label in labels]}
+    repos = [pr.rsplit("__", 1)[0] for pr, _ in references]
+    report = {"blocks": taken, "hunks": len(hunks), "references_covered_by_any": len(references), "references": {}, "hunk_size": {}}
+    for name, group in groupings.items():
+        report["references"][name] = {level: grouped_difference(group, repos, [float(r in found[CODEX]) for r in references],
+                                                                 [float(r in found[level]) for r in references]) for level in levels}
+    sizes = [lines[hunk] for hunk in hunks]
+    edges = tuple(int(v) for v in np.quantile(sizes, [1 / 3, 2 / 3]))
+    report["size_edges"] = list(edges)
+    for level in levels:
+        report["hunk_size"][level] = grouped_difference([size_group(lines[h], edges) for h in hunks], [repository(h) for h in hunks],
+                                                        [float(len(cells[CODEX][h])) for h in hunks], [float(len(cells[level][h])) for h in hunks])
+    return report
+
+
+def print_breakdown(report: dict) -> None:
+    levels = list(next(iter(report["references"].values())))
+    print(f"\nWhere Codex covers more or fewer ({report['hunks']} hunks; {report['references_covered_by_any']} distinct reference comments "
+          f"covered by some reviewer). Codex, then each level's count and Codex minus it [95% interval]")
+    tables = {**{f"reference comments by {name}": table for name, table in report["references"].items()},
+              "per-hunk counts by the hunk's size": report["hunk_size"]}
+    for title, table in tables.items():
+        print(f"  {title}")
+        for key in table[levels[0]]:
+            first = table[levels[0]][key]
+            cells = "; ".join(f"{level} {table[level][key]['second']:.0f} ({table[level][key]['difference'][0]:+.0f} "
+                              f"[{table[level][key]['difference'][1]:+.0f}, {table[level][key]['difference'][2]:+.0f}])" for level in levels)
+            print(f"    {key:28s} items {first['items']:4d}  Codex {first['first']:4.0f} | {cells}")
 
 
 def build_report(profile: str, thinking: str, seed: int, blocks: int | None = None) -> dict:
@@ -192,9 +283,13 @@ def main(argv=None) -> int:
     parser.add_argument("--seed", type=int, default=536, help="the seed of the saved order")
     parser.add_argument("--blocks", type=int, help="take only this many finished blocks")
     parser.add_argument("--json", type=Path, help="also write the report to this file")
+    parser.add_argument("--breakdown", action="store_true", help="also show where Codex covers more and where fewer")
     args = parser.parse_args(argv)
     report = build_report(args.profile, args.thinking, args.seed, args.blocks)
     print_report(report)
+    if args.breakdown and report["hunks"]:
+        report["breakdown"] = build_breakdown(args.profile, args.thinking, args.seed, args.blocks)
+        print_breakdown(report["breakdown"])
     if args.json:
         args.json.write_text(json.dumps(report, indent=1), encoding="utf-8")
     return 0
