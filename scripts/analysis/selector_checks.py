@@ -50,13 +50,18 @@ def _hop(stats: dict, name: str) -> int:
 
 
 def build_rows(contexts: Path, run: Path, levels: list[str]) -> dict:
-    """{"rows": one per reviewed hunk, "refs": the references of each PR, "levels": levels}."""
+    """{"rows": one per reviewed hunk, "refs": the references of each PR, "levels": levels,
+    "left_out": hunks with a level that has no review}. A hunk that could not be reviewed at some
+    level (for example too long to send) has no judgment there; it is left out of the rows."""
     with (run / "hunk_table.csv").open(newline="", encoding="utf-8") as handle:
         hunk_table = {(r["entry"], r["level"]): r for r in csv.DictReader(handle)}
     reviewed = {entry for entry, _ in hunk_table}
     missing = sorted(entry for entry in reviewed if any((entry, level) not in hunk_table for level in levels))
     if missing:
         raise SystemExit(f"{len(missing)} hunks lack one of {levels}, e.g. {missing[:3]}")
+    left_out = sorted(entry for entry in reviewed
+                      if any((hunk_table[(entry, level)].get("review_status") or "ok") != "ok" for level in levels))
+    reviewed -= set(left_out)
     references: dict[str, dict] = {}
     with (run / "coverage.csv").open(newline="", encoding="utf-8") as handle:
         for c in csv.DictReader(handle):
@@ -90,7 +95,7 @@ def build_rows(contexts: Path, run: Path, levels: list[str]) -> dict:
                 rows.append(row)
     if len(rows) != len(reviewed):
         raise SystemExit(f"{len(reviewed)} reviewed hunks in the table but {len(rows)} found in {contexts.name}")
-    return {"rows": rows, "refs": references, "levels": levels}
+    return {"rows": rows, "refs": references, "levels": levels, "left_out": left_out}
 
 
 def covered_counts(rows: list[dict], levels: list[str]) -> dict[str, list[int]]:
@@ -141,6 +146,8 @@ def cmd_rows(args, config, paths) -> int:
     paths["rows"].write_text(json.dumps(table), encoding="utf-8")
     prs = {r["pr"] for r in rows}
     print(f"{len(rows)} hunks, {len(prs)} PRs, {sum(len(v) for v in table['refs'].values())} references -> {paths['rows']}")
+    if table["left_out"]:
+        print(f"  left out, a level has no review: {table['left_out']}")
     with (paths["run"] / "coverage.csv").open(newline="", encoding="utf-8") as handle:
         in_table = Counter(c["level"] for c in csv.DictReader(handle) if c["covered"] in ("True", "1"))
     for level in levels:

@@ -107,6 +107,30 @@ class RowTests(unittest.TestCase):
         self.assertEqual(first["levels"]["H03_file"], {"tokens": 300, "findings": 1, "covered": [0], "matched": 2, "out": 9})
         self.assertTrue(table["refs"]["o__r__1"]["0"]["human"])
         self.assertEqual(checks.labels(table["rows"], LEVELS)["wider"], [1, 1])
+        self.assertEqual(table["left_out"], [])
+
+    def test_a_hunk_without_a_review_at_some_level_is_left_out(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            hunks = [{"id": f"o__r__1__h000{i}", "file": "a.go", "new_start": 5 * i, "old_start": 5 * i, "stats": {}} for i in (1, 2)]
+            contexts = Path(tmp) / "context_levels.jsonl"
+            contexts.write_text(json.dumps({"id": "o__r__1", "language": "Go", "hunks": hunks}) + "\n", encoding="utf-8")
+            run.mkdir()
+            with (run / "hunk_table.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, ["entry", "level", "input_tokens", "findings", "output_tokens", "review_status"])
+                writer.writeheader()
+                for hunk, status in ((hunks[0]["id"], "ok"), (hunks[1]["id"], "too_long")):
+                    for level in LEVELS:
+                        writer.writerow({"entry": hunk, "level": level, "input_tokens": 100, "findings": 0, "output_tokens": "",
+                                         "review_status": status})
+                        if status == "ok":
+                            folder = run / "judgments" / hunk
+                            folder.mkdir(parents=True, exist_ok=True)
+                            (folder / f"{level}.json").write_text(json.dumps({"covered_indices": [], "matched_generated": 0}))
+            (run / "coverage.csv").write_text("entry,level,reference,covered,is_ai_comment,context,category,path\n", encoding="utf-8")
+            table = checks.build_rows(contexts, run, LEVELS)
+        self.assertEqual([r["hunk"] for r in table["rows"]], [hunks[0]["id"]])
+        self.assertEqual(table["left_out"], [hunks[1]["id"]])
 
 
 class ReportTests(unittest.TestCase):

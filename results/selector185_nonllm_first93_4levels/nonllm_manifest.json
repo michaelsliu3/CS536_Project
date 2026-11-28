@@ -1,0 +1,53 @@
+{
+ "written_at": "2026-11-27T13:20:34-0500",
+ "inputs": {
+  "outcomes": "/Users/michael.liu/Documents/School/CS536/CS536_Project/data/aacr_hunk_selector_files_first93/hunk_outcomes.json",
+  "contexts": "/Users/michael.liu/Documents/School/CS536/CS536_Project/data/aacr_hunk_selector_files_first93/context_levels_slim.jsonl",
+  "coverage": "/Users/michael.liu/Documents/School/CS536/CS536_Project/data/aacr_hunk_selector_files_first93/coverage.csv"
+ },
+ "sha256": {
+  "outcomes": "f4009442a5198b8c1f62b6307dc31618aff18906baaf2afaa8ebf05d1a63f07c",
+  "contexts": "c73886ae4e45eb45bf4c638f22cda567e72afd601d16ce501c0c86c4ac68006f",
+  "coverage": "1591cab74c31100468b5e78a1fafc3c8994ef1acb502d8a2bdcd9aad1933c689"
+ },
+ "hunks": 928,
+ "references": 684,
+ "label": "wider",
+ "positives": 190,
+ "cv": "group5",
+ "folds": 5,
+ "fold_hash": "1778fb4a7e",
+ "base_level": "H01_min",
+ "upgrade_levels": [
+  "H02_function",
+  "H03_file",
+  "H04_callees1"
+ ],
+ "main_upgrade": "H02_function",
+ "spend": [
+  0.1,
+  0.2,
+  0.3,
+  0.4,
+  0.5,
+  0.7,
+  1.0
+ ],
+ "target_spend": 0.3,
+ "target_weighting": "agreed",
+ "seeds": [
+  0,
+  1,
+  2
+ ],
+ "n_random": 1000,
+ "n_boot": 2000,
+ "tabular_features": 70,
+ "versions": {
+  "python": "3.11.15",
+  "numpy": "2.4.6",
+  "pandas": "3.1.0",
+  "sklearn": "1.9.1"
+ },
+ "note": "AACR-Bench, 93 PRs, 928 hunks, four levels; tabular facts from the four reviewed levels only. One reviewer run. No locked test set."
+}

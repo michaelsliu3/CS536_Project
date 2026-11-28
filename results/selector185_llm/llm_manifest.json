@@ -1,0 +1,86 @@
+{
+ "written_at": "2026-11-28T02:46:30-0500",
+ "inputs": {
+  "outcomes": "/Users/michael.liu/Documents/School/CS536/CS536_Project/data/aacr_hunk_selector_files/hunk_outcomes.json",
+  "contexts": "/Users/michael.liu/Documents/School/CS536/CS536_Project/data/aacr_hunk_selector_files/context_levels_slim.jsonl",
+  "coverage": "/Users/michael.liu/Documents/School/CS536/CS536_Project/data/aacr_hunk_selector_files/coverage.csv"
+ },
+ "sha256": {
+  "outcomes": "ea7e2f3c37fa3064841ac6968882d29e850acb969ae0d59191ecb648acdd9e07",
+  "contexts": "471d2a0cdb8116bc84d6c2c0621741a351c34d8ee0b95d6865a72d754c08d953",
+  "coverage": "ccb9f3d54a9e8fe2b55e70ef7593c044046b3ea174bd500490fbff42ad976127"
+ },
+ "hunks": 1811,
+ "references": 1419,
+ "label": "wider",
+ "positives": 337,
+ "cv": "group5",
+ "folds": 5,
+ "fold_hash": "d9125e9ed7",
+ "base_level": "H01_min",
+ "upgrade_levels": [
+  "H02_function",
+  "H03_file",
+  "H04_callees1"
+ ],
+ "main_upgrade": "H02_function",
+ "spend": [
+  0.1,
+  0.2,
+  0.3,
+  0.4,
+  0.5,
+  0.7,
+  1.0
+ ],
+ "target_spend": 0.3,
+ "target_weighting": "agreed",
+ "n_random": 1000,
+ "n_boot": 2000,
+ "zs_models": [
+  "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "Qwen/Qwen2.5-Coder-3B-Instruct",
+  "Qwen/Qwen2.5-Coder-7B-Instruct"
+ ],
+ "emb_models": [],
+ "ft_models": [],
+ "max_len": 2048,
+ "diff_share": 0.6,
+ "use_meta": true,
+ "emb_pca": 32,
+ "finetune": {
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "epochs": 3,
+  "lr": 0.0002,
+  "batch": 1,
+  "grad_acc": 16,
+  "lora": [
+   16,
+   32,
+   0.05
+  ],
+  "tag": "06772646",
+  "grad_ckpt": true
+ },
+ "smoke": false,
+ "seconds": {
+  "zero-shot 1.5B": 509.25400710105896,
+  "zero-shot 3B": 1105.8132519721985,
+  "zero-shot 7B": 2440.2254569530487
+ },
+ "versions": {
+  "python": "3.11.15",
+  "numpy": "2.4.6",
+  "pandas": "3.1.0",
+  "sklearn": "1.9.1",
+  "torch": "2.15.0",
+  "transformers": "5.22.1",
+  "gpu": "mps",
+  "dtype": "torch.float16"
+ },
+ "note": "AACR-Bench, 185 PRs, 1811 hunks, four levels; tabular facts from the four reviewed levels only. One reviewer run. No locked test set."
+}
