@@ -1,10 +1,10 @@
 # A priced feedback loop on top of the selector: all 185 AACR pull requests (November 28, 2026)
 
-**Status: simulated on November 28, 2026 from saved reviews; no new review was run.** On all 185 buildable AACR-Bench pull requests, a loop that reviews a few hunks a second time with more context covers more reference comments than one review per hunk: 760 to 820 of 1,419 against 742, at 1.08 to 1.61 times the cost. Each extra comment costs 3.4 to 5.8 times what a comment costs in the first pass. While at most a tenth of the hunks are reviewed again, the loop's gate does better than the same dollars spent on second reviews of random hunks, but only 2 to 4 comments better than spending them on the largest hunks. A gate that knew which hunks gain would cover 908 at 1.23 times the cost, so the loop is limited by its gate, which ranks those hunks at AUC 0.64. Letting the selector choose the starting level does about the same at equal cost. A 7B code model asked directly, in place of the trained gate, is at chance on the first step (AUC 0.52); its other two steps were not scored when this was written.
+**Status: simulated on November 28, 2026 from saved reviews; no new review was run.** On all 185 buildable AACR-Bench pull requests, a loop that reviews a few hunks a second time with more context covers more reference comments than one review per hunk: 760 to 820 of 1,419 against 742, at 1.08 to 1.61 times the cost. Each extra comment costs 3.4 to 5.8 times what a comment costs in the first pass. While at most a tenth of the hunks are reviewed again, the loop's gate does better than the same dollars spent on second reviews of random hunks, but only 2 to 4 comments better than spending them on the largest hunks. A gate that knew which hunks gain would cover 908 at 1.23 times the cost, so the loop is limited by its gate, which ranks those hunks at AUC 0.64. Letting the selector choose the starting level does about the same at equal cost. A 7B code model asked directly, in place of the trained gate, does not work: it ranks the hunks at AUC 0.52, 0.48 and 0.60 on the three steps, and its loop covers no more than the same dollars spent on random hunks.
 
 This is the feedback loop the project had kept as later work: the one-shot selector stays, and a hunk can still get more context when one review is not enough, at a price on each extra request. It follows the selector results on all 185 pull requests ([selector185_must_fix.md](selector185_must_fix.md), Section 1) and the level results ([aacr_confirmation_run.md](aacr_confirmation_run.md)). Two earlier tests on 28 pull requests asked whether a first review tells which hunks need the file ([per_hunk_review_test.md](per_hunk_review_test.md), Sections 20.4 and 20.5). What a selector has to beat is in [project_target.md](project_target.md), Section 3.
 
-![Comments covered against cost for the loop from both starts and for the same dollars spent without a gate, and how well the gate ranks the hunks at each step](figures/selector_loop_185/loop.png)
+![Comments covered against cost for the loop from both starts, for the loop with the 7B model as the gate and for the same dollars spent without a gate, and how well each gate ranks the hunks at each step](figures/selector_loop_185/loop.png)
 
 ## 1. What was simulated
 
@@ -73,7 +73,7 @@ The selector's choice is made once, before any review. The same gates and prices
 - **The loop adds as much on top of the selector's start:** 14 to 62 comments over the start alone.
 - **The gates were not retrained for this start.** They were trained for hunks that start with no context.
 
-## 5. A code model as the gate (first step only so far)
+## 5. A code model as the gate
 
 The trained gate can be replaced by a model that is asked the question directly. The model is Qwen2.5-Coder-7B-Instruct, untrained, the one the selector uses. For each hunk it reads the question, the hunk as the reviewer saw it with no context (cut to 1,400 tokens, the diff first) and the findings of the review just made (numbered, cut to 500 tokens). Its score is log P(Yes) − log P(No) for the next word, and the price is compared with that score. The question was written once, before any score was looked at:
 
@@ -85,20 +85,31 @@ only when it is likely to pay off. Would the second review likely find a real pr
 that the first review missed? Answer with Yes or No only.
 ```
 
-**Status: only the first of the three steps is scored.** The steps after the function and file reviews were still running when this was written, so the loop with this gate is not reported yet.
+**How well it ranks the hunks that gain** (AUC, with the trained gate of Section 2 beside it):
 
-On the first step, the hunks where the function review adds a catch (215 of 1,811):
+| Step | 7B model asked after the review [95% interval] | Trained gate | Difference [95% interval] | It answers Yes for | Yes where the next level adds a catch, elsewhere |
+|---|---|---|---|---|---|
+| After no context: function next | 0.518 [0.477, 0.555] | 0.642 | −0.124 [−0.172, −0.074] | 62.2% of hunks | 65.1%, 61.8% |
+| After function: file next | 0.483 [0.423, 0.541] | 0.532 | −0.049 [−0.148, +0.026] | 50.6% | 46.2%, 51.0% |
+| After file: callees next | 0.597 [0.545, 0.648] | 0.719 | −0.122 [−0.220, −0.042] | 54.2% | 67.6%, 53.7% |
 
-| Score | AUC [95% interval] |
-|---|---|
-| 7B model asked after the no-context review | 0.518 [0.477, 0.555] |
-| Trained gate | 0.642 [0.603, 0.675] |
-| The same 7B model asked before any review (the selector's question) | 0.604 |
-| Changed lines alone | 0.581 |
+- **It is at chance on the first two steps,** where almost all second reviews happen.
+- **Its Yes barely depends on whether a second review pays off:** 65% against 62% on the first step.
+- **It ranks worse than its own answer before the review.** The selector's question, asked with no review to read, ranks the first step's hunks at 0.604 (Section 2).
+- **The last step is above chance** (0.597), still 0.12 below the trained gate, on 68 hunks.
 
-- **Asked this way, the 7B model is at chance.** It is 0.124 below the trained gate [−0.172, −0.074].
-- **It answers Yes for most hunks:** 62.2% of all, 65.1% where the function review adds a catch and 61.8% elsewhere.
-- **It ranks worse than its own answer before the review.** The selector's question, asked with no review to read, ranks the same hunks at 0.604.
+**The loop with this gate,** from no context, at the prices that send the same shares of hunks back:
+
+| Price that sends back | Hunks reviewed again | Extra reviews | Comments covered | Cost, times one review per hunk | Same dollars on random hunks: average (95th percentile) | Random is as good in | Same dollars on the largest hunks |
+|---|---|---|---|---|---|---|---|
+| 2% | 37 | 49 | 746 | 1.04 | 747.0 (751) | 74% of draws | 749 |
+| 5% | 91 | 117 | 748 | 1.09 | 753.6 (760) | 98% | 758 |
+| 10% | 182 | 245 | 768 | 1.19 | 766.4 (775) | 39% | 776 |
+| 20% | 363 | 547 | 788 | 1.44 | 797.6 (808) | 95% | 812 |
+
+- **It does no better than second reviews of random hunks** at any price, and worse than the largest hunks first at every price.
+- **It costs less than the trained gate's loop at the same share** (1.19 against 1.30 at 10%, with more extra reviews), so the hunks it sends back are cheaper to review, and it covers fewer comments (768 against 793).
+- **From the selector's start it is the same:** 762, 765, 774 and 791 comments at 1.11, 1.16, 1.25 and 1.48 times the cost, with random hunks as good in 66 to 96% of draws.
 
 ## 6. What can and cannot be claimed
 
@@ -107,7 +118,7 @@ On the first step, the hunks where the function review adds a catch (215 of 1,81
 3. **Cannot be claimed:** that the gate uses what the first review says. The facts known before the review carry almost all of its ranking, and reviewing the largest hunks again does about as well.
 4. **Cannot be claimed:** that the gain comes from the added context. A second review at the same level was not run on these pull requests, and two runs of one level already differ (Section 7).
 5. **Cannot be claimed:** that the selector's start improves on starting with no context.
-6. **Cannot be claimed:** that a code model can stand in for the trained gate. The one question tried is at chance on the first step.
+6. **Cannot be claimed:** that a code model can stand in for the trained gate. The one question tried is at chance on the first two steps, and its loop does no better than random second reviews.
 
 ## 7. Limits
 
@@ -131,8 +142,10 @@ HF_HUB_OFFLINE=1 .venv/bin/python scripts/analysis/selector_gate_llm.py
                                                                    # the 7B gate's scores, results/selector185_llm/gate_llm_scores.csv
 .venv/bin/python scripts/analysis/selector_loop.py --gate-scores results/selector185_llm/gate_llm_scores.csv \
     --gate-name "7B model asked after the review"                  # Section 5
+.venv/bin/python scripts/analysis/selector_loop.py --compare results/selector185_llm/selector_loop_gate_llm_scores.json \
+    --compare-name "the 7B model"                                  # the figure with both gates
 ```
 
 - `selector_loop.py` calls no model. It prints every number of Sections 2 to 4, writes `results/selector185_llm/selector_loop.json` and draws the figure. With `--gate-scores` it prints the given gate's AUC beside the trained gate's and runs the loop with it.
-- `selector_gate_llm.py` runs the 7B model from the Hugging Face cache. The first step took 39 minutes on a laptop (Apple M4 Max, float16). It writes the scores file only when all three steps are done, and a stopped run continues from its cache.
+- `selector_gate_llm.py` runs the 7B model from the Hugging Face cache. The three steps took 39, 41 and 41 minutes on a laptop (Apple M4 Max, float16), with other jobs running beside it. It writes the scores file only when all three steps are done, and a stopped run continues from its cache.
 - Tests: `tests/test_selector_loop.py` and `tests/test_selector_gate_llm.py`.
