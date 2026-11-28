@@ -49,3 +49,5 @@ reports/
 
 # Model output caches of the selector notebooks (tens of MB of .npy; kept on Drive)
 results/*/cache/
+# The same for quick trial runs (selector_gate_llm.py --limit)
+results/*/cache_check/
