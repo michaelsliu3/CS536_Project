@@ -1,0 +1,551 @@
+{
+ "hunks": 1811,
+ "repositories": 50,
+ "references": 1419,
+ "blocking_references": 94,
+ "blocking_on_a_hunk": 93,
+ "hunks_with_a_comment": 850,
+ "must_fix_hunks": 85,
+ "serious_hunks": 356,
+ "hunks_where_context_gains_a_blocking_comment": 29,
+ "spend": 0.3,
+ "draws": 5000,
+ "names": {
+  "zero-shot 7B": "7B model, zero-shot",
+  "zero-shot 3B": "3B model, zero-shot",
+  "zero-shot 1.5B": "1.5B model, zero-shot",
+  "tabular, logistic": "hunk facts, logistic regression",
+  "non-LLM: tabular, random forest": "hunk facts, random forest"
+ },
+ "ranking": {
+  "zero-shot 7B": {
+   "must_fix": [
+    0.625260718424102,
+    0.5712498474787292,
+    0.6735148556159057
+   ],
+   "serious": [
+    0.6355814896328044,
+    0.5969014008201091,
+    0.6715447697960687
+   ],
+   "must_fix_among_commented": [
+    0.569673202614379,
+    0.509341788614976,
+    0.6240526001190545
+   ],
+   "must_fix_within_size_fifths": 0.5727556350124443
+  },
+  "zero-shot 3B": {
+   "must_fix": [
+    0.5707109263172244,
+    0.499238935165231,
+    0.6300792256975926
+   ],
+   "serious": [
+    0.5767799915054636,
+    0.5293231082422203,
+    0.6195010467351211
+   ],
+   "must_fix_among_commented": [
+    0.5231987697039601,
+    0.4513880618121087,
+    0.5860523994854782
+   ],
+   "must_fix_within_size_fifths": 0.5328636029025134
+  },
+  "zero-shot 1.5B": {
+   "must_fix": [
+    0.6086326767091541,
+    0.5335246605653264,
+    0.6727868029765576
+   ],
+   "serious": [
+    0.5732605506004093,
+    0.5130392324864824,
+    0.6178671570105374
+   ],
+   "must_fix_among_commented": [
+    0.5603152633602461,
+    0.49371571349346266,
+    0.6240548393991698
+   ],
+   "must_fix_within_size_fifths": 0.5848669681354506
+  },
+  "tabular, logistic": {
+   "must_fix": [
+    0.6241496830481903,
+    0.5317356510231719,
+    0.7050677363633022
+   ],
+   "serious": [
+    0.6817657052395846,
+    0.6188653091554942,
+    0.7317822161089396
+   ],
+   "must_fix_among_commented": [
+    0.5079738562091504,
+    0.4266124813025522,
+    0.5891438292917835
+   ],
+   "must_fix_within_size_fifths": 0.5656045150208574
+  },
+  "non-LLM: tabular, random forest": {
+   "must_fix": [
+    0.6761911253493286,
+    0.5876887990412306,
+    0.751784334347672
+   ],
+   "serious": [
+    0.7008050503880459,
+    0.660881809715226,
+    0.734668903412462
+   ],
+   "must_fix_among_commented": [
+    0.5594156093810073,
+    0.46348756105006106,
+    0.6470863434825747
+   ],
+   "must_fix_within_size_fifths": 0.6172748624110492
+  },
+  "changed lines": {
+   "must_fix": [
+    0.6884465953241088,
+    0.6122735230908457,
+    0.7593633013945301
+   ],
+   "serious": [
+    0.7103614039152091,
+    0.6744848380838208,
+    0.7409041943652213
+   ],
+   "must_fix_among_commented": [
+    0.5905113417916186,
+    0.5087605636966274,
+    0.6685527882474853
+   ],
+   "must_fix_within_size_fifths": 0.5631331720825884
+  }
+ },
+ "answers": {
+  "zero-shot 7B": {
+   "yes": {
+    "all hunks": [
+     1312,
+     1811
+    ],
+    "must-fix comment on the hunk": [
+     73,
+     85
+    ],
+    "must-fix or should-fix comment": [
+     303,
+     356
+    ],
+    "only milder comments": [
+     365,
+     494
+    ],
+    "no reference comment": [
+     644,
+     961
+    ]
+   },
+   "other_hunks": [
+    1239,
+    1726
+   ],
+   "must_fix_minus_other": [
+    0.1409788017176743,
+    0.06963785903211962,
+    0.20380336747719488
+   ]
+  },
+  "zero-shot 3B": {
+   "yes": {
+    "all hunks": [
+     1799,
+     1811
+    ],
+    "must-fix comment on the hunk": [
+     85,
+     85
+    ],
+    "must-fix or should-fix comment": [
+     355,
+     356
+    ],
+    "only milder comments": [
+     491,
+     494
+    ],
+    "no reference comment": [
+     953,
+     961
+    ]
+   },
+   "other_hunks": [
+    1714,
+    1726
+   ],
+   "must_fix_minus_other": [
+    0.006952491309385911,
+    0.003231614690376164,
+    0.011789340747432838
+   ]
+  },
+  "zero-shot 1.5B": {
+   "yes": {
+    "all hunks": [
+     1811,
+     1811
+    ],
+    "must-fix comment on the hunk": [
+     85,
+     85
+    ],
+    "must-fix or should-fix comment": [
+     356,
+     356
+    ],
+    "only milder comments": [
+     494,
+     494
+    ],
+    "no reference comment": [
+     961,
+     961
+    ]
+   },
+   "other_hunks": [
+    1726,
+    1726
+   ],
+   "must_fix_minus_other": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "budget": {
+  "H02_function": {
+   "no_context": 59,
+   "every_hunk": 60,
+   "every_hunk_gains": 9,
+   "every_hunk_loses": 8,
+   "only_the_must_fix_hunks": 60,
+   "random": {
+    "hunks_up": 0.30015240198785204,
+    "must_fix_up": 0.3013882352941176,
+    "must_fix_up_p95": 0.3770588235294112,
+    "covered": 59.416,
+    "covered_p95": 63.0
+   },
+   "selectors": {
+    "zero-shot 7B": {
+     "hunks_up": 0.27112092766427387,
+     "must_fix_up": [
+      35,
+      85
+     ],
+     "other_up": 0.2641946697566628,
+     "must_fix_minus_other": [
+      0.14757003612569014,
+      0.032921948196916836,
+      0.2655150025524123
+     ],
+     "covered": 60,
+     "random_at_least": 0.498
+    },
+    "zero-shot 3B": {
+     "hunks_up": 0.30480397570403095,
+     "must_fix_up": [
+      30,
+      85
+     ],
+     "other_up": 0.30243337195828507,
+     "must_fix_minus_other": [
+      0.05050780451230319,
+      -0.05363221081714586,
+      0.14931992884293432
+     ],
+     "covered": 57,
+     "random_at_least": 0.923
+    },
+    "zero-shot 1.5B": {
+     "hunks_up": 0.21811154058531199,
+     "must_fix_up": [
+      28,
+      85
+     ],
+     "other_up": 0.21263035921205098,
+     "must_fix_minus_other": [
+      0.11678140549383137,
+      -0.022949623149775267,
+      0.24642118399748095
+     ],
+     "covered": 55,
+     "random_at_least": 0.991
+    },
+    "tabular, logistic": {
+     "hunks_up": 0.2545554942020983,
+     "must_fix_up": [
+      36,
+      85
+     ],
+     "other_up": 0.246234067207416,
+     "must_fix_minus_other": [
+      0.17729534455728987,
+      0.06137055943264748,
+      0.290750251855128
+     ],
+     "covered": 59,
+     "random_at_least": 0.674
+    },
+    "non-LLM: tabular, random forest": {
+     "hunks_up": 0.22915516289342905,
+     "must_fix_up": [
+      36,
+      85
+     ],
+     "other_up": 0.21958285052143686,
+     "must_fix_minus_other": [
+      0.20394656124326901,
+      0.047587454114404903,
+      0.3563808682709894
+     ],
+     "covered": 59,
+     "random_at_least": 0.674
+    },
+    "cheapest first": {
+     "hunks_up": 0.7211485367200442,
+     "must_fix_up": [
+      50,
+      85
+     ],
+     "other_up": 0.727694090382387,
+     "must_fix_minus_other": [
+      -0.1394587962647399,
+      -0.24440790067296722,
+      -0.03694999549777392
+     ],
+     "covered": 60,
+     "random_at_least": 0.498
+    }
+   }
+  },
+  "H03_file": {
+   "no_context": 59,
+   "every_hunk": 66,
+   "every_hunk_gains": 17,
+   "every_hunk_loses": 10,
+   "only_the_must_fix_hunks": 62,
+   "random": {
+    "hunks_up": 0.2998277194919934,
+    "must_fix_up": 0.30178823529411763,
+    "must_fix_up_p95": 0.3764705882352941,
+    "covered": 61.202,
+    "covered_p95": 66.0
+   },
+   "selectors": {
+    "zero-shot 7B": {
+     "hunks_up": 0.2909994478188846,
+     "must_fix_up": [
+      37,
+      85
+     ],
+     "other_up": 0.28389339513325607,
+     "must_fix_minus_other": [
+      0.15140072251380277,
+      0.03828179208336105,
+      0.2675888536540032
+     ],
+     "covered": 61,
+     "random_at_least": 0.588
+    },
+    "zero-shot 3B": {
+     "hunks_up": 0.2987299834345665,
+     "must_fix_up": [
+      29,
+      85
+     ],
+     "other_up": 0.2966396292004635,
+     "must_fix_minus_other": [
+      0.04453684138777181,
+      -0.04936440937991879,
+      0.13309716838502178
+     ],
+     "covered": 58,
+     "random_at_least": 0.936
+    },
+    "zero-shot 1.5B": {
+     "hunks_up": 0.2523467697404749,
+     "must_fix_up": [
+      33,
+      85
+     ],
+     "other_up": 0.24565469293163383,
+     "must_fix_minus_other": [
+      0.14258060118601323,
+      -0.0023165964742704686,
+      0.2687063730608004
+     ],
+     "covered": 61,
+     "random_at_least": 0.588
+    },
+    "tabular, logistic": {
+     "hunks_up": 0.2860298177802319,
+     "must_fix_up": [
+      39,
+      85
+     ],
+     "other_up": 0.27752027809965235,
+     "must_fix_minus_other": [
+      0.18130325131211233,
+      0.052245945049009576,
+      0.3072643130172476
+     ],
+     "covered": 60,
+     "random_at_least": 0.742
+    },
+    "non-LLM: tabular, random forest": {
+     "hunks_up": 0.2766427388183324,
+     "must_fix_up": [
+      39,
+      85
+     ],
+     "other_up": 0.26767091541135574,
+     "must_fix_minus_other": [
+      0.19115261400040895,
+      0.02956309469323953,
+      0.3411855540010657
+     ],
+     "covered": 61,
+     "random_at_least": 0.588
+    },
+    "cheapest first": {
+     "hunks_up": 0.5240198785201546,
+     "must_fix_up": [
+      32,
+      85
+     ],
+     "other_up": 0.5312862108922364,
+     "must_fix_minus_other": [
+      -0.15481562265694226,
+      -0.2608477153256435,
+      -0.04070203803132299
+     ],
+     "covered": 66,
+     "random_at_least": 0.051
+    }
+   }
+  },
+  "H04_callees1": {
+   "no_context": 59,
+   "every_hunk": 63,
+   "every_hunk_gains": 13,
+   "every_hunk_loses": 9,
+   "only_the_must_fix_hunks": 61,
+   "random": {
+    "hunks_up": 0.299815019326339,
+    "must_fix_up": 0.3020235294117647,
+    "must_fix_up_p95": 0.3764705882352941,
+    "covered": 60.068,
+    "covered_p95": 64.0
+   },
+   "selectors": {
+    "zero-shot 7B": {
+     "hunks_up": 0.25179458862506904,
+     "must_fix_up": [
+      33,
+      85
+     ],
+     "other_up": 0.2450753186558517,
+     "must_fix_minus_other": [
+      0.14315997546179537,
+      0.030098153518619164,
+      0.2615141389745505
+     ],
+     "covered": 61,
+     "random_at_least": 0.428
+    },
+    "zero-shot 3B": {
+     "hunks_up": 0.25952512424075097,
+     "must_fix_up": [
+      24,
+      85
+     ],
+     "other_up": 0.25840092699884126,
+     "must_fix_minus_other": [
+      0.02395201417762932,
+      -0.08096133662917065,
+      0.11884866023028888
+     ],
+     "covered": 59,
+     "random_at_least": 0.733
+    },
+    "zero-shot 1.5B": {
+     "hunks_up": 0.26615129762562123,
+     "must_fix_up": [
+      34,
+      85
+     ],
+     "other_up": 0.25955967555040554,
+     "must_fix_minus_other": [
+      0.14044032444959448,
+      -0.004992673990664094,
+      0.2656871918966757
+     ],
+     "covered": 60,
+     "random_at_least": 0.568
+    },
+    "tabular, logistic": {
+     "hunks_up": 0.31143014908890115,
+     "must_fix_up": [
+      42,
+      85
+     ],
+     "other_up": 0.30243337195828507,
+     "must_fix_minus_other": [
+      0.19168427510053848,
+      0.04466888115732104,
+      0.33395592850944217
+     ],
+     "covered": 59,
+     "random_at_least": 0.733
+    },
+    "non-LLM: tabular, random forest": {
+     "hunks_up": 0.30204307012700166,
+     "must_fix_up": [
+      42,
+      85
+     ],
+     "other_up": 0.2925840092699884,
+     "must_fix_minus_other": [
+      0.20153363778883515,
+      0.038765036079162485,
+      0.35001873702785946
+     ],
+     "covered": 58,
+     "random_at_least": 0.857
+    },
+    "cheapest first": {
+     "hunks_up": 0.6189950303699614,
+     "must_fix_up": [
+      43,
+      85
+     ],
+     "other_up": 0.6245654692931634,
+     "must_fix_minus_other": [
+      -0.11868311635198692,
+      -0.22555094987954438,
+      -0.004896267123183336
+     ],
+     "covered": 64,
+     "random_at_least": 0.078
+    }
+   }
+  }
+ }
+}
