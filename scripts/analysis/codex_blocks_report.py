@@ -107,6 +107,16 @@ def build_report(profile: str, thinking: str, seed: int, blocks: int | None = No
                                         off_hunk=int(row["findings_off_hunk"] or 0))
             on_hunk[row["entry"]] = int(row["references_on_hunk"] or 0)
     not_scored = sorted(h for h in hunks if runs[h].get("status") == "ok" and h not in covered[CODEX])
+    # The scored table holds only hunks Codex reviewed. A session that ended without a review (it ran
+    # out of time twice) still counts: the levels' rows for its hunk are the same in the run's own table.
+    no_review = {h for h in hunks if runs[h].get("status") != "ok" and h not in covered[levels[0]]}
+    if no_review:
+        for row in read_csv(run / "hunk_table.csv"):
+            if row["entry"] in no_review and row["level"] in levels:
+                covered[row["level"]][row["entry"]] = float(row["references_covered"] or 0)
+                counts[row["level"]].update(findings=int(row["findings"] or 0), matched=int(row["findings_matched"] or 0),
+                                            off_hunk=int(row["findings_off_hunk"] or 0))
+                on_hunk[row["entry"]] = int(row["references_on_hunk"] or 0)
     for hunk in hunks:                                             # a session without a review covers nothing
         covered[CODEX].setdefault(hunk, 0.0)
     missing = [level for level in levels if set(covered[level]) != wanted]
