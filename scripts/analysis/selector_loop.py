@@ -401,9 +401,9 @@ def figure(report: dict, path: Path, other: dict | None = None, other_name: str 
                Line2D([], [], color=AQUA, linewidth=2, marker="o", markersize=7, markeredgecolor=SURFACE, label="loop from the selector's start")]
     if extra:
         handles.append(Line2D([], [], color=ORANGE, linewidth=2, marker="o", markersize=7, markeredgecolor=SURFACE,
-                              label=f"loop with {other_name or other['gate']} as the gate"))
+                              label=f"loop from no context, {other_name or other['gate']} as the gate"))
     handles += [Line2D([], [], color=MUTED, linewidth=1.2, marker="o", markersize=6, markeredgecolor=SURFACE,
-                       label="same dollars on random hunks (average, to the 95th percentile)"),
+                       label="same dollars on random hunks (average to 95th percentile)"),
                 Line2D([], [], linestyle="none", marker="D", markersize=7, markerfacecolor="none", markeredgecolor=INK2, markeredgewidth=1.4,
                        label="same dollars on the largest hunks first")]
     left.legend(handles=handles, loc="upper left", bbox_to_anchor=(-0.02, -0.17), ncol=2, frameon=False, fontsize=8.5, labelcolor=INK2,
@@ -411,7 +411,7 @@ def figure(report: dict, path: Path, other: dict | None = None, other_name: str 
 
     style(right, "x")
     gates = report["gates"]
-    marks = [("the gate", BLUE, "o", lambda g: g["auc"][0]), ("facts known before the review only", AQUA, "o", lambda g: g.get("auc_facts_only")),
+    marks = [("the trained gate", BLUE, "o", lambda g: g["auc"][0]), ("facts before the review only", AQUA, "o", lambda g: g.get("auc_facts_only")),
              ("the review's output only", INK2, "o", lambda g: g.get("auc_review_only")), ("changed lines alone", MUTED, "D", lambda g: g["auc_changed_lines_alone"])]
     for k, gate in enumerate(gates):
         y0 = len(gates) - 1 - k
@@ -438,8 +438,9 @@ def figure(report: dict, path: Path, other: dict | None = None, other_name: str 
     keys = [Line2D([], [], color=color if j == 0 else "none", linewidth=1.5, marker=marker, markersize=7, markerfacecolor=color,
                    markeredgecolor=SURFACE, label=label) for j, (label, color, marker, _) in enumerate(marks)]
     if other:
-        keys.append(Line2D([], [], color=ORANGE, linewidth=1.5, marker="o", markersize=7, markeredgecolor=SURFACE, label=other_name or other["gate"]))
-    right.legend(handles=keys, loc="upper center", bbox_to_anchor=(0.4, -0.17), ncol=2, frameon=False, fontsize=8.5, labelcolor=INK2,
+        keys.append(Line2D([], [], color=ORANGE, linewidth=1.5, marker="o", markersize=7, markeredgecolor=SURFACE,
+                           label=f"{other_name or other['gate']} as the gate"))
+    right.legend(handles=keys, loc="upper left", bbox_to_anchor=(-0.04, -0.17), ncol=2, frameon=False, fontsize=8.5, labelcolor=INK2,
                  handletextpad=0.4, columnspacing=1.0)
     fig.suptitle("A priced loop adds comments at a cost, about as many as second reviews of the largest hunks", fontsize=11.5, color=INK,
                  x=0.02, ha="left", y=0.965)
@@ -474,6 +475,7 @@ def main(argv=None) -> int:
     parser.add_argument("--json", type=Path, help="where to write the report (default: selector_loop.json next to the scores file)")
     parser.add_argument("--figure", type=Path, default=FIGURE, help="the figure of docs/selector_loop_185.md; drawn by the run with the trained gate")
     parser.add_argument("--compare", type=Path, help="the saved report of a run with --gate-scores, to draw that gate in the figure too")
+    parser.add_argument("--compare-name", default="", help="what the figure calls that gate (default: the name in its report)")
     parser.add_argument("--no-figure", action="store_true")
     args = parser.parse_args(argv)
 
@@ -496,7 +498,7 @@ def main(argv=None) -> int:
     print(f"\nwrote {target}")
     if not args.no_figure and gate is None:
         other = json.loads(args.compare.read_text(encoding="utf-8")) if args.compare else None
-        figure(report, args.figure, other)
+        figure(report, args.figure, other, args.compare_name)
         print(f"drew {args.figure}")
     return 0
 

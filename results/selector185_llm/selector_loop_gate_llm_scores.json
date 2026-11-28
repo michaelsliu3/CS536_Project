@@ -1,0 +1,457 @@
+{
+ "hunks": 1811,
+ "prs": 185,
+ "references": 1419,
+ "levels": [
+  "H01_min",
+  "H02_function",
+  "H03_file",
+  "H04_callees1"
+ ],
+ "gates": [
+  {
+   "from": "H01_min",
+   "to": "H02_function",
+   "adds_a_catch": 215,
+   "auc": [
+    0.518030541469954,
+    0.47727033098940386,
+    0.5553133089332607
+   ],
+   "auc_changed_lines_alone": 0.5806186979075596,
+   "share_above_zero": 0.6223081170623964,
+   "auc_trained_gate": 0.641939150201084,
+   "auc_minus_trained_gate": [
+    -0.12390860873113008,
+    -0.1723812861272468,
+    -0.07375430355506575
+   ],
+   "above_zero_where_it_adds": 0.6511627906976745,
+   "above_zero_elsewhere": 0.618421052631579,
+   "auc_start_selector": 0.6039400827650522
+  },
+  {
+   "from": "H02_function",
+   "to": "H03_file",
+   "adds_a_catch": 145,
+   "auc": [
+    0.48314774185536286,
+    0.4233182634884176,
+    0.5409862223714913
+   ],
+   "auc_changed_lines_alone": 0.5816078155400091,
+   "share_above_zero": 0.5057979017117614,
+   "auc_trained_gate": 0.5317506312869975,
+   "auc_minus_trained_gate": [
+    -0.048602889431634655,
+    -0.1477746903786264,
+    0.026137114148507643
+   ],
+   "above_zero_where_it_adds": 0.46206896551724136,
+   "above_zero_elsewhere": 0.5096038415366146,
+   "auc_start_selector": 0.5260566295483711
+  },
+  {
+   "from": "H03_file",
+   "to": "H04_callees1",
+   "adds_a_catch": 68,
+   "auc": [
+    0.5974401808916338,
+    0.5450639752062644,
+    0.6484385019993784
+   ],
+   "auc_changed_lines_alone": 0.5767059835982585,
+   "share_above_zero": 0.5422418553285477,
+   "auc_trained_gate": 0.7194323512537545,
+   "auc_minus_trained_gate": [
+    -0.12199217036212073,
+    -0.21975974196065684,
+    -0.041918437359907676
+   ],
+   "above_zero_where_it_adds": 0.6764705882352942,
+   "above_zero_elsewhere": 0.5370051635111877,
+   "auc_start_selector": 0.6928934224292127
+  }
+ ],
+ "rows": [
+  {
+   "start": "no context",
+   "policy": "no loop",
+   "price": null,
+   "covered": 742,
+   "recall": 0.5229034531360113,
+   "score": 0.5781659388646289,
+   "requests": 1811,
+   "extra_requests": 0,
+   "hunks_with_more": 0,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "cost_per_pr": 0.057416983783783786
+  },
+  {
+   "start": "no context",
+   "policy": "loop at the price that sends 2% of hunks up from no context",
+   "price": 2.094028882152891,
+   "covered": 746,
+   "recall": 0.525722339675828,
+   "score": 0.5828238719068414,
+   "requests": 1860,
+   "extra_requests": 49,
+   "hunks_with_more": 37,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    1774,
+    29,
+    4,
+    4
+   ],
+   "cost_per_pr": 0.059593405405405406,
+   "equal_cost": {
+    "random_covered_mean": 746.99,
+    "random_covered_p95": 751.0,
+    "random_as_good": 0.74,
+    "random_hunks_with_more": 52.006,
+    "largest_first_covered": 749,
+    "largest_first_hunks_with_more": 11
+   }
+  },
+  {
+   "start": "no context",
+   "policy": "loop at the price that sends 5% of hunks up from no context",
+   "price": 1.7814905238476302,
+   "covered": 748,
+   "recall": 0.5271317829457365,
+   "score": 0.5839883551673944,
+   "requests": 1928,
+   "extra_requests": 117,
+   "hunks_with_more": 91,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    1720,
+    71,
+    14,
+    6
+   ],
+   "cost_per_pr": 0.06244007567567568,
+   "equal_cost": {
+    "random_covered_mean": 753.58,
+    "random_covered_p95": 760.0,
+    "random_as_good": 0.98,
+    "random_hunks_with_more": 120.152,
+    "largest_first_covered": 758,
+    "largest_first_hunks_with_more": 39
+   }
+  },
+  {
+   "start": "no context",
+   "policy": "loop at the price that sends 10% of hunks up from no context",
+   "price": 1.515879503905228,
+   "covered": 768,
+   "recall": 0.5412262156448203,
+   "score": 0.6029112081513828,
+   "requests": 2056,
+   "extra_requests": 245,
+   "hunks_with_more": 182,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    1629,
+    137,
+    27,
+    18
+   ],
+   "cost_per_pr": 0.0681633081081081,
+   "equal_cost": {
+    "random_covered_mean": 766.428,
+    "random_covered_p95": 775.0,
+    "random_as_good": 0.39,
+    "random_hunks_with_more": 256.914,
+    "largest_first_covered": 776,
+    "largest_first_hunks_with_more": 113
+   }
+  },
+  {
+   "start": "no context",
+   "policy": "loop at the price that sends 20% of hunks up from no context",
+   "price": 1.1565353866599277,
+   "covered": 788,
+   "recall": 0.5553206483439042,
+   "score": 0.6157205240174672,
+   "requests": 2358,
+   "extra_requests": 547,
+   "hunks_with_more": 363,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    1448,
+    241,
+    60,
+    62
+   ],
+   "cost_per_pr": 0.08263709189189189,
+   "equal_cost": {
+    "random_covered_mean": 797.56,
+    "random_covered_p95": 808.0,
+    "random_as_good": 0.948,
+    "random_hunks_with_more": 602.6,
+    "largest_first_covered": 812,
+    "largest_first_hunks_with_more": 378
+   }
+  },
+  {
+   "start": "selector",
+   "policy": "no loop",
+   "price": null,
+   "covered": 759,
+   "recall": 0.5348837209302325,
+   "score": 0.5944687045123727,
+   "requests": 1811,
+   "extra_requests": 0,
+   "hunks_with_more": 0,
+   "starts": [
+    1320,
+    491,
+    0,
+    0
+   ],
+   "depths": [
+    1320,
+    491,
+    0,
+    0
+   ],
+   "cost_per_pr": 0.062096270270270267
+  },
+  {
+   "start": "selector",
+   "policy": "loop at the price that sends 2% of hunks up from no context",
+   "price": 2.094028882152891,
+   "covered": 762,
+   "recall": 0.5369978858350951,
+   "score": 0.5988355167394469,
+   "requests": 1850,
+   "extra_requests": 39,
+   "hunks_with_more": 31,
+   "starts": [
+    1320,
+    491,
+    0,
+    0
+   ],
+   "depths": [
+    1295,
+    506,
+    6,
+    4
+   ],
+   "cost_per_pr": 0.0638378918918919,
+   "equal_cost": {
+    "random_covered_mean": 762.342,
+    "random_covered_p95": 766.0,
+    "random_as_good": 0.658,
+    "random_hunks_with_more": 38.704,
+    "largest_first_covered": 760,
+    "largest_first_hunks_with_more": 8
+   }
+  },
+  {
+   "start": "selector",
+   "policy": "loop at the price that sends 5% of hunks up from no context",
+   "price": 1.7814905238476302,
+   "covered": 765,
+   "recall": 0.5391120507399577,
+   "score": 0.6002911208151382,
+   "requests": 1916,
+   "extra_requests": 105,
+   "hunks_with_more": 81,
+   "starts": [
+    1320,
+    491,
+    0,
+    0
+   ],
+   "depths": [
+    1258,
+    521,
+    21,
+    11
+   ],
+   "cost_per_pr": 0.06670736216216216,
+   "equal_cost": {
+    "random_covered_mean": 767.672,
+    "random_covered_p95": 773.0,
+    "random_as_good": 0.858,
+    "random_hunks_with_more": 102.644,
+    "largest_first_covered": 773,
+    "largest_first_hunks_with_more": 31
+   }
+  },
+  {
+   "start": "selector",
+   "policy": "loop at the price that sends 10% of hunks up from no context",
+   "price": 1.515879503905228,
+   "covered": 774,
+   "recall": 0.5454545454545454,
+   "score": 0.6055312954876274,
+   "requests": 2021,
+   "extra_requests": 210,
+   "hunks_with_more": 153,
+   "starts": [
+    1320,
+    491,
+    0,
+    0
+   ],
+   "depths": [
+    1201,
+    545,
+    39,
+    26
+   ],
+   "cost_per_pr": 0.07150572972972973,
+   "equal_cost": {
+    "random_covered_mean": 776.214,
+    "random_covered_p95": 783.05,
+    "random_as_good": 0.758,
+    "random_hunks_with_more": 209.542,
+    "largest_first_covered": 787,
+    "largest_first_hunks_with_more": 85
+   }
+  },
+  {
+   "start": "selector",
+   "policy": "loop at the price that sends 20% of hunks up from no context",
+   "price": 1.1565353866599277,
+   "covered": 791,
+   "recall": 0.5574348132487668,
+   "score": 0.6200873362445415,
+   "requests": 2285,
+   "extra_requests": 474,
+   "hunks_with_more": 312,
+   "starts": [
+    1320,
+    491,
+    0,
+    0
+   ],
+   "depths": [
+    1080,
+    572,
+    84,
+    75
+   ],
+   "cost_per_pr": 0.08490789189189189,
+   "equal_cost": {
+    "random_covered_mean": 799.932,
+    "random_covered_p95": 809.0,
+    "random_as_good": 0.96,
+    "random_hunks_with_more": 508.292,
+    "largest_first_covered": 815,
+    "largest_first_hunks_with_more": 298
+   }
+  },
+  {
+   "start": "no context",
+   "policy": "loop with a gate that knows the answer (hindsight)",
+   "price": null,
+   "covered": 908,
+   "recall": 0.6398872445384073,
+   "score": 0.7045123726346434,
+   "requests": 2044,
+   "extra_requests": 233,
+   "hunks_with_more": 215,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    1596,
+    198,
+    16,
+    1
+   ],
+   "cost_per_pr": 0.07038465945945946
+  },
+  {
+   "start": "no context",
+   "policy": "every level for every hunk",
+   "price": null,
+   "covered": 995,
+   "recall": 0.7011980267794221,
+   "score": 0.7630276564774381,
+   "requests": 7244,
+   "extra_requests": 5433,
+   "hunks_with_more": 1811,
+   "starts": [
+    1811,
+    0,
+    0,
+    0
+   ],
+   "depths": [
+    0,
+    0,
+    0,
+    1811
+   ],
+   "cost_per_pr": 0.3568869297297297
+  },
+  {
+   "start": "function",
+   "policy": "the function level for every hunk, no loop",
+   "price": null,
+   "covered": 753,
+   "recall": 0.5306553911205074,
+   "score": 0.5889374090247452,
+   "requests": 1811,
+   "extra_requests": 0,
+   "hunks_with_more": 0,
+   "starts": [
+    0,
+    1811,
+    0,
+    0
+   ],
+   "depths": [
+    0,
+    1811,
+    0,
+    0
+   ],
+   "cost_per_pr": 0.0757477081081081
+  }
+ ],
+ "start_selector": "zero-shot 7B",
+ "start_spend": 0.3,
+ "gate": "7B model asked after the review"
+}
