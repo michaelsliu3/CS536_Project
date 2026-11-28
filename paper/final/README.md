@@ -31,15 +31,15 @@ and fonts are untouched. The conference checklist is not included.
 | Table 2 (selectors on all 185) and the must-fix paragraph | `results/selector185_llm/llm_auc.csv`, `llm_budget_table.csv`; `docs/selector185_must_fix.md` |
 | The 21 selectors on the first 93 (text and Table 7) | `docs/selector50_run.md` |
 | Figure 3 and the loop, with both gates (text, Tables 8 and 9) | `results/selector185_llm/selector_loop.json`, `selector_loop_gate_llm_scores.json`; `docs/selector_loop_185.md` |
-| Table 3 (Codex) | `scripts/analysis/codex_blocks_report.py` on the 7 blocks scored by 05:48 EST on November 28 |
+| Table 3 (Codex) and the split in Section 4.4 | `results/codex_blocks/report_1000_hunks.json`; `docs/codex_blocks_run.md` |
 | Per pull request against per hunk; the ten-level pilot (Table 6) | `docs/outcome_table_first_run.md`, `docs/per_hunk_review_test.md` (Sections 1 and 19) |
 | The midpoint's numbers | `paper/midpoint/main.tex` |
 | The proposal's plan (Table 4) | `docs/context_selection_proposal_detailed.docx` |
 
 ## Still provisional
 
-- **Codex (Table 3, abstract, Sections 1, 4.4 and 8).** The run is not finished: 700 of 1,811 hunks. Rerun
-  `codex_blocks_report.py` when more blocks are scored and update the table and the sentences that quote it.
+Nothing is waiting on a run. The Codex comparison was stopped on purpose at 1,000 of the 1,811 hunks, a
+random sample.
 
 ## References
 

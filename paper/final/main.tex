@@ -27,7 +27,7 @@ Machine Learning II, Rutgers University}
 \maketitle
 \thispagestyle{plain}
 \begin{abstract}
-An LLM can review a code change from the diff alone or with surrounding repository code, and every added piece of context costs input tokens. We ask whether a small selector can choose the context for each change so that a frozen reviewer keeps its quality at a lower cost. We build an offline outcome table on all 185 buildable pull requests of AACR-Bench: one reviewer (Qwen3.8-27B) reviews each of 1,811 diff hunks at four context levels, and a judge matches its findings to 1,419 reference comments. No fixed level covers more reference comments than no context (52.3\% to 53.2\%), although wider levels cost 1.3 to 2.2 times as much. Eleven selectors, from logistic regression on hand-made features to an untrained 7B code model, rank the hunks that gain from context at AUC 0.48 to 0.58, and none beats random choice at an equal token budget. Yet the choice matters hunk by hunk: a third of the comments are covered at some levels only, and a selector with hindsight would cover 17\% more comments for 8\% more cost. One request per hunk also covers about a third more comments than an agentic harness on the same model, at 5\% to 11\% of its cost. The trade-off we set out to learn exists; the signal that predicts it is still missing.
+An LLM can review a code change from the diff alone or with surrounding repository code, and every added piece of context costs input tokens. We ask whether a small selector can choose the context for each change so that a frozen reviewer keeps its quality at a lower cost. We build an offline outcome table on all 185 buildable pull requests of AACR-Bench: one reviewer (Qwen3.8-27B) reviews each of 1,811 diff hunks at four context levels, and a judge matches its findings to 1,419 reference comments. No fixed level covers more reference comments than no context (52.3\% to 53.2\%), although wider levels cost 1.3 to 2.2 times as much. Eleven selectors, from logistic regression on hand-made features to an untrained 7B code model, rank the hunks that gain from context at AUC 0.48 to 0.58, and none beats random choice at an equal token budget. Yet the choice matters hunk by hunk: a third of the comments are covered at some levels only, and a selector with hindsight would cover 17\% more comments for 8\% more cost. One request per hunk also covers over a third more comments than an agentic harness on the same model, at 5\% to 11\% of its cost. The trade-off we set out to learn exists; the signal that predicts it is still missing.
 \end{abstract}
 \noindent\textbf{Repository:} \url{https://github.com/michaelsliu3/CS536_Project}
 
@@ -84,7 +84,7 @@ CodeReviewer \citep{li2022codereviewer} pre-trains models for review tasks on di
 
 \paragraph{A priced feedback loop.} One shot may not always be enough, so we also let a hunk ask for more at a price. After a review, a \emph{gate} scores the chance that the next level would cover a comment the reviews so far missed. If the score reaches the price, the hunk is reviewed again one level up, the findings of all its reviews are kept, and every request is paid in full. The gate is a logistic regression per step on 29 facts known before the review and 7 facts of the review just made, trained out of fold; we also tried the 7B code model as the gate, asked after reading the review. The loop is simulated on the saved reviews.
 
-\paragraph{The agentic reference.} To measure what an agentic loop costs, we ran Codex CLI \citep{openai2026codex} on the same served model: one session per hunk, given our reviewer's request, free to search and read the checked-out repository, with a 15-minute limit. Its reviews are scored exactly like ours. Hunks were run in a fixed random order, so the 700 finished so far are a random sample of the 1,811.
+\paragraph{The agentic reference.} To measure what an agentic loop costs, we ran Codex CLI \citep{openai2026codex} on the same served model: one session per hunk, given our reviewer's request, free to search and read the checked-out repository, with a 15-minute limit. Its reviews are scored exactly like ours. Hunks were run in a fixed random order and the run was stopped at 1,000, so these are a random sample of the 1,811.
 
 \section{Experiments and results}
 \subsection{RQ1: fixed context levels}
@@ -167,7 +167,7 @@ Whether the gate earns its place is a separate question, and we test it at equal
 
 \subsection{The cost of an agentic harness}
 \begin{table}[t]
-\caption{Codex CLI against our one-request reviews on the same model and the same 700 randomly ordered hunks. Covered counts the reference comments matched by the reviews of these hunks.}
+\caption{Codex CLI against our one-request reviews on the same model and the same 1,000 randomly ordered hunks. Covered counts the reference comments matched by the reviews of these hunks.}
 \label{tab:codex}
 \centering
 \small
@@ -177,21 +177,21 @@ Whether the gate earns its place is a separate question, and we test it at equal
  & Requests & Input tokens & Total & Comments & Findings & Codex minus this row\\
 Reviewer & per hunk & per hunk & cost (\$) & covered & off the hunk & [95\% interval]\\
 \midrule
-Codex CLI, agentic & 16.4 & 356,165 & 81.56 & 304 & 1,615 & \\
-Ours, no context & 1 & 963 & 4.15 & 401 & 19 & $-97$ \ci{-142}{-55}\\
-Ours, function & 1 & 1,584 & 5.35 & 413 & 103 & $-109$ \ci{-161}{-64}\\
-Ours, file & 1 & 2,468 & 7.11 & 409 & 188 & $-105$ \ci{-158}{-56}\\
-Ours, callees & 1 & 3,686 & 8.86 & 414 & 199 & $-110$ \ci{-159}{-64}\\
+Codex CLI, agentic & 16.3 & 348,720 & 114.21 & 415 & 2,197 & \\
+Ours, no context & 1 & 958 & 5.87 & 568 & 25 & $-153$ \ci{-226}{-86}\\
+Ours, function & 1 & 1,547 & 7.56 & 578 & 128 & $-163$ \ci{-238}{-100}\\
+Ours, file & 1 & 2,425 & 9.98 & 572 & 257 & $-157$ \ci{-231}{-88}\\
+Ours, callees & 1 & 3,601 & 12.47 & 569 & 276 & $-154$ \ci{-219}{-93}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:codex} measures the alternative to selecting context in advance. On 700 hunks Codex makes 16.4 requests per hunk and reads 356,165 input tokens, because every request resends its instructions and the conversation so far. Even with cached input priced at a twentieth of new input, it costs 19.7 times our no-context review and 9.2 times our widest level. It also covers fewer of the reference comments: 304 against 401 to 414, a difference of 24 to 27\% whose interval excludes zero for every level. Codex writes 1,615 findings about code outside the hunk it was asked to review, which the scoring does not count; its exploration draws it away from the change. For this reviewer and benchmark, one request with context chosen in advance is the stronger and far cheaper design, which is the premise of a selector.
+Table~\ref{tab:codex} measures the alternative to selecting context in advance. On 1,000 hunks Codex makes 16.3 requests per hunk and reads 348,720 input tokens, because every request resends its instructions and the conversation so far. Even with cached input priced at a twentieth of new input, it costs 19.4 times our no-context review and 9.2 times our widest level. It also covers fewer of the reference comments: 415 against 568 to 578, a difference of 27 to 28\% whose interval excludes zero for every level. Codex writes 2,197 findings about code outside the hunk it was asked to review, which the scoring does not count; its exploration draws it away from the change. The gap is not uniform. A split made after seeing the totals shows Codex behind on comments answerable from the diff or the file (182 against 242, and 109 against 152 with no context) and level with our reviews on comments that need the repository (64 against 63 to 74): exploring buys parity where the repository is needed and loses elsewhere. For this reviewer and benchmark, one request with context chosen in advance is the stronger and far cheaper design, which is the premise of a selector.
 
 \section{Observations: when context helps, and why the selectors fail}
 \paragraph{Context changes which comments are found, not how many.} The reviewer writes about 1.5 findings per hunk at every level (2,708 to 2,772 findings on 1,811 hunks). Of the 1,419 reference comments, 505 are covered at all four levels, 424 at none, and 490 (34.5\%) at some levels and not others. From no context to the function level 179 hunks cover more and 181 cover fewer. The levels average the same because each wider level loses about as many comments as it gains.
 
-\paragraph{More context pulls attention off the change.} Findings that quote code outside the reviewed hunk rise from 19 with no context to 199 with callees on the 700-hunk sample of Table~\ref{tab:codex}. On comments the benchmark marks as answerable from the diff, the file level covers 4.6 points fewer than the function level \ci{-7.7}{-1.0}, a difference seen on the first half and repeated on the second. In the ten-level pilot the widest levels fell below no context. This is the behaviour reported for irrelevant context on other tasks \citep{shi2023distracted}, and it means unneeded context is not only a token cost.
+\paragraph{More context pulls attention off the change.} Findings that quote code outside the reviewed hunk rise from 25 with no context to 276 with callees on the 1,000-hunk sample of Table~\ref{tab:codex}. On comments the benchmark marks as answerable from the diff, the file level covers 4.6 points fewer than the function level \ci{-7.7}{-1.0}, a difference seen on the first half and repeated on the second. In the ten-level pilot the widest levels fell below no context. This is the behaviour reported for irrelevant context on other tasks \citep{shi2023distracted}, and it means unneeded context is not only a token cost.
 
 \paragraph{The wording does change.} Comparing the reviews across levels directly, with no reference comments involved, shows a difference that holds on both halves of the data: with no context 52\% of findings ask the author to check something and with callees 41\% do, a change of $-11.5$ points \ci{-14.8}{-8.6}; findings that say code cannot be seen fall from 10\% to 6\%. Context makes the reviewer more definite without making it cover more.
 
